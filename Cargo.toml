@@ -1,0 +1,53 @@
+[package]
+name = "pangan"
+version = "0.1.0"
+edition = "2021"
+description = "Pangan — a minimal, efficient cross-platform Pomodoro timer (Rust + Slint)"
+license = "MIT"
+repository = "https://github.com/amirhosseineslami/pangan"
+default-run = "pangan"
+
+[[bin]]
+name = "pangan"
+path = "src/main.rs"
+
+[dependencies]
+slint = "1.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+dirs = "6"
+chrono = { version = "0.4", features = ["serde"] }
+ureq = { version = "3", features = ["json"] }
+
+# --- Global hotkey (all three OS) -------------------------------
+[target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))'.dependencies]
+global-hotkey = { version = "0.6", default-features = false }
+
+# --- Cross-platform notification --------------------------------
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+notify-rust = "4.11"
+
+# --- Linux: tray (ksni), inhibit (zbus) --------------------------
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "0.3.7", default-features = false, features = ["blocking", "async-io"] }
+zbus = { version = "5", default-features = false, features = ["blocking-api"] }
+
+# --- Windows/macOS: tray (tray-icon) -----------------------------
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+tray-icon = { version = "0.19", default-features = false }
+
+# --- Windows: notifications + registry autostart ------------------
+[target.'cfg(target_os = "windows")'.dependencies]
+winrt-notification = "0.5.1"
+winreg = "0.56"
+
+[build-dependencies]
+slint-build = "1.11"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = 3
+panic = "abort"

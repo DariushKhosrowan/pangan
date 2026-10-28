@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pangan — a minimal Pomodoro timer</title>
+<meta name="description" content="Pangan is a minimal, efficient Pomodoro timer for Linux, Windows, and macOS, built with Rust and Slint." />
+<style>
+  :root {
+    --bg: #1e1e2e;
+    --surface: #313244;
+    --text: #cdd6f4;
+    --muted: #a6adc8;
+    --accent: #89b4fa;
+    --red: #e6453c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6;
+    display: flex; flex-direction: column; min-height: 100vh;
+  }
+  .container { width: min(900px, 92vw); margin: 0 auto; }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 0; border-bottom: 1px solid #3a3a4c;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.2rem; }
+  .dot { width: 18px; height: 18px; border-radius: 50%; background: var(--red); display: inline-block; }
+  .langs { display: flex; gap: 6px; }
+  .langs button {
+    background: transparent; color: var(--muted); border: 1px solid #3a3a4c;
+    padding: 4px 10px; border-radius: 999px; cursor: pointer; font-size: 0.85rem;
+  }
+  .langs button.active { background: var(--accent); color: #1e1e2e; border-color: var(--accent); }
+  .hero { text-align: center; padding: 64px 0 40px; }
+  .hero h1 { font-size: 3rem; margin-bottom: 12px; }
+  .hero .water { font-size: 2rem; }
+  .hero p.sub { color: var(--muted); max-width: 640px; margin: 0 auto 20px; font-size: 1.1rem; }
+  .badge {
+    display: inline-block; background: var(--surface); border: 1px solid #3a3a4c;
+    padding: 6px 14px; border-radius: 999px; font-size: 0.85rem; color: var(--muted);
+  }
+  section { padding: 32px 0; }
+  section h2 { font-size: 1.5rem; margin-bottom: 18px; color: var(--accent); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .card {
+    background: var(--surface); border: 1px solid #3a3a4c; border-radius: 12px;
+    padding: 20px; font-size: 0.95rem;
+  }
+  .card h3 { margin-bottom: 6px; color: var(--text); font-size: 1rem; }
+  .card p { color: var(--muted); }
+  code, pre {
+    font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
+    background: #181825; border-radius: 8px; color: var(--accent);
+  }
+  code { padding: 2px 6px; }
+  pre { padding: 16px; overflow-x: auto; margin: 12px 0; }
+  pre code { padding: 0; background: transparent; }
+  .btn {
+    display: inline-block; background: var(--accent); color: #1e1e2e;
+    padding: 10px 22px; border-radius: 10px; text-decoration: none; font-weight: 600;
+    margin: 6px 6px 0 0;
+  }
+  .btn.ghost { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+  footer {
+    margin-top: auto; padding: 28px 0; border-top: 1px solid #3a3a4c;
+    color: var(--muted); font-size: 0.85rem; text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="container" style="display:flex;align-items:center;justify-content:space-between;width:100%">
+    <div class="brand"><span class="dot"></span> Pangan</div>
+    <div class="langs">
+      <button class="active" onclick="setLang('en')">EN</button>
+      <button onclick="setLang('fa')">FA</button>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+  <div class="hero">
+    <div class="water" data-i18n="water">&#128336;</div>
+    <h1>Pangan</h1>
+    <p class="sub" data-i18n="tagline">A minimal, efficient Pomodoro timer for Linux, Windows &amp; macOS — Rust + Slint, ~4–8 MB idle RAM.</p>
+    <span class="badge" data-i18n="native">Native • Lightweight • Single binary</span><br />
+    <a class="btn" href="https://github.com/amirhosseineslami/pangan" data-i18n="cta">View on GitHub</a>
+    <a class="btn ghost" href="https://github.com/amirhosseineslami/pangan/releases" data-i18n="cta2">Download</a>
+  </div>
+
+  <section>
+    <h2 data-i18n="feat_title">Features</h2>
+    <div class="grid">
+      <div class="card"><h3 data-i18n="f1">System tray</h3><p data-i18n="f1d">Live countdown with Start/Pause, Skip, Reset, Quit from the tray menu.</p></div>
+      <div class="card"><h3 data-i18n="f2">Notifications</h3><p data-i18n="f2d">Desktop notification when each focus/break session ends.</p></div>
+      <div class="card"><h3 data-i18n="f3">Global hotkey</h3><p data-i18n="f3d">Super+P to start/pause from anywhere.</p></div>
+      <div class="card"><h3 data-i18n="f4">Stay awake</h3><p data-i18n="f4d">Inhibits screen lock/suspend during focus sessions.</p></div>
+      <div class="card"><h3 data-i18n="f5">Autostart</h3><p data-i18n="f5d">Launches at login via a .desktop entry.</p></div>
+      <div class="card"><h3 data-i18n="f6">Configurable</h3><p data-i18n="f6d">Work/break lengths set in ~/.config/pangan/config.toml.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2 data-i18n="install_title">Install</h2>
+    <pre><code>git clone https://github.com/amirhosseineslami/pangan.git
+cd pangan
+cargo build --release
+./target/release/pangan &   # autostarts on next login</code></pre>
+  </section>
+
+  <section>
+    <h2 data-i18n="why_title">Why Pangan?</h2>
+    <p data-i18n="why_body">Pangan (پنگان) is the Persian word for an ancient water clock used to divide time fairly among people. A fitting ancestor for a focus timer — small, precise, and fair to your attention.</p>
+  </section>
+</main>
+
+<footer>
+  <div class="container">
+    <p data-i18n="footer">MIT Licensed • Built with Rust &amp; Slint • <a href="https://github.com/amirhosseineslami/pangan" style="color:var(--accent)">GitHub</a></p>
+  </div>
+</footer>
+
+<script>
+const I18N = {
+  en: {
+    water: "⏱",
+    tagline: "A minimal, efficient Pomodoro timer for Linux — Rust + Slint, ~4–8 MB idle RAM.",
+    native: "Native • Lightweight • Single binary",
+    cta: "View on GitHub",
+    cta2: "Download",
+    feat_title: "Features",
+    f1: "System tray", f1d: "Live countdown with Start/Pause, Skip, Reset, Quit from the tray menu.",
+    f2: "Notifications", f2d: "Desktop notification when each focus/break session ends.",
+    f3: "Global hotkey", f3d: "Super+P to start/pause from anywhere.",
+    f4: "Stay awake", f4d: "Inhibits screen lock/suspend during focus sessions.",
+    f5: "Autostart", f5d: "Launches at login via a .desktop entry.",
+    f6: "Configurable", f6d: "Work/break lengths set in ~/.config/pangan/config.toml.",
+    install_title: "Install", install_cmd: "git clone https://github.com/amirhosseineslami/pangan.git\ncd pangan\ncargo build --release\n./target/release/pangan &   # autostarts on next login",
+    why_title: "Why Pangan?",
+    why_body: "Pangan (پنگان) is the Persian word for an ancient water clock used to divide time fairly among people. A fitting ancestor for a focus timer — small, precise, and fair to your attention.",
+    footer: "MIT Licensed • Built with Rust &amp; Slint •",
+  },
+  fa: {
+    water: "⏱",
+    tagline: "یک تایمر پومودورو سبک و کارآمد برای لینوکس — راست + اسلینت، حدود ۴ تا ۸ مگابایت.",
+    native: "بومی • سبک • تک‌باینری",
+    cta: "مشاهده در گیت‌هاب",
+    cta2: "دانلود",
+    feat_title: "امکانات",
+    f1: "نوار سیستمی", f1d: "شمارش معکوس زنده به‌همراه شروع/مکث/رد/بازنشانی از منوی نوار.",
+    f2: "اعلان", f2d: "اعلان دسکتاپ هنگام پایان هر جلسه کار/استراحت.",
+    f3: "کلید میان‌بر سراسری", f3d: "Super+P برای شروع/مکث از هر جایی.",
+    f4: "بیدار ماندن", f4d: "جلوگیری از قفل/تعلیق صفحه هنگام جلسه تمرکز.",
+    f5: "اجرای خودکار", f5d: "اجرای خودکار هنگام ورود به سیستم با فایل .desktop.",
+    f6: "قابل تنظیم", f6d: "مدت کار/استراحت در ~/.config/pangan/config.toml.",
+    install_title: "نصب", install_cmd: "git clone https://github.com/amirhosseineslami/pangan.git\ncd pangan\ncargo build --release\n./target/release/pangan &   # اجرای خودکار در ورود بعدی",
+    why_title: "چرا پنگان؟",
+    why_body: "پنگان نام ساعت آبی باستانی ایرانیان است که برای تقسیم عادلانه زمان میان مردم استفاده می‌شد. نیای شایسته برای یک تایمر تمرکز — کوچک، دقیق، و منصف نسبت به توجه شما.",
+    footer: "تحت مجوز MIT • ساخته‌شده با راست و اسلینت •",
+  }
+};
+
+document.addEventListener("DOMContentLoaded", () => setLang("en"));
+
+function setLang(lang) {
+  document.documentElement.lang = lang;
+  document.documentElement.dataset.lang = lang;
+  const t = I18N[lang] || I18N.en;
+  document.querySelectorAll("[data-i18n]").forEach(el => {
+    const key = el.dataset.i18n;
+    const val = key === "install_cmd" ? t.install_cmd : (t[key] ?? key);
+    if (key === "install_cmd") el.textContent = val;
+    else el.innerHTML = val;
+  });
+  document.querySelectorAll(".langs button").forEach(b => {
+    b.classList.toggle("active", b.textContent === lang.toUpperCase());
+  });
+  // note: the install code block is rendered via its <pre><code> container.
+  const pre = document.querySelector("pre code");
+  if (pre) pre.textContent = t.install_cmd;
+}
+</script>
+
+</body>
+</html>

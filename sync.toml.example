@@ -1,0 +1,21 @@
+# Pangan Google Cloud sync (Sheets API v4)
+# Copy this file to ~/.config/pangan/sync.toml and fill in your values.
+#
+# How to get a token:
+#   1. Install Google Cloud CLI: https://cloud.google.com/sdk/docs/install
+#   2. gcloud auth login
+#   3. In Google Cloud Console, enable the Google Sheets API for your project.
+#   4. Print an access token:
+#        gcloud auth print-access-token ^scopes=https://www.googleapis.com/auth/spreadsheets
+#   5. Create a Google Sheet, note its ID from the URL:
+#        https://docs.google.com/spreadsheets/d/<SPREADSHEET_ID>/edit
+#
+# The token expires (typically after 1 hour). Re-run step 4 and paste the new
+# value, or script it. Pangan reads this file each time you click "☁ Sync".
+
+spreadsheet_id = "YOUR_SPREADSHEET_ID"
+sheet = "Pangan"          # sheet/tab name inside the spreadsheet
+token = "YOUR_ACCESS_TOKEN"
+
+# Columns written per row:
+#   ts | period | sessions | minutes | avg_min | consistency_pct | streak_days | score | tasks_open

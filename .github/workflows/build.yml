@@ -1,0 +1,109 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            artifact: pangan-linux-x86_64
+          - os: windows-latest
+            artifact: pangan-windows-x86_64
+          - os: macos-latest
+            artifact: pangan-macos-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libwayland-dev libx11-dev libxkbcommon-x11-dev libgtk-3-dev
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check
+        run: cargo check --all-features
+
+      - name: Test
+        run: cargo test --all-features
+
+      - name: Build (release)
+        run: cargo build --release
+
+      # Give the binary a unique per-OS name so Linux/macOS artifacts
+      # cannot collide in the release (both are named "pangan" by cargo).
+      - name: Prepare release artifact
+        shell: bash
+        run: |
+          cd target/release
+          if [ -f pangan.exe ]; then
+            mv pangan.exe "${{ matrix.artifact }}.exe"
+          else
+            mv pangan "${{ matrix.artifact }}"
+          fi
+
+      - name: Compute SHA256
+        shell: bash
+        run: |
+          cd target/release
+          f="${{ matrix.artifact }}"
+          if [ -f "${f}.exe" ]; then f="${f}.exe"; fi
+          python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest(), sys.argv[1])" "$f" > "${{ matrix.artifact }}.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            target/release/${{ matrix.artifact }}
+            target/release/${{ matrix.artifact }}.exe
+            target/release/${{ matrix.artifact }}.sha256
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: List artifacts
+        run: find dist -type f | sort
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: dist/**
