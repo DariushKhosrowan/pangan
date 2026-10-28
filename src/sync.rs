@@ -159,7 +159,11 @@ pub fn push_backup(cfg: &SyncCfg, payload: &BackupPayload) -> Result<(), String>
         .send_json(body);
     match resp {
         Ok(r) if r.status() == 200 => Ok(()),
-        Ok(r) => Err(format!("backup HTTP {}: {}", r.status(), r.into_body().read_to_string().unwrap_or_default())),
+        Ok(r) => Err(format!(
+            "backup HTTP {}: {}",
+            r.status(),
+            r.into_body().read_to_string().unwrap_or_default()
+        )),
         Err(e) => Err(format!("backup request failed: {e}")),
     }
 }
@@ -176,8 +180,17 @@ pub fn pull_latest_backup(cfg: &SyncCfg) -> Result<BackupPayload, String> {
         .header("Authorization", &format!("Bearer {}", cfg.token))
         .call();
     let text = match resp {
-        Ok(r) if r.status() == 200 => r.into_body().read_to_string().map_err(|e| format!("read: {e}"))?,
-        Ok(r) => return Err(format!("pull HTTP {}: {}", r.status(), r.into_body().read_to_string().unwrap_or_default())),
+        Ok(r) if r.status() == 200 => r
+            .into_body()
+            .read_to_string()
+            .map_err(|e| format!("read: {e}"))?,
+        Ok(r) => {
+            return Err(format!(
+                "pull HTTP {}: {}",
+                r.status(),
+                r.into_body().read_to_string().unwrap_or_default()
+            ))
+        }
         Err(e) => return Err(format!("pull request failed: {e}")),
     };
     let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("json: {e}"))?;
@@ -192,7 +205,11 @@ pub fn pull_latest_backup(cfg: &SyncCfg) -> Result<BackupPayload, String> {
                 continue;
             }
             return Ok(BackupPayload {
-                app: a.get(0).and_then(|x| x.as_str()).unwrap_or("pangan").to_string(),
+                app: a
+                    .get(0)
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("pangan")
+                    .to_string(),
                 version: a.get(1).and_then(|x| x.as_str()).unwrap_or("").to_string(),
                 ts: a.get(2).and_then(|x| x.as_str()).unwrap_or("").to_string(),
                 settings,

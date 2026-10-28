@@ -99,7 +99,10 @@ mod tests {
         // 4th focus session completes -> pomodoro_complete + break_start.
         s.skip();
         let ev = s.drain_events();
-        assert!(ev.contains(&EVENT_POMODORO_COMPLETE.to_string()), "got {ev:?}");
+        assert!(
+            ev.contains(&EVENT_POMODORO_COMPLETE.to_string()),
+            "got {ev:?}"
+        );
         assert!(ev.contains(&EVENT_BREAK_START.to_string()), "got {ev:?}");
     }
 
