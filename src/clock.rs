@@ -88,6 +88,9 @@ pub struct Shared {
     pending_sessions: Mutex<Vec<SessionRecord>>,
     /// Count of completed breaks (rest periods) not yet consumed.
     pending_breaks: Mutex<u32>,
+    /// Life-cycle automation events not yet fired by the event loop
+    /// (e.g. "focus_start", "break_end", ...).
+    pending_events: Mutex<Vec<String>>,
 }
 
 impl Shared {
@@ -106,7 +109,13 @@ impl Shared {
             cfg,
             pending_sessions: Mutex::new(Vec::new()),
             pending_breaks: Mutex::new(0),
+            pending_events: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Drain automation life-cycle events since the last call.
+    pub fn drain_events(&self) -> Vec<String> {
+        std::mem::take(&mut *self.pending_events.lock().unwrap())
     }
 
     /// Drain and return completed sessions since the last call.
@@ -140,6 +149,21 @@ impl Shared {
             } else {
                 Phase::ShortBreak
             };
+            // Automation: a focus session completed; a break begins.
+            self.pending_events
+                .lock()
+                .unwrap()
+                .push(crate::settings::EVENT_FOCUS_END.into());
+            if is_long {
+                self.pending_events
+                    .lock()
+                    .unwrap()
+                    .push(crate::settings::EVENT_POMODORO_COMPLETE.into());
+            }
+            self.pending_events
+                .lock()
+                .unwrap()
+                .push(crate::settings::EVENT_BREAK_START.into());
             Some(format!(
                 "{} finished — take a {}.",
                 Phase::Work.label(),
@@ -147,6 +171,15 @@ impl Shared {
             ))
         } else {
             s.phase = Phase::Work;
+            // Automation: the break ended; focus begins again.
+            self.pending_events
+                .lock()
+                .unwrap()
+                .push(crate::settings::EVENT_BREAK_END.into());
+            self.pending_events
+                .lock()
+                .unwrap()
+                .push(crate::settings::EVENT_FOCUS_START.into());
             Some("Break over — back to focus.".to_string())
         };
         s.total = self.phase_total(s.phase);
@@ -192,6 +225,12 @@ impl Shared {
         s.running = !s.running;
         if s.running {
             s.finish_at = Some(Instant::now() + s.remaining);
+            if s.phase == Phase::Work {
+                self.pending_events
+                    .lock()
+                    .unwrap()
+                    .push(crate::settings::EVENT_FOCUS_START.into());
+            }
         } else {
             s.finish_at = None;
         }

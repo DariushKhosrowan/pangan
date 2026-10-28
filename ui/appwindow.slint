@@ -43,6 +43,9 @@ export component PanganWindow inherits Window {
     in-out property <bool> hotkey-enabled: true;
     in-out property <bool> inhibit-enabled: true;
     in-out property <bool> overlay-enabled: true;
+    in-out property <bool> compact-mode: false;
+    in-out property <int> sound-volume: 80;
+    in property <string> automation-summary;
 
     // ---- Callbacks to Rust ----
     callback start-pause;
@@ -57,11 +60,14 @@ export component PanganWindow inherits Window {
     callback preview-sound;
     callback sync-now;
     callback add-task;
+    callback backup-now;
+    callback restore-now;
+    callback add-automation(string, string);
 
     title: "Pangan";
-    width: 480px;
-    height: 700px;
     no-frame: true;
+    width: root.compact-mode ? 300px : 480px;
+    height: root.compact-mode ? 340px : 700px;
 
     // ═══ Theme palette ═══
     private property <brush> c-bg: root.resolved-theme == "light" ? #f1ecdf : #12162b;
@@ -171,8 +177,63 @@ export component PanganWindow inherits Window {
         width: parent.width;
         height: parent.height - 96px;
 
+        // ═══ VIEW: COMPACT (mini timer) ═══
+        if root.show-view == "main" && root.compact-mode: VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+
+            Text {
+                text: root.session-name;
+                font-size: 12px; font-weight: 600; letter-spacing: 2px;
+                color: c-muted; horizontal-alignment: center;
+            }
+
+            Text {
+                text: root.time-left;
+                font-size: 40px; font-weight: 700;
+                color: c-text; horizontal-alignment: center;
+            }
+
+            // thin progress bar
+            Rectangle {
+                width: parent.width; height: 4px;
+                background: c-track; border-radius: 2px;
+                Rectangle {
+                    width: parent.width * root.progress;
+                    height: parent.height;
+                    background: c-accent; border-radius: 2px;
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 8px; alignment: center;
+                Rectangle {
+                    width: 96px; height: 36px; border-radius: 18px;
+                    background: c-accent;
+                    TouchArea { clicked => { root.start-pause(); } }
+                    Text { text: root.running ? "II Pause" : "▶ Start"; font-size: 13px;
+                           font-weight: 700; color: c-btn-text;
+                           horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Rectangle {
+                    width: 64px; height: 36px; border-radius: 18px;
+                    background: c-surface2; border-width: 1px; border-color: c-gold-border;
+                    TouchArea { clicked => { root.skip(); } }
+                    Text { text: "Skip"; font-size: 12px; color: c-text;
+                           horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Rectangle {
+                    width: 64px; height: 36px; border-radius: 18px;
+                    background: c-surface2; border-width: 1px; border-color: c-gold-border;
+                    TouchArea { clicked => { root.open-settings(); } }
+                    Text { text: "⚙"; font-size: 15px; color: c-text;
+                           horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+        }
+
         // ═══ VIEW: MAIN (timer) ═══
-        if root.show-view == "main": VerticalLayout {
+        if root.show-view == "main" && !root.compact-mode: VerticalLayout {
             padding: 20px;
             spacing: 10px;
 
@@ -472,6 +533,8 @@ export component PanganWindow inherits Window {
                         Text { text: "System"; color: root.theme-pref == "system" ? c-btn-text : c-text;
                                horizontal-alignment: center; vertical-alignment: center; font-size: 12px; } }
                 }
+                CheckBox { text: "Compact mode (mini window)"; checked: root.compact-mode;
+                           toggled => { root.compact-mode = self.checked; } }
 
                 Rectangle { height: 1px; background: c-surface2; }
 
@@ -509,10 +572,34 @@ export component PanganWindow inherits Window {
                         Text { text: "Sand"; color: root.sound-theme == "sand" ? c-btn-text : c-text;
                                horizontal-alignment: center; vertical-alignment: center; font-size: 12px; } }
                     Rectangle { width: 88px; height: 36px; border-radius: 18px;
+                        background: root.sound-theme == "cyrus" ? c-accent : c-surface2;
+                        TouchArea { clicked => { root.sound-theme = "cyrus"; } }
+                        Text { text: "Cyrus"; color: root.sound-theme == "cyrus" ? c-btn-text : c-text;
+                               horizontal-alignment: center; vertical-alignment: center; font-size: 12px; } }
+                    Rectangle { width: 88px; height: 36px; border-radius: 18px;
                         background: c-surface2; border-width: 1px; border-color: c-gold-border;
                         TouchArea { clicked => { root.preview-sound(); } }
                         Text { text: "▶ Preview"; color: c-text;
                                horizontal-alignment: center; vertical-alignment: center; font-size: 12px; } }
+                }
+                Text { text: "Volume"; color: c-text; }
+                HorizontalLayout { spacing: 8px;
+                    Rectangle { width: 140px; height: 30px; border-radius: 15px;
+                        background: c-surface2; border-width: 1px; border-color: c-gold-border;
+                        Rectangle {
+                            width: 140px * root.sound-volume / 100;
+                            height: 30px;
+                            border-radius: 15px;
+                            background: c-accent;
+                        }
+                        TouchArea {
+                            moved => {
+                                root.sound-volume = clamp(self.mouse-x / 140px * 100, 0, 100);
+                            }
+                        }
+                    }
+                    Text { text: root.sound-volume + "%"; color: c-text; font-size: 12px;
+                           vertical-alignment: center; }
                 }
 
                 Rectangle { height: 1px; background: c-surface2; }
@@ -525,6 +612,54 @@ export component PanganWindow inherits Window {
                            toggled => { root.inhibit-enabled = self.checked; } }
                 CheckBox { text: "Fullscreen overlay during breaks"; checked: root.overlay-enabled;
                            toggled => { root.overlay-enabled = self.checked; } }
+
+                Rectangle { height: 1px; background: c-surface2; }
+
+                // -- Automation (FocusTimer-class tools) --
+                Text { text: "AUTOMATION"; font-size: 11px; letter-spacing: 2px; color: c-muted; }
+                Text {
+                    text: root.automation-summary;
+                    font-size: 12px; color: c-muted; wrap: word-wrap;
+                }
+                HorizontalLayout { spacing: 8px;
+                    LineEdit {
+                        placeholder-text: "command (e.g. playerctl pause)";
+                        width: 170px;
+                        text: root.new-task-text;
+                        edited => { root.new-task-text = self.text; }
+                    }
+                    Rectangle { width: 70px; height: 34px; border-radius: 17px;
+                        background: c-accent;
+                        TouchArea { clicked => { root.add-automation("focus_start", root.new-task-text); } }
+                        Text { text: "Add"; color: c-btn-text; font-weight: 700;
+                               horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+                Text {
+                    text: "Runs a shell command when the event fires. Use %event% / %session% variables.";
+                    font-size: 11px; color: c-muted; wrap: word-wrap;
+                }
+
+                Rectangle { height: 1px; background: c-surface2; }
+
+                // -- Cloud backup --
+                Text { text: "CLOUD"; font-size: 11px; letter-spacing: 2px; color: c-muted; }
+                HorizontalLayout { spacing: 8px; alignment: center;
+                    Rectangle { width: 120px; height: 38px; border-radius: 19px;
+                        background: c-surface2; border-width: 1px; border-color: c-gold-border;
+                        TouchArea { clicked => { root.backup-now(); } }
+                        Text { text: "☁ Backup"; color: c-text;
+                               horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    Rectangle { width: 120px; height: 38px; border-radius: 19px;
+                        background: c-surface2; border-width: 1px; border-color: c-gold-border;
+                        TouchArea { clicked => { root.restore-now(); } }
+                        Text { text: "↺ Restore"; color: c-text;
+                               horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+                Text { text: root.sync-status; font-size: 11px; color: c-muted;
+                       horizontal-alignment: center; }
 
                 Rectangle { height: 4px; }
             }

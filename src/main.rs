@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use slint::{CloseRequestResponse, ComponentHandle, SharedString, Timer, TimerMode};
 
+mod automation;
 mod clock;
 mod platform;
 mod settings;
@@ -31,6 +32,7 @@ pub enum TrayAction {
     Skip,
     Reset,
     Quit,
+    ToggleWindow,
 }
 
 /// User-facing app state shared with the UI update closures.
@@ -127,6 +129,14 @@ fn run_action(
             let _ = slint::quit_event_loop();
             return;
         }
+        TrayAction::ToggleWindow => {
+            let w = win.upgrade();
+            if let Some(w) = w {
+                let visible = w.window().is_visible();
+                let _ = if visible { w.hide() } else { w.show() };
+            }
+            None
+        }
     };
 
     let shared = Arc::clone(shared);
@@ -191,6 +201,23 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
     drop(st);
 }
 
+/// Recompute the automation summary line and push it to the window.
+fn update_automation_summary(win: &slint::Weak<PanganWindow>, app: &AppState) {
+    let automation = automation::sorted(&app.settings.lock().unwrap());
+    let summary = if automation.is_empty() {
+        "No automation rules yet.".to_string()
+    } else {
+        let mut s = String::from(format!("{} rule(s): ", automation.len()));
+        for a in &automation {
+            s.push_str(&format!("[{}] {}, ", a.event, a.command));
+        }
+        s
+    };
+    if let Some(w) = win.upgrade() {
+        w.set_automation_summary(SharedString::from(summary));
+    }
+}
+
 fn sync_row(app: &AppState) -> sync::SyncRow {
     let st = app.store.lock().unwrap();
     let t = stats::report(&st.data.sessions, stats::Period::Today);
@@ -234,8 +261,10 @@ fn apply_ui_settings(win: &PanganWindow, app: &AppState) -> Settings {
     s.auto_start_on_launch = win.get_auto_start_on_launch();
     s.daily_goal_minutes = win.get_daily_goal_minutes().max(15) as u64;
     s.theme = win.get_theme_pref().to_string();
+    s.compact_mode = win.get_compact_mode();
     s.sound_enabled = win.get_sound_enabled();
     s.sound_theme = win.get_sound_theme().to_string();
+    s.sound_volume = win.get_sound_volume().clamp(0, 100) as u8;
     s.hotkey_enabled = win.get_hotkey_enabled();
     s.inhibit_enabled = win.get_inhibit_enabled();
     s.overlay_enabled = win.get_overlay_enabled();
@@ -288,8 +317,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         win.set_auto_start_next(settings.auto_start_next);
         win.set_auto_start_on_launch(settings.auto_start_on_launch);
         win.set_daily_goal_minutes(settings.daily_goal_minutes as i32);
+        win.set_compact_mode(settings.compact_mode);
         win.set_sound_enabled(settings.sound_enabled);
         win.set_sound_theme(SharedString::from(settings.sound_theme.clone()));
+        win.set_sound_volume(settings.sound_volume as i32);
         win.set_hotkey_enabled(settings.hotkey_enabled);
         win.set_inhibit_enabled(settings.inhibit_enabled);
         win.set_overlay_enabled(settings.overlay_enabled);
@@ -310,17 +341,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let recs = tick_shared.drain_sessions();
         let breaks = tick_shared.take_breaks();
+        let events = tick_shared.drain_events();
+        let volume = tick_app.settings.lock().unwrap().sound_volume;
+        if !events.is_empty() {
+            let settings_snapshot = tick_app.settings.lock().unwrap().clone();
+            for ev in &events {
+                automation::fire_event(&settings_snapshot, ev, "session");
+            }
+        }
         if !recs.is_empty() {
             {
                 let mut st = tick_app.store.lock().unwrap();
                 st.add_sessions(&recs);
             }
             if tick_app.settings.lock().unwrap().sound_enabled {
-                sound::play(&tick_sounds_work);
+                sound::play(&tick_sounds_work, volume);
             }
         } else if breaks > 0 {
             if tick_app.settings.lock().unwrap().sound_enabled {
-                sound::play(&tick_sounds_rest);
+                sound::play(&tick_sounds_rest, volume);
             }
         }
 
@@ -475,10 +514,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .upgrade()
             .map(|w| w.get_sound_theme().to_string())
             .unwrap_or_default();
+        let volume = preview_app.settings.lock().unwrap().sound_volume;
         let dir = store::Store::data_dir().join("sounds");
         let snd = sound::Sounds::ensure(&dir, &theme);
-        sound::play(&snd.work);
-        let _ = &preview_app;
+        sound::play(&snd.work, volume);
     });
 
     // Add task.
@@ -510,6 +549,106 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         do_sync(&sync_weak, &sync_app);
     });
 
+    // Cloud backup (push full settings+data snapshot to the backup sheet).
+    let backup_app = Arc::clone(&app);
+    let backup_weak = weak.clone();
+    win.on_backup_now(move || {
+        let Some(cfg) = sync::load_config() else {
+            if let Some(w) = backup_weak.upgrade() {
+                w.set_sync_status(SharedString::from("Backup disabled (no token)."));
+            }
+            return;
+        };
+        let s = backup_app.settings.lock().unwrap().clone();
+        let d = backup_app.store.lock().unwrap().data.clone();
+        let payload = sync::BackupPayload {
+            app: "pangan".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            ts: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
+            settings: toml::to_string_pretty(&s).unwrap_or_default(),
+            data: serde_json::to_string_pretty(&d).unwrap_or_default(),
+        };
+        let status = match sync::push_backup(&cfg, &payload) {
+            Ok(()) => "Backup saved to Google Sheets ✓".into(),
+            Err(e) => format!("Backup error: {e}"),
+        };
+        {
+            let mut ls = backup_app.last_sync.lock().unwrap();
+            *ls = status.clone();
+        }
+        if let Some(w) = backup_weak.upgrade() {
+            w.set_sync_status(SharedString::from(status));
+        }
+    });
+
+    // Cloud restore (pull latest backup and apply it).
+    let restore_app = Arc::clone(&app);
+    let restore_weak = weak.clone();
+    win.on_restore_now(move || {
+        let Some(cfg) = sync::load_config() else {
+            if let Some(w) = restore_weak.upgrade() {
+                w.set_sync_status(SharedString::from("Restore disabled (no token)."));
+            }
+            return;
+        };
+        let status = match sync::pull_latest_backup(&cfg) {
+            Ok(payload) => {
+                // Apply settings.
+                if let Ok(s) = toml::from_str::<Settings>(&payload.settings) {
+                    let mut s = s;
+                    s.sanitize_mut();
+                    s.save();
+                    *restore_app.settings.lock().unwrap() = s.clone();
+                    *restore_app.sound_theme.lock().unwrap() = s.sound_theme.clone();
+                    if let Some(w) = restore_weak.upgrade() {
+                        w.set_sound_theme(SharedString::from(s.sound_theme.clone()));
+                        w.set_sound_volume(s.sound_volume as i32);
+                        w.set_compact_mode(s.compact_mode);
+                        w.set_theme_pref(SharedString::from(s.theme.clone()));
+                        w.set_theme_label(SharedString::from(s.theme_label()));
+                        w.set_resolved_theme(SharedString::from(resolve_theme(&s.theme)));
+                    }
+                }
+                // Apply data.
+                if let Ok(d) = serde_json::from_str::<store::Data>(&payload.data) {
+                    let mut st = restore_app.store.lock().unwrap();
+                    st.data = d;
+                    st.save();
+                }
+                format!("Restored backup from {}", payload.ts)
+            }
+            Err(e) => format!("Restore error: {e}"),
+        };
+        {
+            let mut ls = restore_app.last_sync.lock().unwrap();
+            *ls = status.clone();
+        }
+        if let Some(w) = restore_weak.upgrade() {
+            w.set_sync_status(SharedString::from(status));
+            refresh_screens(&w, &restore_app);
+        }
+    });
+
+    // Automation: add a rule (event, command).
+    let add_auto_app = Arc::clone(&app);
+    let add_auto_weak = weak.clone();
+    win.on_add_automation(move |event: SharedString, command: SharedString| {
+        let cmd = command.trim().to_string();
+        if cmd.is_empty() {
+            return;
+        }
+        {
+            let mut s = add_auto_app.settings.lock().unwrap();
+            s.automation.push(settings::AutomationAction {
+                event: event.to_string(),
+                command: cmd,
+                enabled: true,
+            });
+            s.save();
+        }
+        update_automation_summary(&add_auto_weak, &add_auto_app);
+    });
+
     // Tray + hotkey.
     let tray_shared = Arc::clone(&shared);
     platform::tray::spawn(tray_shared, tx.clone());
@@ -519,6 +658,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     apply_snapshot(&win, &shared);
     refresh_screens(&win, &app);
+    update_automation_summary(&weak, &app);
     win.set_sync_status(SharedString::from("Cloud sync ready"));
     win.show()?;
 
@@ -527,22 +667,112 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn hotkey_thread(shared: Arc<Shared>, tx: Sender<TrayAction>) {
-    use global_hotkey::{
-        hotkey::{Code, HotKey, Modifiers},
-        GlobalHotKeyEvent, GlobalHotKeyManager,
-    };
+    use global_hotkey::hotkey::{Code, HotKey, Modifiers};
+    use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
+
     let Ok(manager) = GlobalHotKeyManager::new() else {
         return;
     };
-    let hotkey = HotKey::new(Some(Modifiers::SUPER), Code::KeyP);
-    let _ = manager.register(hotkey);
+
+    // Map accelerator string -> (modifiers, code, action).
+    // Supported modifiers: <Super>, <Control>, <Alt> (case-insensitive).
+    // Key is the trailing single key token.
+    let accel_to_hotkey = |accel: &str| -> Option<HotKey> {
+        let mut mods = Modifiers::empty();
+        let mut key: Option<char> = None;
+        for part in accel.split('<') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            let lower = part.to_lowercase();
+            if lower.starts_with("super") {
+                mods |= Modifiers::SUPER;
+            } else if lower.starts_with("control") || lower.starts_with("ctrl") {
+                mods |= Modifiers::CONTROL;
+            } else if lower.starts_with("alt") {
+                mods |= Modifiers::ALT;
+            } else if lower.starts_with("shift") {
+                mods |= Modifiers::SHIFT;
+            } else if let Some(c) = lower.chars().next() {
+                if c.is_ascii_alphanumeric() {
+                    key = Some(c);
+                }
+            }
+        }
+        let key = key?;
+        let code = match key.to_ascii_lowercase() {
+            'a' => Code::KeyA,
+            'b' => Code::KeyB,
+            'c' => Code::KeyC,
+            'd' => Code::KeyD,
+            'e' => Code::KeyE,
+            'f' => Code::KeyF,
+            'g' => Code::KeyG,
+            'h' => Code::KeyH,
+            'i' => Code::KeyI,
+            'j' => Code::KeyJ,
+            'k' => Code::KeyK,
+            'l' => Code::KeyL,
+            'm' => Code::KeyM,
+            'n' => Code::KeyN,
+            'o' => Code::KeyO,
+            'p' => Code::KeyP,
+            'q' => Code::KeyQ,
+            'r' => Code::KeyR,
+            's' => Code::KeyS,
+            't' => Code::KeyT,
+            'u' => Code::KeyU,
+            'v' => Code::KeyV,
+            'w' => Code::KeyW,
+            'x' => Code::KeyX,
+            'y' => Code::KeyY,
+            'z' => Code::KeyZ,
+            '0' => Code::Digit0,
+            '1' => Code::Digit1,
+            '2' => Code::Digit2,
+            '3' => Code::Digit3,
+            '4' => Code::Digit4,
+            '5' => Code::Digit5,
+            '6' => Code::Digit6,
+            '7' => Code::Digit7,
+            '8' => Code::Digit8,
+            '9' => Code::Digit9,
+            _ => return None,
+        };
+        Some(HotKey::new(Some(mods), code))
+    };
+
+    let settings = Settings::load();
+    let mut registered: Vec<(HotKey, TrayAction)> = Vec::new();
+    if settings.hotkey_enabled {
+        let action_for = |name: &str| -> Option<TrayAction> {
+            match name {
+                "toggle" => Some(TrayAction::Toggle),
+                "skip" => Some(TrayAction::Skip),
+                "reset" => Some(TrayAction::Reset),
+                "toggle_window" => Some(TrayAction::ToggleWindow),
+                _ => None,
+            }
+        };
+        for (name, accel) in &settings.shortcuts {
+            if let (Some(action), Some(hk)) = (action_for(name), accel_to_hotkey(accel)) {
+                if manager.register(hk).is_ok() {
+                    registered.push((hk, action));
+                }
+            }
+        }
+    }
+
     loop {
         if shared.quit.load(Ordering::Relaxed) {
             break;
         }
         if let Ok(event) = GlobalHotKeyEvent::receiver().try_recv() {
-            if event.id() == hotkey.id() {
-                let _ = tx.send(TrayAction::Toggle);
+            for (hk, action) in &registered {
+                if event.id() == hk.id() {
+                    let _ = tx.send(*action);
+                }
             }
         }
         std::thread::sleep(Duration::from_millis(40));

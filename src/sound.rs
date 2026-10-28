@@ -280,10 +280,50 @@ fn sand_rest() -> Vec<i16> {
 }
 
 // ---------------------------------------------------------------------------
+// Cyrus — a regal fanfare theme evoking the trumpeting herald of an ancient
+// Persian court. Built from two interleaved karn/gong strikes and a bright
+// ascending arpeggio of the *Cyrus cylinder* scale (a pentachord on D).
+// ---------------------------------------------------------------------------
+
+/// A fifth-above karn strike for the fanfare opening (the "herald").
+fn cyrus_herald() -> Vec<i16> {
+    let mut buf = Vec::new();
+    let a = gong_strike(196.0, 1.6, 0.7); // G3
+    let b = gong_strike(293.66, 1.2, 0.5); // D4
+    append_into(&mut buf, &a);
+    // Small gap before the second strike.
+    let gap = (0.10 * SAMPLE_RATE as f32) as usize;
+    if buf.len() < a.len() + gap {
+        buf.resize(a.len() + gap, 0);
+    }
+    append_into(&mut buf, &b);
+    buf
+}
+
+/// A bright, noble arpeggio (D F G A D) — the "triumph" statement.
+fn cyrus_arpeggio() -> Vec<i16> {
+    // D4 F4 G4 A4 D5 — a pentachord gesture that feels both ancient and regal.
+    let freqs = [293.66, 349.23, 392.00, 440.00, 587.33];
+    arpeggio(&freqs, 0.17, 0.9, 0.65)
+}
+
+fn cyrus_work() -> Vec<i16> {
+    let mut buf = cyrus_herald();
+    buf.extend(cyrus_arpeggio());
+    buf
+}
+
+fn cyrus_rest() -> Vec<i16> {
+    // A warm, resolving cadence: D A D.
+    let freqs = [293.66, 440.00, 293.66];
+    arpeggio(&freqs, 0.28, 1.2, 0.5)
+}
+
+// ---------------------------------------------------------------------------
 // Theming + file generation
 // ---------------------------------------------------------------------------
 
-pub const THEMES: [&str; 5] = ["santur", "daf", "tombak", "karn", "sand"];
+pub const THEMES: [&str; 6] = ["santur", "daf", "tombak", "karn", "sand", "cyrus"];
 
 pub struct Theme {
     pub work: Vec<i16>,
@@ -297,6 +337,7 @@ impl Theme {
             "tombak" => (tombak_work(), tombak_rest()),
             "karn" => (karn_work(), karn_rest()),
             "sand" => (sand_work(), sand_rest()),
+            "cyrus" => (cyrus_work(), cyrus_rest()),
             _ => (work_phrase(), rest_phrase()), // santur default
         };
         Self { work, rest }
@@ -359,17 +400,32 @@ impl Sounds {
     }
 }
 
-/// Find a playable command for a WAV file.
-fn play_command(path: &std::path::Path) -> Option<Vec<String>> {
+/// Find a playable command for a WAV file at the given volume (0-100).
+fn play_command(path: &std::path::Path, volume: u8) -> Option<Vec<String>> {
+    let vol = (volume as f32 / 100.0).clamp(0.0, 1.0);
     for player in ["paplay", "pw-play", "aplay", "ffplay"] {
         if which(player) {
             let args: Vec<String> = match player {
+                "paplay" => vec![
+                    player.into(),
+                    "--volume".into(),
+                    ((vol * 65535.0) as u32).to_string(),
+                    path.display().to_string(),
+                ],
+                "pw-play" => vec![
+                    player.into(),
+                    "--volume".into(),
+                    format!("{vol:.2}"),
+                    path.display().to_string(),
+                ],
                 "ffplay" => vec![
                     player.into(),
                     "-nodisp".into(),
                     "-autoexit".into(),
                     "-loglevel".into(),
                     "quiet".into(),
+                    "-volume".into(),
+                    ((vol * 100.0) as u32).to_string(),
                     path.display().to_string(),
                 ],
                 _ => vec![player.into(), path.display().to_string()],
@@ -389,9 +445,10 @@ fn which(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Play a WAV file, spawned detached so it never blocks the UI.
-pub fn play(path: &std::path::Path) {
-    if let Some(args) = play_command(path) {
+/// Play a WAV file at the given volume (0-100), spawned detached so it never
+/// blocks the UI.
+pub fn play(path: &std::path::Path, volume: u8) {
+    if let Some(args) = play_command(path, volume) {
         let _ = std::process::Command::new(&args[0])
             .args(&args[1..])
             .stdin(std::process::Stdio::null())
@@ -399,6 +456,12 @@ pub fn play(path: &std::path::Path) {
             .stderr(std::process::Stdio::null())
             .spawn();
     }
+}
+
+/// Play at the default/current volume (kept for backward compatibility in tests).
+#[allow(dead_code)]
+pub fn play_at_default(path: &std::path::Path) {
+    play(path, 80);
 }
 
 #[cfg(test)]

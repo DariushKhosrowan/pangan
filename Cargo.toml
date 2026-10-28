@@ -1,6 +1,6 @@
 [package]
 name = "pangan"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Pangan — a modern Persian Pomodoro timer inspired by Persepolis (Rust + Slint)"
 license = "MIT"

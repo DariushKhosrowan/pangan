@@ -12,22 +12,29 @@ no audio files, everything generated mathematically.
 
 - 🎨 **Persepolis-inspired UI** — deep indigo & gilded gold palette, a radiating
   sun-ray progress ring evoking the winged solar disc, cuneiform-textured borders,
-  system / dark / light themes.
-- 🔊 **Iranian sound engine (procedural)** — five chime **themes**, each synthesized
+  system / dark / light themes, and a **compact mini-window** mode.
+- 🔊 **Iranian sound engine (procedural)** — six chime **themes**, each synthesized
   from scratch: **Santur** (hammered dulcimer), **Daf** (frame drum), **Tombak**
-  (goblet drum), **Karn** (ceremonial horn/gong), and **Sand** (a fine water-clock
-  tick). Preview before you choose.
+  (goblet drum), **Karn** (ceremonial horn/gong), **Sand** (a fine water-clock
+  tick), and **Cyrus** (a regal herald fanfare). Preview before you choose, with a
+  volume slider.
+- 🤖 **Automation engine** — attach shell commands to timer events (`focus_start`,
+  `focus_end`, `break_start`, `break_end`, `pomodoro_complete`) to drive your
+  desktop (pause media, switch workspaces, and more).
+- ⌨️ **Remappable global hotkeys** — toggle, skip, reset, and show/hide window,
+  each configurable.
 - 🧠 **Drift-free timer core** — timestamp+`Instant`-based countdown (no clock drift).
 - ⚙️ **Rich settings** — focus/short/long durations, long-break interval, daily goal,
-  auto-start-next & auto-start-on-launch, theme, sound theme & volume toggle, global
-  hotkey (`Super+P`), idle-inhibit, and fullscreen break-overlay toggles.
+  auto-start-next & auto-start-on-launch, theme, compact mode, sound theme & volume
+  toggle, global hotkey, idle-inhibit, and fullscreen break-overlay toggles.
 - 📊 **Scientific reports** — daily / weekly / monthly analytics: sessions, focus
   minutes, consistency %, streaks, and a deep-work score.
 - ✅ **Tasks & scheduling** — add tasks (with optional date/time), tracked persistently.
 - 🖥️ **System tray** — live countdown, Start/Pause, Skip, Reset, Quit.
 - 🔔 **Desktop notifications** — when a focus/break session ends.
 - 🌙 **Screen-lock inhibit** — keep the desktop awake during focus sessions.
-- ☁️ **Cloud sync** — push performance snapshots to a Google Sheet (see `sync.toml.example`).
+- ☁️ **Cloud sync & backup** — push performance snapshots to a Google Sheet and
+  **back up / restore** your full settings + history across devices (see `sync.toml.example`).
 
 ## Build
 
@@ -71,6 +78,15 @@ break every 4 focus sessions.
    score, and open-task count. Sync also runs automatically every 10 minutes
    while the token is configured.
 
+**Two-way backup / restore.** The Settings → Cloud section also offers:
+
+- **Backup** — pushes a full snapshot of your settings + session history + tasks
+  to a dedicated `PanganBackup` sheet tab, so you can move to a new machine (or
+  recover after a wipe) without losing anything.
+- **Restore** — pulls the most recent backup and applies it locally.
+
+Both need the same `sync.toml` token with spreadsheet access.
+
 ## Data
 
 History and tasks live in `~/.config/pangan/data.json`. Sound and theme
@@ -79,11 +95,12 @@ preferences are written into `config.toml`.
 ## Architecture
 
 - `src/clock.rs` — platform-agnostic drift-free timer state machine
-- `src/settings.rs` — full TOML settings model
+- `src/settings.rs` — full TOML settings model (incl. shortcuts + automation)
+- `src/automation.rs` — shell-command automation engine over timer events
 - `src/store.rs` — JSON persistence for sessions and tasks
 - `src/stats.rs` — daily/weekly/monthly report engine
 - `src/sound.rs` — procedural Iranian instrument synthesis + WAV generation
-- `src/sync.rs` — Google Sheets API adapter
+- `src/sync.rs` — Google Sheets adapter (snapshot sync + two-way backup)
 - `src/platform/` — per-OS tray / notifications / hotkey / inhibit / autostart
 - `ui/appwindow.slint` — the Persepolis-themed Slint UI
 

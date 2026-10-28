@@ -123,3 +123,82 @@ pub fn try_sync(row: &SyncRow) -> String {
         Err(e) => format!("Sync error: {e}"),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Two-way cloud backup: settings + data snapshot as a single JSON cell.
+// ---------------------------------------------------------------------------
+
+/// A full app-state backup pushed to the backup sheet tab.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct BackupPayload {
+    pub app: String,
+    pub version: String,
+    pub ts: String,
+    pub settings: String, // TOML text
+    pub data: String,     // JSON text
+}
+
+/// Push a full backup payload to a dedicated "PanganBackup" sheet tab.
+pub fn push_backup(cfg: &SyncCfg, payload: &BackupPayload) -> Result<(), String> {
+    let sheet = "PanganBackup";
+    let url = format!(
+        "https://sheets.googleapis.com/v4/spreadsheets/{}/values/{}!A1:append?valueInputOption=RAW",
+        cfg.spreadsheet_id, sheet
+    );
+    let body = serde_json::json!({
+        "values": [[
+            payload.app,
+            payload.version,
+            payload.ts,
+            payload.settings,
+            payload.data,
+        ]]
+    });
+    let resp = ureq::post(&url)
+        .header("Authorization", &format!("Bearer {}", cfg.token))
+        .send_json(body);
+    match resp {
+        Ok(r) if r.status() == 200 => Ok(()),
+        Ok(r) => Err(format!("backup HTTP {}: {}", r.status(), r.into_body().read_to_string().unwrap_or_default())),
+        Err(e) => Err(format!("backup request failed: {e}")),
+    }
+}
+
+/// Pull the most recent backup row from the "PanganBackup" tab.
+pub fn pull_latest_backup(cfg: &SyncCfg) -> Result<BackupPayload, String> {
+    let sheet = "PanganBackup";
+    let range = format!("{}!A:E", sheet);
+    let url = format!(
+        "https://sheets.googleapis.com/v4/spreadsheets/{}/values/{}?majorDimension=ROWS",
+        cfg.spreadsheet_id, range
+    );
+    let resp = ureq::get(&url)
+        .header("Authorization", &format!("Bearer {}", cfg.token))
+        .call();
+    let text = match resp {
+        Ok(r) if r.status() == 200 => r.into_body().read_to_string().map_err(|e| format!("read: {e}"))?,
+        Ok(r) => return Err(format!("pull HTTP {}: {}", r.status(), r.into_body().read_to_string().unwrap_or_default())),
+        Err(e) => return Err(format!("pull request failed: {e}")),
+    };
+    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("json: {e}"))?;
+    let rows = v["values"].as_array().ok_or("no rows")?;
+    // Rows are [app, version, ts, settings, data]; take the last non-empty.
+    for row in rows.iter().rev() {
+        let a = row.as_array().ok_or("bad row")?;
+        if a.len() >= 5 {
+            let settings = a[3].as_str().unwrap_or("").to_string();
+            let data = a[4].as_str().unwrap_or("").to_string();
+            if settings.is_empty() && data.is_empty() {
+                continue;
+            }
+            return Ok(BackupPayload {
+                app: a.get(0).and_then(|x| x.as_str()).unwrap_or("pangan").to_string(),
+                version: a.get(1).and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                ts: a.get(2).and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                settings,
+                data,
+            });
+        }
+    }
+    Err("no backup found".into())
+}
