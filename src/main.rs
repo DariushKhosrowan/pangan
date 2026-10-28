@@ -5,7 +5,10 @@ use std::sync::{
 };
 use std::time::Duration;
 
-use slint::{CloseRequestResponse, ComponentHandle, SharedString, Timer, TimerMode};
+use slint::{
+    CloseRequestResponse, ComponentHandle, Global, ModelRc, SharedString, Timer, TimerMode,
+    VecModel,
+};
 
 mod automation;
 mod clock;
@@ -103,6 +106,19 @@ fn apply_snapshot(win: &PanganWindow, shared: &Shared) {
     win.set_work_done(snap.work_done as i32);
 }
 
+/// Push the resolved theme into the Slint palette global.
+fn apply_palette(win: &PanganWindow, resolved: &str) {
+    ui::Palette::get(win).set_dark(resolved != "light");
+}
+
+/// Session dots: total = long-break interval, done = position in the cycle.
+fn apply_session_dots(win: &PanganWindow, shared: &Shared, app: &AppState) {
+    let interval = app.settings.lock().unwrap().long_break_interval.max(1) as i32;
+    let done = (shared.snapshot().work_done as i32) % interval;
+    win.set_session_total(interval);
+    win.set_session_done(done);
+}
+
 fn notify(body: &str) {
     platform::notify::send("Pangan", body);
 }
@@ -198,6 +214,58 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
         st.data.sessions.len() + 1,
         goal
     )));
+
+    // ---- Rich data for the redesigned UI ----
+    win.set_today_sessions(t.sessions as i32);
+    win.set_today_minutes(t.minutes as i32);
+    win.set_today_score(t.score as i32);
+    win.set_today_streak(t.streak as i32);
+    win.set_today_consistency((t.consistency * 100.0).round() as i32);
+    win.set_today_best(t.best_day_minutes as i32);
+    win.set_goal_minutes(goal as i32);
+    win.set_goal_done_minutes(t.minutes as i32);
+
+    // Weekly bars: Monday..Sunday of the current week, normalised to the peak.
+    let (week_start, _) = stats::Period::Week.bounds(today);
+    let mut per_day = [0u64; 7];
+    for s in &st.data.sessions {
+        let d = chrono::DateTime::from_timestamp(s.at, 0)
+            .map(|d| d.with_timezone(&chrono::Local).date_naive());
+        if let Some(d) = d {
+            let idx = (d - week_start).num_days();
+            if (0..7).contains(&idx) {
+                per_day[idx as usize] += s.minutes;
+            }
+        }
+    }
+    let peak = per_day.iter().copied().max().unwrap_or(0).max(1);
+    let bars: Vec<f32> = per_day
+        .iter()
+        .map(|m| (*m as f32 / peak as f32).clamp(0.0, 1.0))
+        .collect();
+    win.set_week_bars(ModelRc::new(VecModel::from(bars)));
+
+    let labels: Vec<SharedString> = ["M", "T", "W", "T", "F", "S", "S"]
+        .iter()
+        .map(|s| SharedString::from(*s))
+        .collect();
+    win.set_week_labels(ModelRc::new(VecModel::from(labels)));
+
+    // Task list for the redesigned panel: open tasks first, then done.
+    let mut items: Vec<ui::TaskItem> = st
+        .data
+        .tasks
+        .iter()
+        .map(|t| ui::TaskItem {
+            id: t.id as i32,
+            title: SharedString::from(t.title.clone()),
+            time: SharedString::from(t.time.clone()),
+            done: t.done,
+        })
+        .collect();
+    items.sort_by_key(|t| t.done);
+    win.set_tasks(ModelRc::new(VecModel::from(items)));
+
     drop(st);
 }
 
@@ -306,6 +374,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         win.set_resolved_theme(SharedString::from(resolved));
         win.set_theme_label(SharedString::from(settings.theme_label()));
         win.set_theme_pref(SharedString::from(settings.theme.clone()));
+        apply_palette(&win, resolved);
     }
 
     // Push settings into the UI.
@@ -365,6 +434,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if let Some(win) = tick_weak.upgrade() {
             apply_snapshot(&win, &tick_shared);
+            apply_session_dots(&win, &tick_shared, &tick_app);
             refresh_screens(&win, &tick_app);
         }
 
@@ -472,7 +542,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let cfg = clock::Config::from(&s);
             // The clock is shared; rebuild its totals from the new config.
             w.set_theme_label(SharedString::from(s.theme_label()));
-            w.set_resolved_theme(SharedString::from(resolve_theme(&s.theme)));
+            let resolved = resolve_theme(&s.theme);
+            w.set_resolved_theme(SharedString::from(resolved));
+            apply_palette(&w, resolved);
             w.set_show_view("main".into());
             let _ = cfg;
         }
@@ -495,6 +567,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             w.set_theme_label(SharedString::from(label));
             w.set_theme_pref(SharedString::from(s.theme.clone()));
             w.set_resolved_theme(SharedString::from(resolved));
+            apply_palette(&w, resolved);
         }
     });
 
@@ -542,7 +615,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // Sync now.
+    // Toggle a task's done state from the new task rows.
+    let toggle_app = Arc::clone(&app);
+    let toggle_weak = weak.clone();
+    win.on_toggle_task(move |id| {
+        {
+            let mut st = toggle_app.store.lock().unwrap();
+            let current = st
+                .data
+                .tasks
+                .iter()
+                .find(|t| t.id == id as u64)
+                .map(|t| t.done)
+                .unwrap_or(false);
+            st.set_done(id as u64, !current);
+        }
+        if let Some(w) = toggle_weak.upgrade() {
+            refresh_screens(&w, &toggle_app);
+        }
+    }); // Explicit theme selection from the Settings segmented control.
+    let settheme_app = Arc::clone(&app);
+    let settheme_weak = weak.clone();
+    win.on_set_theme(move |pref| {
+        let pref = pref.to_string();
+        let resolved = {
+            let mut s = settheme_app.settings.lock().unwrap();
+            s.theme = pref.clone();
+            s.save();
+            resolve_theme(&s.theme)
+        };
+        if let Some(w) = settheme_weak.upgrade() {
+            w.set_theme_pref(SharedString::from(pref));
+            w.set_resolved_theme(SharedString::from(resolved));
+            apply_palette(&w, resolved);
+        }
+    }); // Frameless window drag: move the window with the pointer.
+    let drag_weak = weak.clone();
+    win.on_window_drag_start(move || {
+        if let Some(w) = drag_weak.upgrade() {
+            let x = w.get_drag_origin_x();
+            let y = w.get_drag_origin_y();
+            let _ = w.window().set_position(slint::WindowPosition::Logical(
+                slint::LogicalPosition::new(x, y),
+            ));
+        }
+    }); // Sync now.
     let sync_app = Arc::clone(&app);
     let sync_weak = weak.clone();
     win.on_sync_now(move || {
@@ -606,7 +723,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         w.set_compact_mode(s.compact_mode);
                         w.set_theme_pref(SharedString::from(s.theme.clone()));
                         w.set_theme_label(SharedString::from(s.theme_label()));
-                        w.set_resolved_theme(SharedString::from(resolve_theme(&s.theme)));
+                        let resolved = resolve_theme(&s.theme);
+                        w.set_resolved_theme(SharedString::from(resolved));
+                        apply_palette(&w, resolved);
                     }
                 }
                 // Apply data.
@@ -657,6 +776,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::thread::spawn(move || hotkey_thread(hk_shared, tx.clone()));
 
     apply_snapshot(&win, &shared);
+    apply_session_dots(&win, &shared, &app);
     refresh_screens(&win, &app);
     update_automation_summary(&weak, &app);
     win.set_sync_status(SharedString::from("Cloud sync ready"));
