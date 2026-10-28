@@ -2,10 +2,10 @@
 //! The deadline is an `Instant`; every tick recomputes remaining from the
 //! monotonic clock, so there is no `sleep()` drift.
 
+use crate::settings::Settings;
+use crate::store::SessionRecord;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-
-use crate::store::SessionRecord;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -13,6 +13,19 @@ pub struct Config {
     pub short_break_minutes: u64,
     pub long_break_minutes: u64,
     pub long_break_interval: u32,
+    pub auto_start_next: bool,
+}
+
+impl From<&Settings> for Config {
+    fn from(s: &Settings) -> Self {
+        Self {
+            work_minutes: s.work_minutes,
+            short_break_minutes: s.short_break_minutes,
+            long_break_minutes: s.long_break_minutes,
+            long_break_interval: s.long_break_interval,
+            auto_start_next: s.auto_start_next,
+        }
+    }
 }
 
 impl Default for Config {
@@ -22,42 +35,13 @@ impl Default for Config {
             short_break_minutes: 5,
             long_break_minutes: 15,
             long_break_interval: 4,
+            auto_start_next: true,
         }
     }
-}
-
-pub fn config_path() -> std::path::PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("pangan")
-        .join("config.toml")
 }
 
 pub fn load_config() -> Config {
-    let mut cfg = Config::default();
-    if let Ok(text) = std::fs::read_to_string(config_path()) {
-        if let Ok(parsed) = text.parse::<toml::Value>() {
-            fn get_u64(v: &toml::Value, key: &str) -> Option<u64> {
-                v.get(key).and_then(|x| x.as_integer()).map(|i| i as u64)
-            }
-            fn get_u32(v: &toml::Value, key: &str) -> Option<u32> {
-                v.get(key).and_then(|x| x.as_integer()).map(|i| i as u32)
-            }
-            if let Some(w) = get_u64(&parsed, "work_minutes") {
-                cfg.work_minutes = w;
-            }
-            if let Some(s) = get_u64(&parsed, "short_break_minutes") {
-                cfg.short_break_minutes = s;
-            }
-            if let Some(l) = get_u64(&parsed, "long_break_minutes") {
-                cfg.long_break_minutes = l;
-            }
-            if let Some(i) = get_u32(&parsed, "long_break_interval") {
-                cfg.long_break_interval = i.max(1);
-            }
-        }
-    }
-    cfg
+    Config::from(&Settings::load())
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -84,6 +68,7 @@ pub struct Snapshot {
     pub progress: f32,
     pub phase: String,
     pub running: bool,
+    pub work_done: u32,
 }
 
 pub struct State {
@@ -166,8 +151,13 @@ impl Shared {
         };
         s.total = self.phase_total(s.phase);
         s.remaining = s.total;
-        s.running = true;
-        s.finish_at = Some(Instant::now() + s.remaining);
+        s.running = self.cfg.auto_start_next;
+        // When auto-start is off, land paused ready for the user to begin.
+        s.finish_at = if s.running {
+            Some(Instant::now() + s.remaining)
+        } else {
+            None
+        };
         notify
     }
 
@@ -237,6 +227,7 @@ impl Shared {
             progress: progress.clamp(0.0, 1.0),
             phase: if s.running { "Running" } else { "Paused" }.to_string(),
             running: s.running,
+            work_done: s.work_done,
         }
     }
 
@@ -257,6 +248,7 @@ mod tests {
             short_break_minutes: 5,
             long_break_minutes: 15,
             long_break_interval: 4,
+            auto_start_next: true,
         }
     }
 

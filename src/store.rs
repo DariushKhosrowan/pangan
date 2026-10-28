@@ -83,7 +83,11 @@ impl Store {
         let mut added = 0;
         for r in recs {
             // dedupe by exact timestamp+minutes to avoid double-count on reload
-            let dup = self.data.sessions.iter().any(|s| s.at == r.at && s.minutes == r.minutes);
+            let dup = self
+                .data
+                .sessions
+                .iter()
+                .any(|s| s.at == r.at && s.minutes == r.minutes);
             if !dup {
                 self.data.sessions.push(r.clone());
                 added += 1;
@@ -155,7 +159,10 @@ mod tests {
     fn add_sessions_dedupes() {
         let mut store = Store::load();
         store.data = Data::default();
-        let rec = SessionRecord { at: 1234, minutes: 25 };
+        let rec = SessionRecord {
+            at: 1234,
+            minutes: 25,
+        };
         let added = store.add_sessions(&[rec.clone()]);
         assert_eq!(added, 1);
         let added2 = store.add_sessions(&[rec.clone()]);

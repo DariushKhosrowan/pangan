@@ -137,7 +137,11 @@ pub fn report(sessions: &[SessionRecord], period: Period) -> ReportStats {
         period_label: period.label().to_string(),
         sessions: count,
         minutes: total,
-        avg: if count > 0 { (total as f64 / count as f64).round() as u64 } else { 0 },
+        avg: if count > 0 {
+            (total as f64 / count as f64).round() as u64
+        } else {
+            0
+        },
         active_days: active,
         days_in_period: elapsed_days,
         consistency,
@@ -186,7 +190,10 @@ mod tests {
     #[test]
     fn report_today_filters_to_today() {
         let today = Local::now().date_naive();
-        let sess = vec![SessionRecord { at: ts_for(today.year(), today.month(), today.day()), minutes: 25 }];
+        let sess = vec![SessionRecord {
+            at: ts_for(today.year(), today.month(), today.day()),
+            minutes: 25,
+        }];
         let r = report(&sess, Period::Today);
         assert_eq!(r.sessions, 1);
         assert_eq!(r.minutes, 25);

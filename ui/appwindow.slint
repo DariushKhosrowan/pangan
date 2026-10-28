@@ -1,191 +1,337 @@
-import { Button, LineEdit } from "std-widgets.slint";
+import { Button, CheckBox, LineEdit, SpinBox } from "std-widgets.slint";
 
-// Pangan — a modern, themed Pomodoro platform.
-// Aesthetic: "Iranian Old Parsi" — cuneiform-laced deep indigo, gold accents,
-// temple motifs, with light/dark/system themes and a full report screen.
+// ═══════════════════════════════════════════════════════════════════════════
+// Pangan — a modern Pomodoro timer inspired by Persepolis, Cyrus & Darius.
+//
+// Design language: "Persian Imperial Night" — deep indigo, gilded gold,
+// lapis and terracotta accents, with a radiating sun-ray meter (echoing the
+// winged solar disc of the Achaemenids) and cuneiform-textured borders.
+// ═══════════════════════════════════════════════════════════════════════════
 
 export component PanganWindow inherits Window {
+    // ---- Live timer state (pushed from Rust each tick) ----
     in property <string> time-left;
     in property <string> session-name;
     in property <float> progress;
     in property <string> phase;
     in property <bool> running;
+    in property <int> work-done;
+    in property <string> session-counter;
 
-    // Theme label provided by the host ("System"/"Dark"/"Light").
+    // ---- Theme ----
     in property <string> theme-label: "System";
-    // Effective theme used by the palette ("dark"/"light").
     in property <string> resolved-theme: "dark";
+    in-out property <string> theme-pref: "system";
 
-    // Status / report / sync / task input
+    // ---- Reports / status / sync / task input ----
     in property <string> status-line;
     in property <string> report-text;
     in property <string> sync-status;
-    in property <bool> show-report: false;
     in-out property <string> new-task-text;
+    in-out property <string> show-view: "main";
 
+    // ---- Settings (edited in the Settings screen) ----
+    in-out property <int> work-minutes: 25;
+    in-out property <int> short-break-minutes: 5;
+    in-out property <int> long-break-minutes: 15;
+    in-out property <int> long-break-interval: 4;
+    in-out property <int> daily-goal-minutes: 120;
+    in-out property <bool> auto-start-next: true;
+    in-out property <bool> auto-start-on-launch: false;
+    in-out property <bool> sound-enabled: true;
+    in-out property <string> sound-theme: "santur";
+    in-out property <bool> hotkey-enabled: true;
+    in-out property <bool> inhibit-enabled: true;
+    in-out property <bool> overlay-enabled: true;
+
+    // ---- Callbacks to Rust ----
     callback start-pause;
     callback skip;
     callback reset;
     callback open-report;
     callback close-report;
+    callback open-settings;
+    callback close-settings;
     callback cycle-theme;
     callback toggle-sound;
+    callback preview-sound;
     callback sync-now;
     callback add-task;
-    callback quit;
 
     title: "Pangan";
-    width: 460px;
-    height: 620px;
+    width: 480px;
+    height: 700px;
     no-frame: true;
 
-    // ---------- Theme palette ----------
-    private property <brush> c-bg: root.resolved-theme == "light" ? #f4f1ea : #171a2e;
-    private property <brush> c-bg2: root.resolved-theme == "light" ? #ece7dc : #1e2340;
-    private property <brush> c-surface: root.resolved-theme == "light" ? #fbf9f4 : #242a4d;
-    private property <brush> c-surface2: root.resolved-theme == "light" ? #e8e1d2 : #2d3460;
-    private property <brush> c-text: root.resolved-theme == "light" ? #2a2a35 : #e8e6f2;
-    private property <brush> c-muted: root.resolved-theme == "light" ? #6b6558 : #9a96b8;
-    private property <brush> c-accent: root.resolved-theme == "light" ? #8a5a2b : #e0b25c;
-    private property <brush> c-btn: root.resolved-theme == "light" ? #b98a4e : #c89a4f;
-    private property <brush> c-btn-text: #141018;
+    // ═══ Theme palette ═══
+    private property <brush> c-bg: root.resolved-theme == "light" ? #f1ecdf : #12162b;
+    private property <brush> c-bg2: root.resolved-theme == "light" ? #e7e0cf : #191e36;
+    private property <brush> c-surface: root.resolved-theme == "light" ? #fbf8f0 : #1d2342;
+    private property <brush> c-surface2: root.resolved-theme == "light" ? #ddd3bd : #2a3057;
+    private property <brush> c-text: root.resolved-theme == "light" ? #2a2836 : #e8e4f2;
+    private property <brush> c-muted: root.resolved-theme == "light" ? #6f6756 : #9a95ac;
+    private property <brush> c-accent: root.resolved-theme == "light" ? #9a6f2c : #e0b25c;
+    private property <brush> c-accent2: root.resolved-theme == "light" ? #c69a4f : #f0cd83;
+    private property <brush> c-track: root.resolved-theme == "light" ? #d8cfba : #2c3152;
+    private property <brush> c-btn-text: #151019;
+    private property <brush> c-gold-border: root.resolved-theme == "light" ? #b98a4e : #7a5f2c;
 
     background: c-bg;
 
-    VerticalLayout {
-        spacing: 0px;
+    // ═══ Header ═══
+    Rectangle {
+        height: 96px;
+        background: c-bg2;
+        y: 0px;
 
-        // ================= Header =================
-        Rectangle {
-            height: 64px;
-            background: c-bg2;
-            Rectangle {
-                height: 3px;
-                width: parent.width;
-                background: c-accent;
-                y: 0px;
-            }
-            HorizontalLayout {
-                padding-left: 16px;
-                padding-right: 12px;
-                spacing: 12px;
+        // ornamental gold trim
+        Rectangle { height: 2px; width: parent.width; background: c-accent; y: 0px; }
 
-                // --------- Old Parsi icon (winged bull + cuneiform) ---------
-                Rectangle {
-                    width: 44px;
-                    height: 44px;
-                    border-radius: 22px;
-                    background: c-accent;
-
-                    Rectangle { width: 13px; height: 3px; x: 5px; y: 14px; background: c-btn-text; }
-                    Rectangle { width: 10px; height: 3px; x: 6px; y: 19px; background: c-btn-text; }
-                    Rectangle { width: 7px; height: 3px; x: 7px; y: 24px; background: c-btn-text; }
-
-                    Rectangle { width: 13px; height: 3px; x: 26px; y: 14px; background: c-btn-text; }
-                    Rectangle { width: 10px; height: 3px; x: 28px; y: 19px; background: c-btn-text; }
-                    Rectangle { width: 7px; height: 3px; x: 30px; y: 24px; background: c-btn-text; }
-
-                    Rectangle {
-                        width: 10px; height: 16px; x: 17px; y: 12px;
-                        border-radius: 4px; background: c-btn-text;
-                        Rectangle { width: 3px; height: 3px; x: 2px; y: 2px; background: c-accent; border-radius: 1px; }
-                        Rectangle { width: 3px; height: 3px; x: 6px; y: 2px; background: c-accent; border-radius: 1px; }
-                    }
-
-                    Rectangle { width: 4px; height: 2px; x: 8px; y: 5px; background: c-btn-text; }
-                    Rectangle { width: 4px; height: 2px; x: 14px; y: 3px; background: c-btn-text; }
-                    Rectangle { width: 4px; height: 2px; x: 21px; y: 4px; background: c-btn-text; }
-                    Rectangle { width: 3px; height: 2px; x: 27px; y: 6px; background: c-btn-text; }
-                }
-
-                VerticalLayout {
-                    alignment: center;
-                    spacing: 1px;
-                    Text { text: "PANGAN"; font-size: 16px; font-weight: 700; letter-spacing: 2px; color: c-text; }
-                    Text { text: "پنگان · پومودورو"; font-size: 11px; color: c-muted; }
-                }
-
-                Rectangle { width: 0px; }
-
-                HorizontalLayout {
-                    spacing: 6px;
-                    alignment: end;
-                    Button { width: 84px; text: root.theme-label; clicked => { root.cycle-theme(); } }
-                    Button { width: 36px; text: "♪"; clicked => { root.toggle-sound(); } }
-                }
-            }
-        }
-
-        // ================= Body =================
-        if root.show-report: VerticalLayout {
-            padding: 16px;
-            spacing: 8px;
-
-            HorizontalLayout {
-                spacing: 10px;
-                Button { text: "← Back"; clicked => { root.close-report(); } }
-                Text {
-                    text: "Focus Report"; font-size: 18px; font-weight: 700;
-                    color: c-text; vertical-alignment: center;
-                }
-            }
-
-            Rectangle { height: 1px; background: c-surface2; }
-
-            Text {
-                text: root.report-text;
-                font-size: 13px; color: c-text; wrap: word-wrap; height: 480px;
-            }
-        }
-
-        if !root.show-report: VerticalLayout {
-            padding: 24px;
+        HorizontalLayout {
+            padding-left: 18px;
+            padding-right: 14px;
+            padding-top: 12px;
+            padding-bottom: 10px;
             spacing: 12px;
+            alignment: start;
 
+            // ---- Emblem: the Achaemenid sun disc ----
+            Rectangle {
+                width: 46px;
+                height: 46px;
+                border-radius: 23px;
+                border-width: 2px;
+                border-color: c-accent;
+                background: c-surface;
+
+                // inner disc
+                Rectangle {
+                    width: 26px; height: 26px;
+                    x: 10px; y: 10px;
+                    border-radius: 13px;
+                    background: c-accent;
+                    Rectangle {
+                        width: 10px; height: 10px; x: 8px; y: 8px;
+                        border-radius: 5px; background: c-bg2;
+                    }
+                }
+                // rays
+                Rectangle { width: 3px; height: 6px; x: 21px; y: 3px; background: c-accent2; }
+                Rectangle { width: 3px; height: 6px; x: 21px; y: 37px; background: c-accent2; }
+                Rectangle { width: 6px; height: 3px; x: 3px; y: 21px; background: c-accent2; }
+                Rectangle { width: 6px; height: 3px; x: 37px; y: 21px; background: c-accent2; }
+            }
+
+            VerticalLayout {
+                spacing: 1px;
+                alignment: center;
+                Text { text: "PANGAN"; font-size: 17px; font-weight: 700; letter-spacing: 3px; color: c-text; }
+                Text { text: "پنگان · پومودورو"; font-size: 11px; color: c-muted; }
+            }
+
+            Rectangle { width: 0px; }
+
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: end;
+
+                // Theme cycle
+                Rectangle {
+                    width: 74px; height: 34px;
+                    border-radius: 17px;
+                    background: c-surface2;
+                    border-width: 1px; border-color: c-gold-border;
+                    TouchArea {
+                        clicked => { root.cycle-theme(); }
+                    }
+                    Text { text: root.theme-label; font-size: 12px; color: c-text;
+                           horizontal-alignment: center; vertical-alignment: center; }
+                }
+
+                // Sound toggle
+                Rectangle {
+                    width: 40px; height: 34px;
+                    border-radius: 17px;
+                    background: c-surface2;
+                    border-width: 1px; border-color: c-gold-border;
+                    TouchArea {
+                        clicked => { root.toggle-sound(); }
+                    }
+                    Text { text: root.sound-enabled ? "♪" : "✕"; font-size: 15px;
+                           color: root.sound-enabled ? c-accent2 : c-muted;
+                           horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+
+    // ═══ Body ═══
+    Rectangle {
+        y: 96px;
+        width: parent.width;
+        height: parent.height - 96px;
+
+        // ═══ VIEW: MAIN (timer) ═══
+        if root.show-view == "main": VerticalLayout {
+            padding: 20px;
+            spacing: 10px;
+
+            // session label
             Text {
                 text: root.session-name;
-                font-size: 15px; font-weight: 600; letter-spacing: 2px;
+                font-size: 14px; font-weight: 600; letter-spacing: 3px;
                 color: c-muted; horizontal-alignment: center;
             }
 
+            // ---- Sun-ray ring ----
             Rectangle {
-                height: 10px; border-radius: 5px; background: c-surface2;
+                height: 300px;
+                width: 300px;
+                x: (parent.width - 300px) / 2;
+                background: c-surface;
+                border-radius: 150px;
+                border-width: 1px;
+                border-color: c-gold-border;
+
+                // outer halo
                 Rectangle {
-                    width: parent.width * root.progress;
-                    height: parent.height; border-radius: 5px; background: c-accent;
+                    width: 272px; height: 272px;
+                    x: 14px; y: 14px;
+                    border-radius: 136px;
+                    background: transparent;
+                    border-width: 1px;
+                    border-color: c-track;
+                }
+
+                // segmented sun-ray meter (60 dots)
+                for i in 60 : Rectangle {
+                    width: 5px; height: 5px;
+                    background: i <= (root.progress * 60) ? c-accent2 : c-track;
+                    x: 150px - 2.5px + 132px * cos(i * 6 * 1deg);
+                    y: 150px - 2.5px + 132px * sin(i * 6 * 1deg);
+                }
+
+                // inner radiant disc (filled as progress grows)
+                Rectangle {
+                    width: 216px; height: 216px;
+                    x: 42px; y: 42px;
+                    border-radius: 108px;
+                    background: c-bg2;
+                    border-width: 1px;
+                    border-color: c-track;
+
+                    Text {
+                        text: root.time-left;
+                        font-size: 54px; font-weight: 700;
+                        color: c-text;
+                        horizontal-alignment: center; vertical-alignment: center;
+                        width: parent.width; height: parent.height;
+                    }
+                }
+
+                // progress badge pinned to bottom of the ring
+                Text {
+                    text: "progress";
+                    font-size: 11px; color: transparent;
+                    horizontal-alignment: center;
+                    y: 272px; width: 300px;
                 }
             }
 
             Text {
-                text: root.time-left;
-                font-size: 68px; font-weight: 700; color: c-text; horizontal-alignment: center;
+                text: root.phase;
+                font-size: 13px; color: root.running ? c-accent2 : c-muted;
+                horizontal-alignment: center;
             }
 
-            Text {
-                text: root.phase; font-size: 13px; color: c-muted; horizontal-alignment: center;
-            }
-
+            // ---- Controls ----
             HorizontalLayout {
-                spacing: 10px;
+                spacing: 12px;
                 alignment: center;
-                Button { text: root.running ? "Pause" : "Start"; clicked => { root.start-pause(); } }
-                Button { text: "Skip"; clicked => { root.skip(); } }
-                Button { text: "Reset"; clicked => { root.reset(); } }
+
+                // Start/Pause (primary gold pill)
+                Rectangle {
+                    width: 132px; height: 46px;
+                    border-radius: 23px;
+                    background: c-accent;
+                    TouchArea { clicked => { root.start-pause(); } }
+                    Text {
+                        text: root.running ? "II  Pause" : "▶  Start";
+                        font-size: 15px; font-weight: 700; color: c-btn-text;
+                        horizontal-alignment: center; vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    width: 74px; height: 46px;
+                    border-radius: 23px;
+                    background: c-surface2;
+                    border-width: 1px; border-color: c-gold-border;
+                    TouchArea { clicked => { root.skip(); } }
+                    Text { text: "Skip"; font-size: 13px; color: c-text;
+                           horizontal-alignment: center; vertical-alignment: center; }
+                }
+
+                Rectangle {
+                    width: 74px; height: 46px;
+                    border-radius: 23px;
+                    background: c-surface2;
+                    border-width: 1px; border-color: c-gold-border;
+                    TouchArea { clicked => { root.reset(); } }
+                    Text { text: "Reset"; font-size: 13px; color: c-text;
+                           horizontal-alignment: center; vertical-alignment: center; }
+                }
             }
 
-            Rectangle { height: 2px; background: c-surface2; }
+            // session counter
+            Text {
+                text: root.session-counter;
+                font-size: 12px; color: c-muted; horizontal-alignment: center;
+            }
 
+            Rectangle { height: 1px; width: parent.width; background: c-surface2; }
+
+            // daily status (tasks)
             Text {
                 text: root.status-line;
                 font-size: 12px; color: c-muted; wrap: word-wrap;
-                horizontal-alignment: center; height: 44px;
+                horizontal-alignment: center; height: 40px;
             }
 
+            // action row
             HorizontalLayout {
-                spacing: 10px;
+                spacing: 12px;
                 alignment: center;
-                Button { text: "📊 Report"; clicked => { root.open-report(); } }
-                Button { text: "☁ Sync"; clicked => { root.sync-now(); } }
+
+                Rectangle {
+                    width: 120px; height: 40px;
+                    border-radius: 20px;
+                    background: c-surface2;
+                    border-width: 1px; border-color: c-gold-border;
+                    TouchArea { clicked => { root.open-report(); } }
+                    Text { text: "📊 Report"; font-size: 13px; color: c-text;
+                           horizontal-alignment: center; vertical-alignment: center; }
+                }
+
+                Rectangle {
+                    width: 120px; height: 40px;
+                    border-radius: 20px;
+                    background: c-surface2;
+                    border-width: 1px; border-color: c-gold-border;
+                    TouchArea { clicked => { root.sync-now(); } }
+                    Text { text: "☁ Sync"; font-size: 13px; color: c-text;
+                           horizontal-alignment: center; vertical-alignment: center; }
+                }
+
+                Rectangle {
+                    width: 120px; height: 40px;
+                    border-radius: 20px;
+                    background: c-surface2;
+                    border-width: 1px; border-color: c-gold-border;
+                    TouchArea { clicked => { root.open-settings(); } }
+                    Text { text: "⚙ Settings"; font-size: 13px; color: c-text;
+                           horizontal-alignment: center; vertical-alignment: center; }
+                }
             }
 
             Text {
@@ -193,6 +339,7 @@ export component PanganWindow inherits Window {
                 font-size: 11px; color: c-muted; horizontal-alignment: center;
             }
 
+            // quick add task
             HorizontalLayout {
                 spacing: 8px;
                 alignment: center;
@@ -202,7 +349,184 @@ export component PanganWindow inherits Window {
                     width: 260px;
                     edited => { root.new-task-text = self.text; }
                 }
-                Button { text: "+"; clicked => { root.add-task(); } }
+                Rectangle {
+                    width: 40px; height: 38px;
+                    border-radius: 19px;
+                    background: c-accent;
+                    TouchArea { clicked => { root.add-task(); } }
+                    Text { text: "+"; font-size: 20px; font-weight: 700; color: c-btn-text;
+                           horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+        }
+
+        // ═══ VIEW: REPORT ═══
+        if root.show-view == "report": VerticalLayout {
+            padding: 18px;
+            spacing: 10px;
+
+            HorizontalLayout {
+                spacing: 10px;
+                Rectangle {
+                    width: 76px; height: 38px;
+                    border-radius: 19px;
+                    background: c-surface2;
+                    border-width: 1px; border-color: c-gold-border;
+                    TouchArea { clicked => { root.close-report(); } }
+                    Text { text: "← Back"; font-size: 13px; color: c-text;
+                           horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Text {
+                    text: "Focus Report";
+                    font-size: 18px; font-weight: 700;
+                    color: c-text; vertical-alignment: center;
+                }
+            }
+
+            Rectangle { height: 1px; background: c-surface2; }
+
+            Text {
+                text: root.report-text;
+                font-size: 13px; color: c-text; wrap: word-wrap;
+                height: 470px;
+            }
+        }
+
+        // ═══ VIEW: SETTINGS ═══
+        if root.show-view == "settings": VerticalLayout {
+            padding: 16px;
+            spacing: 8px;
+
+            HorizontalLayout {
+                spacing: 10px;
+                Rectangle {
+                    width: 76px; height: 38px;
+                    border-radius: 19px;
+                    background: c-accent;
+                    TouchArea { clicked => { root.close-settings(); } }
+                    Text { text: "✓ Done"; font-size: 13px; font-weight: 700; color: c-btn-text;
+                           horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Text {
+                    text: "Settings";
+                    font-size: 18px; font-weight: 700;
+                    color: c-text; vertical-alignment: center;
+                }
+            }
+
+            Rectangle { height: 1px; background: c-surface2; }
+
+            // scrollable settings body
+            VerticalLayout {
+                spacing: 6px;
+
+                // -- Timers --
+                Text { text: "TIMER (minutes)"; font-size: 11px; letter-spacing: 2px; color: c-muted; }
+                HorizontalLayout { spacing: 10px;
+                    Text { text: "Focus"; color: c-text; vertical-alignment: center; width: 120px; }
+                    SpinBox { value <=> root.work-minutes; minimum: 1; maximum: 180; width: 140px; }
+                }
+                HorizontalLayout { spacing: 10px;
+                    Text { text: "Short break"; color: c-text; vertical-alignment: center; width: 120px; }
+                    SpinBox { value <=> root.short-break-minutes; minimum: 1; maximum: 60; width: 140px; }
+                }
+                HorizontalLayout { spacing: 10px;
+                    Text { text: "Long break"; color: c-text; vertical-alignment: center; width: 120px; }
+                    SpinBox { value <=> root.long-break-minutes; minimum: 1; maximum: 90; width: 140px; }
+                }
+                HorizontalLayout { spacing: 10px;
+                    Text { text: "Long break every"; color: c-text; vertical-alignment: center; width: 120px; }
+                    SpinBox { value <=> root.long-break-interval; minimum: 1; maximum: 12; width: 140px; }
+                }
+                Text { text: "Daily goal (minutes)"; color: c-text; }
+                SpinBox { value <=> root.daily-goal-minutes; minimum: 15; maximum: 600; width: 140px; }
+
+                Rectangle { height: 1px; background: c-surface2; }
+
+                // -- Behavior --
+                Text { text: "BEHAVIOR"; font-size: 11px; letter-spacing: 2px; color: c-muted; }
+                CheckBox { text: "Auto-start the next session"; checked: root.auto-start-next;
+                           toggled => { root.auto-start-next = self.checked; } }
+                CheckBox { text: "Auto-start on launch"; checked: root.auto-start-on-launch;
+                           toggled => { root.auto-start-on-launch = self.checked; } }
+
+                Rectangle { height: 1px; background: c-surface2; }
+
+                // -- Appearance --
+                Text { text: "APPEARANCE"; font-size: 11px; letter-spacing: 2px; color: c-muted; }
+                HorizontalLayout { spacing: 8px;
+                    Text { text: "Theme"; color: c-text; vertical-alignment: center; width: 120px; }
+                    Rectangle { width: 72px; height: 34px; border-radius: 17px;
+                        background: root.theme-pref == "dark" ? c-accent : c-surface2;
+                        TouchArea { clicked => { root.theme-pref = "dark"; } }
+                        Text { text: "Dark"; color: root.theme-pref == "dark" ? c-btn-text : c-text;
+                               horizontal-alignment: center; vertical-alignment: center; font-size: 12px; } }
+                    Rectangle { width: 72px; height: 34px; border-radius: 17px;
+                        background: root.theme-pref == "light" ? c-accent : c-surface2;
+                        TouchArea { clicked => { root.theme-pref = "light"; } }
+                        Text { text: "Light"; color: root.theme-pref == "light" ? c-btn-text : c-text;
+                               horizontal-alignment: center; vertical-alignment: center; font-size: 12px; } }
+                    Rectangle { width: 72px; height: 34px; border-radius: 17px;
+                        background: root.theme-pref == "system" ? c-accent : c-surface2;
+                        TouchArea { clicked => { root.theme-pref = "system"; } }
+                        Text { text: "System"; color: root.theme-pref == "system" ? c-btn-text : c-text;
+                               horizontal-alignment: center; vertical-alignment: center; font-size: 12px; } }
+                }
+
+                Rectangle { height: 1px; background: c-surface2; }
+
+                // -- Sound --
+                Text { text: "SOUND"; font-size: 11px; letter-spacing: 2px; color: c-muted; }
+                CheckBox { text: "Enable sounds"; checked: root.sound-enabled;
+                           toggled => { root.sound-enabled = self.checked; } }
+                Text { text: "Chime theme"; color: c-text; }
+                HorizontalLayout { spacing: 8px;
+                    Rectangle { width: 88px; height: 36px; border-radius: 18px;
+                        background: root.sound-theme == "santur" ? c-accent : c-surface2;
+                        TouchArea { clicked => { root.sound-theme = "santur"; } }
+                        Text { text: "Santur"; color: root.sound-theme == "santur" ? c-btn-text : c-text;
+                               horizontal-alignment: center; vertical-alignment: center; font-size: 12px; } }
+                    Rectangle { width: 88px; height: 36px; border-radius: 18px;
+                        background: root.sound-theme == "daf" ? c-accent : c-surface2;
+                        TouchArea { clicked => { root.sound-theme = "daf"; } }
+                        Text { text: "Daf"; color: root.sound-theme == "daf" ? c-btn-text : c-text;
+                               horizontal-alignment: center; vertical-alignment: center; font-size: 12px; } }
+                    Rectangle { width: 88px; height: 36px; border-radius: 18px;
+                        background: root.sound-theme == "tombak" ? c-accent : c-surface2;
+                        TouchArea { clicked => { root.sound-theme = "tombak"; } }
+                        Text { text: "Tombak"; color: root.sound-theme == "tombak" ? c-btn-text : c-text;
+                               horizontal-alignment: center; vertical-alignment: center; font-size: 12px; } }
+                }
+                HorizontalLayout { spacing: 8px;
+                    Rectangle { width: 88px; height: 36px; border-radius: 18px;
+                        background: root.sound-theme == "karn" ? c-accent : c-surface2;
+                        TouchArea { clicked => { root.sound-theme = "karn"; } }
+                        Text { text: "Karn"; color: root.sound-theme == "karn" ? c-btn-text : c-text;
+                               horizontal-alignment: center; vertical-alignment: center; font-size: 12px; } }
+                    Rectangle { width: 88px; height: 36px; border-radius: 18px;
+                        background: root.sound-theme == "sand" ? c-accent : c-surface2;
+                        TouchArea { clicked => { root.sound-theme = "sand"; } }
+                        Text { text: "Sand"; color: root.sound-theme == "sand" ? c-btn-text : c-text;
+                               horizontal-alignment: center; vertical-alignment: center; font-size: 12px; } }
+                    Rectangle { width: 88px; height: 36px; border-radius: 18px;
+                        background: c-surface2; border-width: 1px; border-color: c-gold-border;
+                        TouchArea { clicked => { root.preview-sound(); } }
+                        Text { text: "▶ Preview"; color: c-text;
+                               horizontal-alignment: center; vertical-alignment: center; font-size: 12px; } }
+                }
+
+                Rectangle { height: 1px; background: c-surface2; }
+
+                // -- System --
+                Text { text: "SYSTEM"; font-size: 11px; letter-spacing: 2px; color: c-muted; }
+                CheckBox { text: "Global hotkey (Super+P)"; checked: root.hotkey-enabled;
+                           toggled => { root.hotkey-enabled = self.checked; } }
+                CheckBox { text: "Keep screen awake during focus"; checked: root.inhibit-enabled;
+                           toggled => { root.inhibit-enabled = self.checked; } }
+                CheckBox { text: "Fullscreen overlay during breaks"; checked: root.overlay-enabled;
+                           toggled => { root.overlay-enabled = self.checked; } }
+
+                Rectangle { height: 4px; }
             }
         }
     }

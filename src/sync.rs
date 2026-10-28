@@ -50,6 +50,11 @@ impl Default for SyncRow {
     }
 }
 
+/// Whether a sync config is present (even if not yet validated).
+pub fn has_config() -> bool {
+    load_config().is_some()
+}
+
 /// Load sync config. Returns None when sync is fully disabled.
 pub fn load_config() -> Option<SyncCfg> {
     let path = crate::store::Store::data_dir().join("sync.toml");

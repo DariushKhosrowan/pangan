@@ -1,10 +1,11 @@
 [package]
 name = "pangan"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "Pangan — a minimal, efficient cross-platform Pomodoro timer (Rust + Slint)"
+description = "Pangan — a modern Persian Pomodoro timer inspired by Persepolis (Rust + Slint)"
 license = "MIT"
-repository = "https://github.com/amirhosseineslami/pangan"
+authors = ["Dariush Khosrowan"]
+repository = "https://github.com/DariushKhosrowan/pangan"
 default-run = "pangan"
 
 [[bin]]
