@@ -16,7 +16,7 @@ pub fn ensure() {
             return;
         }
         let desktop = format!(
-            "[Desktop Entry]\nType=Application\nName=Pangan\nComment=Pomodoro timer\nExec={}\nX-GNOME-Autostart-enabled=true\n",
+            "[Desktop Entry]\nType=Application\nName=Pangan\nName[fa]=پنگان\nComment=Pomodoro timer\nComment[fa]=زمان‌سنج کار ژرف\nExec={}\nX-GNOME-Autostart-enabled=true\n",
             exe.display()
         );
         if std::fs::create_dir_all(&autostart).is_ok() {

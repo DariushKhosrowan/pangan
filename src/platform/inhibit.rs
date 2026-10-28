@@ -25,7 +25,7 @@ pub fn acquire() -> Option<InhibitGuard> {
                 "/org/freedesktop/login1",
                 Some("org.freedesktop.login1.Manager"),
                 "Inhibit",
-                &("sleep", "Pangan", "Focus session in progress", "block"),
+                &("sleep", "پنگان", "نشست کار ژرف روان است", "block"),
             )
             .ok()?;
         let fd: zbus::zvariant::OwnedFd = reply.body().deserialize().ok()?;

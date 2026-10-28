@@ -43,7 +43,7 @@ pub fn spawn(_shared: Arc<Shared>, tx: Sender<TrayAction>) {
         }
         fn menu(&self) -> Vec<MenuItem<Self>> {
             let toggle = StandardItem {
-                label: "Start/Pause".into(),
+                label: "آغاز/درنگ".into(),
                 enabled: true,
                 visible: true,
                 shortcut: vec![vec!["Super".into(), "P".into()]],
@@ -53,21 +53,21 @@ pub fn spawn(_shared: Arc<Shared>, tx: Sender<TrayAction>) {
                 ..Default::default()
             };
             let skip = StandardItem {
-                label: "Skip".into(),
+                label: "گذشتن".into(),
                 activate: Box::new(|tray: &mut Self| {
                     let _ = tray.tx.send(TrayAction::Skip);
                 }),
                 ..Default::default()
             };
             let reset = StandardItem {
-                label: "Reset".into(),
+                label: "از نو".into(),
                 activate: Box::new(|tray: &mut Self| {
                     let _ = tray.tx.send(TrayAction::Reset);
                 }),
                 ..Default::default()
             };
             let quit = StandardItem {
-                label: "Quit".into(),
+                label: "بیرون رفتن".into(),
                 activate: Box::new(|tray: &mut Self| {
                     let _ = tray.tx.send(TrayAction::Quit);
                 }),
@@ -113,19 +113,19 @@ pub fn spawn(shared: Arc<Shared>, tx: Sender<TrayAction>) {
 
     let toggle = MenuItemBuilder::new()
         .id("toggle".into())
-        .text("Start/Pause")
+        .text("آغاز/درنگ")
         .build();
     let skip = MenuItemBuilder::new()
         .id("skip".into())
-        .text("Skip")
+        .text("گذشتن")
         .build();
     let reset = MenuItemBuilder::new()
         .id("reset".into())
-        .text("Reset")
+        .text("از نو")
         .build();
     let quit = MenuItemBuilder::new()
         .id("quit".into())
-        .text("Quit")
+        .text("بیرون رفتن")
         .build();
 
     let menu = Menu::new();

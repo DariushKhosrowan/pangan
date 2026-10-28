@@ -1,4 +1,5 @@
 import { LineEdit } from "std-widgets.slint";
+import { Shahbaz, Faravahar, Derafsh, Senmurv, Boteh, BotehDivider, EmblemField } from "heritage.slint";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Pangan — پنگان
@@ -16,31 +17,86 @@ import { LineEdit } from "std-widgets.slint";
 // ───────────────────────────────────────────────────────────────────────────
 export global Palette {
     in-out property <bool> dark: true;
-
-    out property <brush> bg: dark ? #0E1016 : #F7F5F0;
-    out property <brush> surface: dark ? #15181F : #FFFFFF;
-    out property <brush> surface-2: dark ? #1C2029 : #F0EDE6;
-    out property <brush> surface-3: dark ? #232833 : #E7E2D8;
-    out property <brush> border: dark ? #262A35 : #E3DED3;
-    out property <brush> hairline: dark ? #1E222B : #EDE9E1;
-
-    out property <brush> text: dark ? #E9E7EF : #1B1A20;
-    out property <brush> text-dim: dark ? #9A9DAD : #6B6774;
-    out property <brush> text-faint: dark ? #6A6E7E : #98939F;
-
-    out property <brush> accent: dark ? #D6A84E : #A67A2B;
-    out property <brush> accent-soft: dark ? #2A2418 : #F3EAD8;
-    out property <brush> on-accent: dark ? #17120A : #FFFFFF;
-
-    out property <brush> track: dark ? #232833 : #E7E2D8;
-    out property <brush> danger: dark ? #C9635B : #B04A42;
-}
+    // Which dynasty's palette is active: cyrus | darius | parthian | sasanid
+    // All four are pre-Islamic. No Islamic-era ornament is used in this app.
+    in-out property <string> era: "cyrus"; // ── Era accents ────────────────────────────────────────────────────────
+    // Cyrus: Achaemenid gold. Darius: Persepolis bronze. All pre-Islamic.
+    // Parthian: lapis blue. Sasanid: verdigris silver.
+    out property <brush> accent: era == "darius"
+        ? (dark ? #C87941 : #A85F2C)
+        : era == "sasanid"
+        ? (dark ? #4FA89B : #2E7D72)
+        : era == "parthian"
+        ? (dark ? #5B8FD6 : #2F5FA8)
+        : (dark ? #D6A84E : #A67A2B); out property <brush> accent-soft: era == "darius"
+        ? (dark ? #2A2018 : #F5E9DC)
+        : era == "sasanid"
+        ? (dark ? #14251F : #E2F0EC)
+        : era == "parthian"
+        ? (dark ? #141C2E : #E3E9F5)
+        : (dark ? #2A2418 : #F3EAD8); out property <brush> on-accent: era == "darius"
+        ? (dark ? #1A0F06 : #FFFFFF)
+        : era == "sasanid"
+        ? (dark ? #04120F : #FFFFFF)
+        : era == "parthian"
+        ? (dark ? #060B16 : #FFFFFF)
+        : (dark ? #17120A : #FFFFFF); // ── Surfaces, tinted per era ───────────────────────────────────────────
+    out property <brush> bg: era == "darius"
+        ? (dark ? #12100C : #FAF6EF)
+        : era == "sasanid"
+        ? (dark ? #0A1413 : #F2F7F5)
+        : era == "parthian"
+        ? (dark ? #0B0F1A : #F3F5FA)
+        : (dark ? #0E1016 : #F7F5F0); out property <brush> surface: era == "darius"
+        ? (dark ? #1A1712 : #FFFFFF)
+        : era == "sasanid"
+        ? (dark ? #111D1B : #FFFFFF)
+        : era == "parthian"
+        ? (dark ? #131A28 : #FFFFFF)
+        : (dark ? #15181F : #FFFFFF); out property <brush> surface-2: era == "darius"
+        ? (dark ? #221D16 : #F2ECE1)
+        : era == "sasanid"
+        ? (dark ? #17251F : #E9F1EE)
+        : era == "parthian"
+        ? (dark ? #1A2334 : #E8EDF6)
+        : (dark ? #1C2029 : #F0EDE6); out property <brush> surface-3: era == "darius"
+        ? (dark ? #2A241B : #E8DFD0)
+        : era == "sasanid"
+        ? (dark ? #1E2E28 : #DCE8E4)
+        : era == "parthian"
+        ? (dark ? #212C40 : #DCE3F0)
+        : (dark ? #232833 : #E7E2D8); out property <brush> border: era == "darius"
+        ? (dark ? #2C261D : #E5DCCB)
+        : era == "sasanid"
+        ? (dark ? #20302A : #D9E5E1)
+        : era == "parthian"
+        ? (dark ? #232F45 : #D8E0EE)
+        : (dark ? #262A35 : #E3DED3); out property <brush> hairline: era == "darius"
+        ? (dark ? #221D15 : #EFE8DC)
+        : era == "sasanid"
+        ? (dark ? #182722 : #E8F0ED)
+        : era == "parthian"
+        ? (dark ? #1A2334 : #E7ECF5)
+        : (dark ? #1E222B : #EDE9E1); out property <brush> text: dark ? #E9E7EF : #1B1A20; out property <brush> text-dim: dark ? #9A9DAD : #6B6774; out property <brush> text-faint: dark ? #6A6E7E : #98939F; out property <brush> track: era == "darius"
+        ? (dark ? #2A241B : #E8DFD0)
+        : era == "sasanid"
+        ? (dark ? #1E2E28 : #DCE8E4)
+        : era == "parthian"
+        ? (dark ? #212C40 : #DCE3F0)
+        : (dark ? #232833 : #E7E2D8); out property <brush> danger: dark ? #C9635B : #B04A42; }
 
 export struct TaskItem {
     id: int,
     title: string,
     time: string,
     done: bool,
+}
+
+// One "on this day" row.
+export struct CalEvent {
+    section: string,   // سیاسی / هنری / ورزشی
+    year: string,      // "۱۱۹۲" or ""
+    text: string,
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -218,8 +274,9 @@ component Ring {
     in property <brush> track-color: Palette.track;
     in property <brush> fill-color: Palette.accent;
     in property <bool> glow: false;
-    // Dot count: 120 is smooth at this size and cheap to lay out.
-    in property <int> steps: 120;
+    // Dot count for the progress arc. High enough that neighbouring dots
+    // overlap and the arc reads as one continuous stroke.
+    in property <int> steps: 180;
 
     width: d * 1px;
     height: d * 1px;
@@ -240,33 +297,26 @@ component Ring {
         opacity: 0.05;
     }
 
-    // Track: a full ring of quiet dots.
-    for i in root.steps : Rectangle {
-        width: root.t * 1px;
-        height: root.t * 1px;
-        border-radius: root.t * 0.5px;
-        background: track-color;
-        x: (root.ax(i) - root.t / 2) * 1px;
-        y: (root.ay(i) - root.t / 2) * 1px;
+    // Track: a true stroked circle, so it is continuous at any size.
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: self.width / 2;
+        background: transparent;
+        border-width: root.t * 1px;
+        border-color: track-color;
     }
 
-    // Progress: dots up to `progress`, drawn over the track.
+    // Progress: overlapping dots swept from 12 o'clock, clockwise.
     for i in root.steps : Rectangle {
-        width: root.t * 1px;
-        height: root.t * 1px;
-        border-radius: root.t * 0.5px;
-        background: fill-color;
-        x: (root.ax(i) - root.t / 2) * 1px;
-        y: (root.ay(i) - root.t / 2) * 1px;
-        visible: (i * 1.0 / root.steps) < root.progress;
-    }
+        width: root.t * 1px; height: root.t * 1px; border-radius: root.t * 0.5px; background: fill-color; x: (root.ax(i) - root.t / 2) * 1px; y: (root.ay(i) - root.t / 2) * 1px; visible: (i * 1.0 / root.steps) < root.progress; }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
 // Segmented — a quiet two-or-three way switch.
 // ───────────────────────────────────────────────────────────────────────────
 component Segmented inherits Rectangle {
-    in property <[string]> options: ["Timer", "Stats"];
+    in property <[string]> options: ["زمان‌سنج", "آمار"];
     in property <int> current: 0;
     in property <length> item-height: 28px;
     in property <length> font-size: 12px;
@@ -358,7 +408,7 @@ component Stepper inherits Rectangle {
     in-out property <int> value: 25;
     in property <int> min: 1;
     in property <int> max: 180;
-    in property <string> suffix: "m";
+    in property <string> suffix: "د";
     callback changed(int);
 
     height: 30px;
@@ -492,7 +542,7 @@ component StatCard inherits Rectangle {
 // ───────────────────────────────────────────────────────────────────────────
 component BarChart {
     in property <[float]> values: [0, 0, 0, 0, 0, 0, 0];
-    in property <[string]> labels: ["M", "T", "W", "T", "F", "S", "S"];
+    in property <[string]> labels: ["ش", "ی", "د", "س", "چ", "پ", "ج"];
     in property <int> highlight: 6;
 
     height: 132px;
@@ -626,14 +676,61 @@ component Card inherits Rectangle {
 // ═══════════════════════════════════════════════════════════════════════════
 // The window
 // ═══════════════════════════════════════════════════════════════════════════
+// ───────────────────────────────────────────────────────────────────────────
+// EraPicker — four dynasty cards, each showing that era's emblem and colour.
+// Selecting one repaints the entire app through the Palette global.
+// ───────────────────────────────────────────────────────────────────────────
+component EraCard inherits Rectangle {
+    in property <string> era-id: "cyrus"; in property <string> name: "Cyrus"; in property <string> blurb: "Achaemenid gold on lapis"; in property <brush> swatch: #D6A84E; in property <bool> active: false; callback picked(); height: 88px; border-radius: 12px; background: active ? Palette.accent-soft : Palette.surface-2; border-width: active ? 1.5px : 1px; border-color: active ? Palette.accent : Palette.hairline; ta := TouchArea {
+        clicked => { root.picked(); }
+        mouse-cursor: pointer; }
+
+    VerticalLayout {
+        padding-left: 10px; padding-right: 10px; padding-top: 9px; padding-bottom: 9px; spacing: 4px; // emblem row
+        Rectangle {
+            height: 26px; background: transparent;
+            if root.era-id == "cyrus" : Shahbaz {
+                width: 26px; height: 26px; color: root.swatch; x: 0px; y: 0px; }
+            if root.era-id == "darius" : Faravahar {
+                width: 26px; height: 26px; color: root.swatch; x: 0px; y: 0px; }
+            if root.era-id == "parthian" : Derafsh {
+                width: 26px; height: 26px; color: root.swatch; x: 0px; y: 0px; }
+            if root.era-id == "sasanid" : Senmurv {
+                width: 26px; height: 26px; color: root.swatch; x: 0px; y: 0px; }
+
+            // active check
+            if root.active : Rectangle {
+                width: 14px; height: 14px; border-radius: 7px; background: Palette.accent; x: parent.width - self.width; y: (parent.height - self.height) / 2; Icon {
+                    kind: "check"; size: 9px; color: Palette.on-accent; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+            }
+        }
+
+        Text {
+            text: root.name; font-size: 11px; font-weight: 600; color: active ? Palette.accent : Palette.text; overflow: elide; }
+        Text {
+            text: root.blurb; font-size: 8px; color: Palette.text-faint; overflow: elide; }
+    }
+}
+
 export component PanganWindow inherits Window {
     // ---- Live timer state (pushed from Rust each tick) ----
     in property <string> time-left; in property <string> session-name; in property <float> progress; in property <string> phase; in property <bool> running; in property <int> work-done; in property <string> session-counter; // ---- Theme ----
-    in property <string> theme-label: "System"; in property <string> resolved-theme: "dark"; in-out property <string> theme-pref: "system"; // ---- Reports / status / sync / task input ----
+    in property <string> theme-label: "سامانه"; in property <string> resolved-theme: "dark"; in-out property <string> theme-pref: "system"; // Heritage era identity
+in property <string> era: "cyrus"; in property <string> era-label: "کوروش"; in property <string> era-blurb: "زر آخامنشی بر لاجورد";
+
+    // ---- Today (Persian calendar) ----
+    in property <string> cal-date: "";        // "۱۲ آبان ۱۴۰۵"
+    in property <string> cal-weekday: "";     // "چهارشنبه"
+    in property <string> cal-day-name: "";    // "خور" — the Sasanian day-name
+    in property <string> cal-day-index: "";   // "روز یازدهم ماه"
+    in property <string> cal-feast: "";       // "مهرگان" or empty
+    in property <string> cal-month-progress: ""; // "روز ۱۲ از ۳۰"
+    in property <[CalEvent]> cal-events: [];
+    in property <string> cal-empty: "برای این روز رویدادی ثبت نشده است."; // ---- Reports / status / sync / task input ----
     in property <string> status-line; in property <string> report-text; in property <string> sync-status; in-out property <string> new-task-text; in-out property <string> show-view: "main"; // ---- Settings (edited in the Settings screen) ----
     in-out property <int> work-minutes: 25; in-out property <int> short-break-minutes: 5; in-out property <int> long-break-minutes: 15; in-out property <int> long-break-interval: 4; in-out property <int> daily-goal-minutes: 120; in-out property <bool> auto-start-next: true; in-out property <bool> auto-start-on-launch: false; in-out property <bool> sound-enabled: true; in-out property <string> sound-theme: "santur"; in-out property <bool> hotkey-enabled: true; in-out property <bool> inhibit-enabled: true; in-out property <bool> overlay-enabled: true; in-out property <bool> compact-mode: false; in-out property <int> sound-volume: 80; in property <string> automation-summary; // ---- Rich data (pushed from Rust) ----
-    in property <[TaskItem]> tasks: []; in property <[float]> week-bars: [0, 0, 0, 0, 0, 0, 0]; in property <[string]> week-labels: ["M", "T", "W", "T", "F", "S", "S"]; in property <int> today-sessions: 0; in property <int> today-minutes: 0; in property <int> today-score: 0; in property <int> today-streak: 0; in property <int> today-consistency: 0; in property <int> today-best: 0; in property <int> session-total: 4; in property <int> session-done: 0; in property <int> goal-minutes: 120; in property <int> goal-done-minutes: 0; // ---- Callbacks to Rust ----
-    callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback window-drag-start;
+    in property <[TaskItem]> tasks: []; in property <[float]> week-bars: [0, 0, 0, 0, 0, 0, 0]; in property <[string]> week-labels: ["ش", "ی", "د", "س", "چ", "پ", "ج"]; in property <int> today-sessions: 0; in property <int> today-minutes: 0; in property <int> today-score: 0; in property <int> today-streak: 0; in property <int> today-consistency: 0; in property <int> today-best: 0; in property <int> session-total: 4; in property <int> session-done: 0; in property <int> goal-minutes: 120; in property <int> goal-done-minutes: 0; // ---- Callbacks to Rust ----
+    callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback open-url(string); callback window-drag-start;
 
     // Frameless drag: window position that keeps the pointer over the grab point.
     out property <length> drag-origin-x: self.absolute-position.x - root.drag-start-x;
@@ -641,7 +738,29 @@ export component PanganWindow inherits Window {
     in-out property <length> drag-start-x: 0px;
     in-out property <length> drag-start-y: 0px;
 
-    title: "Pangan"; no-frame: true; width: root.compact-mode ? 320px : 420px; height: root.compact-mode ? 300px : 680px; background: Palette.bg; default-font-family: "Inter";  // ─────────────────────────────────────────────────────────────────────
+    title: "Pangan";
+    no-frame: true;
+    width: root.compact-mode ? 320px : 420px;
+    height: root.compact-mode ? 300px : 680px;
+    background: Palette.bg;
+    default-font-family: "Inter";
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Heritage texture — the era emblem repeated at very low opacity, so the
+    // pattern reads as paper grain rather than decoration.
+    // ─────────────────────────────────────────────────────────────────────
+    EmblemField {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        cols: 6;
+        rows: 9;
+        emblem: root.era == "sasanid" ? 1 : (root.era == "cyrus" ? 2 : 0);
+        color: Palette.accent;
+        fade: root.resolved-theme == "light" ? 0.05 : 0.035;
+    }
+  // ─────────────────────────────────────────────────────────────────────
     // Header — draggable, minimal. Title left, controls right.
     // ─────────────────────────────────────────────────────────────────────
     Rectangle {
@@ -671,14 +790,37 @@ export component PanganWindow inherits Window {
         HorizontalLayout {
             padding-left: 18px; padding-right: 12px; spacing: 8px; alignment: space-between; // wordmark
             HorizontalLayout {
-                spacing: 9px; alignment: start; // the pangan mark: a filled disc with a notch — a water clock
+                spacing: 9px;
+                alignment: start;
+
+                // The mark: the active era's authentic emblem.
                 Rectangle {
-                    width: 22px; height: 22px; border-radius: 11px; background: Palette.accent; y: (parent.height - self.height) / 2; Rectangle {
-                        width: 7px; height: 7px; border-radius: 3.5px; background: Palette.bg; x: 7.5px; y: 7.5px; }
+                    width: 30px; height: 30px; y: (parent.height - self.height) / 2; background: transparent; if root.era == "cyrus" : Shahbaz { width: 30px; height: 30px; color: Palette.accent; }
+                    if root.era == "darius" : Faravahar { width: 30px; height: 30px; color: Palette.accent; }
+                    if root.era == "parthian" : Derafsh { width: 30px; height: 30px; color: Palette.accent; }
+                    if root.era == "sasanid" : Senmurv { width: 30px; height: 30px; color: Palette.accent; }
                 }
 
-                Text {
-                    text: "Pangan"; font-size: 14px; font-weight: 600; letter-spacing: 0.2px; color: Palette.text; vertical-alignment: center; }
+                VerticalLayout {
+                    spacing: 0px;
+                    alignment: center;
+                    vertical-stretch: 0;
+                    Text {
+                        text: "پنگان";
+                        font-size: 13px;
+                        font-weight: 600;
+                        letter-spacing: 0.3px;
+                        color: Palette.text;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: "زمان‌سنج کار ژرف";
+                        font-family: "Vazirmatn";
+                        font-size: 10px;
+                        color: Palette.text-faint;
+                        vertical-alignment: center;
+                    }
+                }
             }
 
             HorizontalLayout {
@@ -740,8 +882,9 @@ export component PanganWindow inherits Window {
             padding-bottom: 14px; spacing: 0px; // view switcher
             HorizontalLayout {
                 height: 40px; alignment: center; Segmented {
-                    options: ["Timer", "Stats"]; current: 0; selected(i) => {
-                        if (i == 1) { root.open-report(); }
+                    options: ["زمان‌سنج", "امروز", "آمار"]; current: 0; selected(i) => {
+                        if (i == 1) { root.open-today(); }
+                        if (i == 2) { root.open-report(); }
                     }
                 }
             }
@@ -796,6 +939,64 @@ export component PanganWindow inherits Window {
 
             Rectangle { height: 16px; }
 
+            // ---- today's Persian date, at a glance ----
+            Rectangle {
+                height: 46px;
+                x: 22px;
+                width: parent.width - 22px - 22px;
+                border-radius: 12px;
+                background: Palette.surface;
+                border-width: 1px;
+                border-color: Palette.hairline;
+                ta-date := TouchArea { clicked => { root.open-today(); } }
+
+                VerticalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    padding-top: 8px;
+                    padding-bottom: 8px;
+                    spacing: 1px;
+
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: root.cal-weekday;
+                            font-family: "Vazirmatn";
+                            font-size: 10px;
+                            font-weight: 600;
+                            color: Palette.accent;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: root.cal-date;
+                            font-family: "Vazirmatn";
+                            font-size: 12px;
+                            font-weight: 600;
+                            color: Palette.text;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        if root.cal-feast != "" : Text {
+                            text: "جشن " + root.cal-feast;
+                            font-family: "Vazirmatn";
+                            font-size: 9px;
+                            color: Palette.accent;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Text {
+                        text: "روز " + root.cal-day-name + " · " + root.cal-day-index;
+                        font-family: "Vazirmatn";
+                        font-size: 10px;
+                        color: Palette.text-faint;
+                        overflow: elide;
+                    }
+                }
+            }
+
+            Rectangle { height: 10px; }
+
             // ---- today's progress ----
             Rectangle {
                 height: 54px;
@@ -815,7 +1016,7 @@ export component PanganWindow inherits Window {
 
                     HorizontalLayout {
                         Text {
-                            text: "Today";
+                            text: "امروز";
                             font-size: 10px;
                             font-weight: 700;
                             letter-spacing: 1.1px;
@@ -823,7 +1024,7 @@ export component PanganWindow inherits Window {
                         }
                         Rectangle { horizontal-stretch: 1; }
                         Text {
-                            text: root.today-minutes + " / " + root.goal-minutes + " min";
+                            text: root.today-minutes + " / " + root.goal-minutes + " دقیقه";
                             font-size: 11px;
                             color: Palette.text-dim;
                         }
@@ -866,7 +1067,7 @@ export component PanganWindow inherits Window {
                     HorizontalLayout {
                         height: 20px;
                         Text {
-                            text: "TASKS";
+                            text: "کارها";
                             font-size: 10px;
                             font-weight: 700;
                             letter-spacing: 1.1px;
@@ -883,7 +1084,7 @@ export component PanganWindow inherits Window {
                     if root.tasks.length == 0 : Rectangle {
                         height: 46px;
                         Text {
-                            text: "Nothing queued. Add one below.";
+                            text: "چیزی در صف نیست. یکی بیفزایید.";
                             font-size: 12px;
                             color: Palette.text-faint;
                             x: 2px;
@@ -916,7 +1117,7 @@ export component PanganWindow inherits Window {
 
                             LineEdit {
                                 text: root.new-task-text;
-                                placeholder-text: "Add a task…";
+                                placeholder-text: "کار تازه…";
                                 font-size: 12px;
                                 horizontal-stretch: 1;
                                 edited(t) => { root.new-task-text = t; }
@@ -968,7 +1169,7 @@ export component PanganWindow inherits Window {
                     horizontal-stretch: 1;
                 }
                 Text {
-                    text: "Sync";
+                    text: "همگام‌سازی";
                     font-size: 10px;
                     color: Palette.text-dim;
                     ta7 := TouchArea {
@@ -986,6 +1187,93 @@ export component PanganWindow inherits Window {
         }
 
         // ═══ STATS ═══
+        // ═══ TODAY — Persian calendar ═══
+        if root.show-view == "today" : VerticalLayout {
+            padding: 0px; spacing: 0px; // ---- title bar ----
+            HorizontalLayout {
+                height: 44px; padding-left: 14px; padding-right: 14px; spacing: 8px; IconButton {
+                    icon: "back"; size: 30px; icon-size: 15px; clicked => { root.close-today(); }
+                }
+                Text {
+                    text: "امروز"; font-family: "Vazirmatn"; font-size: 15px; font-weight: 600; color: Palette.text; horizontal-stretch: 1; }
+            }
+
+            Flickable {
+                vertical-stretch: 1; content-height: today-content.preferred-height; interactive: true; today-content := VerticalLayout {
+                    width: parent.width; height: self.preferred-height; padding-left: 18px; padding-right: 18px; padding-bottom: 20px; spacing: 10px; // ---- the date card ----
+                    Rectangle {
+                        height: 132px; border-radius: 14px; background: Palette.surface; border-width: 1px; border-color: Palette.hairline; // era emblem, faint, on the right
+                        Rectangle {
+                            width: 84px; height: 84px; x: parent.width - self.width - 12px; y: (parent.height - self.height) / 2; background: transparent; if root.era == "cyrus" : Shahbaz { width: 84px; height: 84px; color: Palette.accent; fade: 0.10; }
+                            if root.era == "darius" : Faravahar { width: 84px; height: 84px; color: Palette.accent; fade: 0.10; }
+                            if root.era == "parthian" : Derafsh { width: 84px; height: 84px; color: Palette.accent; fade: 0.10; }
+                            if root.era == "sasanid" : Senmurv { width: 84px; height: 84px; color: Palette.accent; fade: 0.10; }
+                        }
+
+                        VerticalLayout {
+                            padding-left: 16px; padding-top: 14px; padding-bottom: 14px; spacing: 4px; Text {
+                                text: root.cal-weekday; font-family: "Vazirmatn"; font-size: 11px; color: Palette.accent; font-weight: 600; }
+                            Text {
+                                text: root.cal-date; font-family: "Vazirmatn"; font-size: 24px; font-weight: 600; color: Palette.text; }
+                            Text {
+                                text: root.cal-month-progress; font-family: "Vazirmatn"; font-size: 10px; color: Palette.text-faint; }
+                        }
+                    }
+
+                    // ---- the Sasanian day-name ----
+                    Rectangle {
+                        height: 74px; border-radius: 14px; background: Palette.accent-soft; border-width: 1px; border-color: Palette.accent; VerticalLayout {
+                            padding-left: 16px; padding-right: 16px; padding-top: 12px; padding-bottom: 12px; spacing: 2px; Text {
+                                text: "نام روز به گاهشمار ساسانی"; font-family: "Vazirmatn"; font-size: 9px; font-weight: 700; letter-spacing: 0.6px; color: Palette.text-faint; }
+                            HorizontalLayout {
+                                spacing: 8px; Text {
+                                    text: root.cal-day-name; font-family: "Vazirmatn"; font-size: 20px; font-weight: 600; color: Palette.accent; vertical-alignment: center; }
+                                Text {
+                                    text: root.cal-day-index; font-family: "Vazirmatn"; font-size: 10px; color: Palette.text-dim; vertical-alignment: center; horizontal-stretch: 1; }
+                            }
+                        }
+                    }
+
+                    // ---- feast badge, only when today is one ----
+                    if root.cal-feast != "" : Rectangle {
+                        height: 46px; border-radius: 12px; background: Palette.surface-2; border-width: 1px; border-color: Palette.hairline; HorizontalLayout {
+                            padding-left: 14px; padding-right: 14px; spacing: 8px; alignment: start; Boteh {
+                                size: 20px; y: (parent.height - self.height) / 2; color: Palette.accent; fade: 0.9; }
+                            Text {
+                                text: "جشن " + root.cal-feast; font-family: "Vazirmatn"; font-size: 13px; font-weight: 600; color: Palette.text; vertical-alignment: center; }
+                        }
+                    }
+
+                    // ---- events ----
+                    HorizontalLayout {
+                        height: 20px; padding-left: 2px; spacing: 6px; alignment: start; Text {
+                            text: "رخدادهای این روز"; font-family: "Vazirmatn"; font-size: 10px; font-weight: 700; letter-spacing: 0.6px; color: Palette.text-faint; vertical-alignment: center; }
+                        Text {
+                            text: root.cal-events.length > 0 ? "(" + root.cal-events.length + ")" : ""; font-size: 10px; color: Palette.text-faint; vertical-alignment: center; }
+                    }
+
+                    if root.cal-events.length == 0 : Rectangle {
+                        height: 56px; border-radius: 12px; background: Palette.surface; border-width: 1px; border-color: Palette.hairline; Text {
+                            text: root.cal-empty; font-family: "Vazirmatn"; font-size: 11px; color: Palette.text-faint; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
+                    }
+
+                    for ev in root.cal-events : Rectangle {
+                        height: ev-row.preferred-height + 22px; border-radius: 12px; background: Palette.surface; border-width: 1px; border-color: Palette.hairline; ev-row := VerticalLayout {
+                            x: 14px; y: 11px; width: parent.width - 28px; height: self.preferred-height; spacing: 4px; HorizontalLayout {
+                                spacing: 6px; height: 14px; if ev.year != "" : Text {
+                                    text: ev.year; font-family: "Vazirmatn"; font-size: 10px; font-weight: 700; color: Palette.accent; vertical-alignment: center; }
+                                if ev.section != "" : Text {
+                                    text: ev.section; font-family: "Vazirmatn"; font-size: 9px; color: Palette.text-faint; vertical-alignment: center; }
+                            }
+
+                            Text {
+                                text: ev.text; font-family: "Vazirmatn"; font-size: 11px; color: Palette.text; wrap: word-wrap; line-height-factor: 1.55; }
+                        }
+                    }
+                }
+            }
+        }
+
         if root.show-view == "report" : VerticalLayout {
             padding: 0px;
             spacing: 0px;
@@ -1005,7 +1293,7 @@ export component PanganWindow inherits Window {
                     clicked => { root.close-report(); }
                 }
                 Text {
-                    text: "Stats";
+                    text: "آمار";
                     font-size: 15px;
                     font-weight: 600;
                     color: Palette.text;
@@ -1044,7 +1332,7 @@ export component PanganWindow inherits Window {
                             spacing: 4px;
                             alignment: center;
                             Text {
-                                text: "DEEP WORK SCORE";
+                                text: "نمرهٔ کار ژرف";
                                 font-size: 10px;
                                 font-weight: 700;
                                 letter-spacing: 1.2px;
@@ -1073,7 +1361,7 @@ export component PanganWindow inherits Window {
                             padding: 14px;
                             spacing: 8px;
                             Text {
-                                text: "THIS WEEK";
+                                text: "این هفته";
                                 font-size: 10px;
                                 font-weight: 700;
                                 letter-spacing: 1.2px;
@@ -1092,25 +1380,25 @@ export component PanganWindow inherits Window {
                     HorizontalLayout {
                         spacing: 10px;
                         StatCard {
-                            label: "SESSIONS";
+                            label: "نشست‌ها";
                             value: root.today-sessions + "";
                             horizontal-stretch: 1;
                         }
                         StatCard {
-                            label: "FOCUS";
-                            value: root.today-minutes + "m";
+                            label: "کار ژرف";
+                            value: root.today-minutes + "د";
                             horizontal-stretch: 1;
                         }
                     }
                     HorizontalLayout {
                         spacing: 10px;
                         StatCard {
-                            label: "STREAK";
-                            value: root.today-streak + "d";
+                            label: "زنجیره";
+                            value: root.today-streak + "ر";
                             horizontal-stretch: 1;
                         }
                         StatCard {
-                            label: "CONSISTENCY";
+                            label: "پیوستگی";
                             value: root.today-consistency + "%";
                             horizontal-stretch: 1;
                         }
@@ -1150,7 +1438,7 @@ export component PanganWindow inherits Window {
                     clicked => { root.close-settings(); }
                 }
                 Text {
-                    text: "Settings";
+                    text: "تنظیمات";
                     font-size: 15px;
                     font-weight: 600;
                     color: Palette.text;
@@ -1169,7 +1457,7 @@ export component PanganWindow inherits Window {
                         }
                     ]
                     Text {
-                        text: "Done";
+                        text: "تمام";
                         font-size: 12px;
                         font-weight: 600;
                         color: Palette.on-accent;
@@ -1180,18 +1468,22 @@ export component PanganWindow inherits Window {
 
             Flickable {
                 vertical-stretch: 1;
-                content-height: 1180px;
+                // Bind to the real content height so nothing is ever clipped when
+                // a section is added. (This used to be a hardcoded 1180px, which
+                // silently hid the bottom sections.)
+                content-height: settings-content.preferred-height;
                 interactive: true;
 
-                VerticalLayout {
+                settings-content := VerticalLayout {
                     width: parent.width;
+                    height: self.preferred-height;
                     padding-left: 18px;
                     padding-right: 18px;
                     padding-bottom: 20px;
                     spacing: 8px;
 
                     // ── timer ──
-                    SectionLabel { text: "TIMER"; }
+                    SectionLabel { text: "زمان‌سنج"; }
                     Card {
                         height: 174px;
                         VerticalLayout {
@@ -1200,45 +1492,45 @@ export component PanganWindow inherits Window {
 
                             HorizontalLayout {
                                 height: 40px;
-                                Text { text: "Focus"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: "کار ژرف"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Stepper { value <=> root.work-minutes; min: 1; max: 180; changed(v) => { root.work-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
-                                Text { text: "Short break"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: "آسایش کوتاه"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Stepper { value <=> root.short-break-minutes; min: 1; max: 60; changed(v) => { root.short-break-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
-                                Text { text: "Long break"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: "آسایش دراز"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Stepper { value <=> root.long-break-minutes; min: 1; max: 90; changed(v) => { root.long-break-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
-                                Text { text: "Long break every"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: "آسایش دراز پس از هر"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Stepper { value <=> root.long-break-interval; min: 1; max: 12; suffix: "×"; changed(v) => { root.long-break-interval = v; } }
                             }
                         }
                     }
 
                     // ── goal ──
-                    SectionLabel { text: "DAILY GOAL"; }
+                    SectionLabel { text: "هدف روزانه"; }
                     Card {
                         height: 58px;
                         VerticalLayout {
                             padding: 14px;
                             HorizontalLayout {
-                                Text { text: "Focus minutes per day"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
-                                Stepper { value <=> root.daily-goal-minutes; min: 15; max: 600; suffix: "m"; changed(v) => { root.daily-goal-minutes = v; } }
+                                Text { text: "دقیقهٔ کار ژرف در روز"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Stepper { value <=> root.daily-goal-minutes; min: 15; max: 600; suffix: "د"; changed(v) => { root.daily-goal-minutes = v; } }
                             }
                         }
                     }
 
                     // ── behaviour ──
-                    SectionLabel { text: "BEHAVIOUR"; }
+                    SectionLabel { text: "کنش"; }
                     Card {
                         height: 118px;
                         VerticalLayout {
@@ -1246,20 +1538,95 @@ export component PanganWindow inherits Window {
                             spacing: 0px;
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: "Auto-start next session"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: "آغاز خودکار نشست بعدی"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Toggle { checked <=> root.auto-start-next; y: (parent.height - self.height) / 2; }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: "Auto-start on launch"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: "آغاز خودکار هنگام راه‌اندازی"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Toggle { checked <=> root.auto-start-on-launch; y: (parent.height - self.height) / 2; }
                             }
                         }
                     }
 
                     // ── appearance ──
-                    SectionLabel { text: "APPEARANCE"; }
+                    SectionLabel { text: "گنجینهٔ نیاکان"; }
+                    Card {
+                        height: 212px;
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 9px;
+
+                            HorizontalLayout {
+                                height: 14px;
+                                Text {
+                                    text: root.era-label;
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                    letter-spacing: 0.6px;
+                                    color: Palette.accent;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                Text {
+                                    text: "دودمان‌های ایران";
+                                    font-size: 10px;
+                                    color: Palette.text-faint;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 7px;
+                                EraCard {
+                                    era-id: "cyrus";
+                                    name: "کوروش";
+                                    blurb: "آخامنشی";
+                                    swatch: #D6A84E;
+                                    active: root.era == "cyrus";
+                                    horizontal-stretch: 1;
+                                    picked => { root.set-era("cyrus"); }
+                                }
+                                EraCard {
+                                    era-id: "darius";
+                                    name: "داریوش";
+                                    blurb: "پارسه";
+                                    swatch: #C87941;
+                                    active: root.era == "darius";
+                                    horizontal-stretch: 1;
+                                    picked => { root.set-era("darius"); }
+                                }
+                                EraCard {
+                                    era-id: "parthian";
+                                    name: "اشکانی";
+                                    blurb: "لاجورد";
+                                    swatch: #5B8FD6;
+                                    active: root.era == "parthian";
+                                    horizontal-stretch: 1;
+                                    picked => { root.set-era("parthian"); }
+                                }
+                                EraCard {
+                                    era-id: "sasanid";
+                                    name: "ساسانی";
+                                    blurb: "زنگار";
+                                    swatch: #4FA89B;
+                                    active: root.era == "sasanid";
+                                    horizontal-stretch: 1;
+                                    picked => { root.set-era("sasanid"); }
+                                }
+                            }
+
+                            Text {
+                                text: root.era-blurb;
+                                font-size: 10px;
+                                color: Palette.text-dim;
+                                overflow: elide;
+                            }
+                        }
+                    }
+
+                    SectionLabel { text: "آرایه"; }
                     Card {
                         height: 118px;
                         VerticalLayout {
@@ -1267,9 +1634,9 @@ export component PanganWindow inherits Window {
                             spacing: 0px;
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: "Theme"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: "پوسته"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Segmented {
-                                    options: ["System", "Dark", "Light"];
+                                    options: ["سامانه", "تاریک", "روشن"];
                                     current: root.theme-pref == "dark" ? 1 : (root.theme-pref == "light" ? 2 : 0);
                                     item-height: 24px;
                                     font-size: 11px;
@@ -1282,14 +1649,14 @@ export component PanganWindow inherits Window {
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: "Compact mini window"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: "پنجرهٔ کوچک"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Toggle { checked <=> root.compact-mode; y: (parent.height - self.height) / 2; }
                             }
                         }
                     }
 
                     // ── sound ──
-                    SectionLabel { text: "SOUND"; }
+                    SectionLabel { text: "آوا"; }
                     Card {
                         height: 214px;
                         VerticalLayout {
@@ -1298,11 +1665,11 @@ export component PanganWindow inherits Window {
 
                             HorizontalLayout {
                                 height: 26px;
-                                Text { text: "Enable sounds"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: "آواها روشن"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Toggle { checked <=> root.sound-enabled; y: (parent.height - self.height) / 2; }
                             }
 
-                            Text { text: "Chime"; font-size: 11px; color: Palette.text-faint; }
+                            Text { text: "آهنگ پایان"; font-size: 11px; color: Palette.text-faint; }
 
                             HorizontalLayout {
                                 spacing: 6px;
@@ -1319,7 +1686,7 @@ export component PanganWindow inherits Window {
                                         }
                                     ]
                                     Text {
-                                        text: s;
+                                        text: s == "santur" ? "سنتور" : (s == "daf" ? "دف" : (s == "tombak" ? "تنبک" : (s == "karn" ? "کرنای" : (s == "sand" ? "سنج" : "کوروش"))));
                                         font-size: 11px;
                                         font-weight: root.sound-theme == s ? 600 : 400;
                                         color: root.sound-theme == s ? Palette.on-accent : Palette.text-dim;
@@ -1342,7 +1709,7 @@ export component PanganWindow inherits Window {
                                         }
                                     ]
                                     Text {
-                                        text: s;
+                                        text: s == "santur" ? "سنتور" : (s == "daf" ? "دف" : (s == "tombak" ? "تنبک" : (s == "karn" ? "کرنای" : (s == "sand" ? "سنج" : "کوروش"))));
                                         font-size: 11px;
                                         font-weight: root.sound-theme == s ? 600 : 400;
                                         color: root.sound-theme == s ? Palette.on-accent : Palette.text-dim;
@@ -1402,7 +1769,7 @@ export component PanganWindow inherits Window {
                                         }
                                     ]
                                     Text {
-                                        text: "Preview";
+                                        text: "شنیدن";
                                         font-size: 11px;
                                         color: Palette.text;
                                         horizontal-alignment: center;
@@ -1413,7 +1780,7 @@ export component PanganWindow inherits Window {
                     }
 
                     // ── system ──
-                    SectionLabel { text: "SYSTEM"; }
+                    SectionLabel { text: "سامانه"; }
                     Card {
                         height: 162px;
                         VerticalLayout {
@@ -1421,26 +1788,26 @@ export component PanganWindow inherits Window {
                             spacing: 0px;
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: "Global hotkeys"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: "کلیدهای میان‌بر همگانی"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Toggle { checked <=> root.hotkey-enabled; y: (parent.height - self.height) / 2; }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: "Keep screen awake"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: "نمایش روشن بماند"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Toggle { checked <=> root.inhibit-enabled; y: (parent.height - self.height) / 2; }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: "Break overlay"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: "پوشش هنگام آسایش"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Toggle { checked <=> root.overlay-enabled; y: (parent.height - self.height) / 2; }
                             }
                         }
                     }
 
                     // ── automation ──
-                    SectionLabel { text: "AUTOMATION"; }
+                    SectionLabel { text: "خودکاری"; }
                     Card {
                         height: 132px;
                         VerticalLayout {
@@ -1466,7 +1833,7 @@ export component PanganWindow inherits Window {
                                     background: Palette.surface-2;
                                     LineEdit {
                                         text: root.new-task-text;
-                                        placeholder-text: "command, e.g. playerctl pause";
+                                        placeholder-text: "دستور، مانند playerctl pause";
                                         font-size: 11px;
                                         edited(t) => { root.new-task-text = t; }
                                     }
@@ -1487,7 +1854,7 @@ export component PanganWindow inherits Window {
                                         }
                                     ]
                                     Text {
-                                        text: "Add";
+                                        text: "افزودن";
                                         font-size: 11px;
                                         font-weight: 600;
                                         color: Palette.on-accent;
@@ -1497,7 +1864,7 @@ export component PanganWindow inherits Window {
                             }
 
                             Text {
-                                text: "Runs on focus_start. Variables: %event%, %session%.";
+                                text: "هنگام آغاز کار ژرف اجرا می‌شود. متغیرها: %event%، %session%.";
                                 font-size: 10px;
                                 color: Palette.text-faint;
                                 wrap: word-wrap;
@@ -1506,7 +1873,7 @@ export component PanganWindow inherits Window {
                     }
 
                     // ── cloud ──
-                    SectionLabel { text: "CLOUD"; }
+                    SectionLabel { text: "ابر"; }
                     Card {
                         height: 62px;
                         VerticalLayout {
@@ -1526,7 +1893,7 @@ export component PanganWindow inherits Window {
                                         }
                                     ]
                                     Text {
-                                        text: "Back up";
+                                        text: "پشتیبان‌گیری";
                                         font-size: 12px;
                                         color: Palette.text;
                                         horizontal-alignment: center;
@@ -1545,7 +1912,7 @@ export component PanganWindow inherits Window {
                                         }
                                     ]
                                     Text {
-                                        text: "Restore";
+                                        text: "بازگردانی";
                                         font-size: 12px;
                                         color: Palette.text;
                                         horizontal-alignment: center;
@@ -1555,8 +1922,83 @@ export component PanganWindow inherits Window {
                         }
                     }
 
+                    // ── about ──
+                    SectionLabel { text: "شناسنامه"; }
+                    Card {
+                        height: 132px;
+                        VerticalLayout {
+                            padding: 14px;
+                            spacing: 6px;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Boteh {
+                                    size: 26px;
+                                    y: (parent.height - self.height) / 2;
+                                    color: Palette.accent;
+                                    fade: 0.9;
+                                }
+                                Text {
+                                    text: "ساختهٔ";
+                                    font-size: 11px;
+                                    color: Palette.text-faint;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: "Khosrowan";
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: Palette.accent;
+                                    vertical-alignment: center;
+                                    ta15 := TouchArea {
+                                        clicked => { root.open-url("https://khosrowan.ir"); }
+                                        mouse-cursor: pointer;
+                                    }
+                                    states [
+                                        h when ta15.has-hover : {
+                                            color: Palette.text;
+                                            in { animate color { duration: 120ms; } }
+                                        }
+                                    ]
+                                }
+                            }
+
+                            Text {
+                                text: "khosrowan.ir";
+                                font-size: 11px;
+                                color: Palette.text-dim;
+                                ta16 := TouchArea {
+                                    clicked => { root.open-url("https://khosrowan.ir"); }
+                                    mouse-cursor: pointer;
+                                }
+                                states [
+                                    h when ta16.has-hover : {
+                                        color: Palette.accent;
+                                        in { animate color { duration: 120ms; } }
+                                    }
+                                ]
+                            }
+
+                            // Free Art License 1.3 requires visible attribution for
+                            // the Parthian emblem (Derafsh Kaviani, by Oneasy).
+                            Text {
+                                text: "نماد اشکانی از Oneasy، پروانهٔ هنر آزاد ۱٫۳";
+                                font-size: 9px;
+                                color: Palette.text-faint;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+
                     Text {
                         text: root.sync-status;
+                        font-size: 10px;
+                        color: Palette.text-faint;
+                        horizontal-alignment: center;
+                    }
+
+                    Text {
+                        text: "پنگان · ساختهٔ خسروان";
                         font-size: 10px;
                         color: Palette.text-faint;
                         horizontal-alignment: center;

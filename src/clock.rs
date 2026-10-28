@@ -54,9 +54,9 @@ pub enum Phase {
 impl Phase {
     pub fn label(&self) -> &'static str {
         match self {
-            Phase::Work => "Focus",
-            Phase::ShortBreak => "Short Break",
-            Phase::LongBreak => "Long Break",
+            Phase::Work => "کار ژرف",
+            Phase::ShortBreak => "آسایش کوتاه",
+            Phase::LongBreak => "آسایش دراز",
         }
     }
 }
@@ -165,7 +165,7 @@ impl Shared {
                 .unwrap()
                 .push(crate::settings::EVENT_BREAK_START.into());
             Some(format!(
-                "{} finished — take a {}.",
+                "{} به پایان رسید — {} آغاز شد.",
                 Phase::Work.label(),
                 s.phase.label()
             ))
@@ -180,7 +180,7 @@ impl Shared {
                 .lock()
                 .unwrap()
                 .push(crate::settings::EVENT_FOCUS_START.into());
-            Some("Break over — back to focus.".to_string())
+            Some("آسایش به سر رسید — بازگشت به کار ژرف.".to_string())
         };
         s.total = self.phase_total(s.phase);
         s.remaining = s.total;
@@ -264,7 +264,7 @@ impl Shared {
             time,
             session: s.phase.label().to_string(),
             progress: progress.clamp(0.0, 1.0),
-            phase: if s.running { "Running" } else { "Paused" }.to_string(),
+            phase: if s.running { "روان" } else { "درنگ" }.to_string(),
             running: s.running,
             work_done: s.work_done,
         }
@@ -296,8 +296,8 @@ mod tests {
         let s = Shared::new(config());
         let snap = s.snapshot();
         assert_eq!(snap.time, "25:00");
-        assert_eq!(snap.session, "Focus");
-        assert_eq!(snap.phase, "Paused");
+        assert_eq!(snap.session, "کار ژرف");
+        assert_eq!(snap.phase, "درنگ");
         assert!(!snap.running);
     }
 
@@ -320,11 +320,11 @@ mod tests {
     fn advance_to_short_break_then_back_to_focus() {
         let s = Shared::new(config());
         let n = s.advance(true).unwrap();
-        assert!(n.contains("Focus finished"));
-        assert_eq!(s.snapshot().session, "Short Break");
+        assert!(n.contains("به پایان رسید"));
+        assert_eq!(s.snapshot().session, "آسایش کوتاه");
         let n = s.advance(false).unwrap();
-        assert!(n.contains("Break over"));
-        assert_eq!(s.snapshot().session, "Focus");
+        assert!(n.contains("آسایش به سر رسید"));
+        assert_eq!(s.snapshot().session, "کار ژرف");
     }
 
     #[test]
@@ -333,21 +333,21 @@ mod tests {
         // work sessions 1..3 -> short breaks (loop runs i=1,2,3)
         for i in 1..4 {
             s.advance(true);
-            assert_eq!(s.snapshot().session, "Short Break", "work session {i}");
+            assert_eq!(s.snapshot().session, "آسایش کوتاه", "work session {i}");
             s.advance(false);
         }
         // 4th work session -> long break
         s.advance(true);
-        assert_eq!(s.snapshot().session, "Long Break");
+        assert_eq!(s.snapshot().session, "آسایش دراز");
     }
 
     #[test]
     fn skip_preserves_work_counter() {
         let s = Shared::new(config());
         s.skip(); // skip a work session -> advance (increment work)
-        assert_eq!(s.snapshot().session, "Short Break");
+        assert_eq!(s.snapshot().session, "آسایش کوتاه");
         s.skip(); // skip the break -> back to focus
-        assert_eq!(s.snapshot().session, "Focus");
+        assert_eq!(s.snapshot().session, "کار ژرف");
     }
 
     #[test]
@@ -358,7 +358,7 @@ mod tests {
         s.reset();
         let snap = s.snapshot();
         assert_eq!(snap.time, "25:00");
-        assert_eq!(snap.session, "Focus");
+        assert_eq!(snap.session, "کار ژرف");
         assert!(!snap.running);
         assert!(!s.should_inhibit());
     }
@@ -373,7 +373,7 @@ mod tests {
         // already advanced; a second tick should not re-advance
         let msg2 = s.tick();
         assert!(msg2.is_none());
-        assert_eq!(s.snapshot().session, "Short Break");
+        assert_eq!(s.snapshot().session, "آسایش کوتاه");
     }
 
     #[test]

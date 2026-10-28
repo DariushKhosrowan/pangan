@@ -11,6 +11,13 @@ pub const THEME_SYSTEM: &str = "system";
 pub const THEME_DARK: &str = "dark";
 pub const THEME_LIGHT: &str = "light";
 
+// --- Heritage eras (visual identity) -----------------------------------------
+pub const ERA_CYRUS: &str = "cyrus";
+pub const ERA_DARIUS: &str = "darius";
+pub const ERA_SASANID: &str = "sasanid";
+pub const ERA_PARTHIAN: &str = "parthian";
+pub const ERAS: [&str; 4] = [ERA_CYRUS, ERA_DARIUS, ERA_PARTHIAN, ERA_SASANID];
+
 pub const SOUND_SANTUR: &str = "santur";
 pub const SOUND_DAF: &str = "daf";
 pub const SOUND_TOMBAK: &str = "tombak";
@@ -84,6 +91,8 @@ pub struct Settings {
 
     // --- Appearance ---
     pub theme: String,
+    /// Visual identity: which Iranian dynasty's palette and motifs are shown.
+    pub era: String,
     pub compact_mode: bool,
 
     // --- Sound ---
@@ -119,6 +128,7 @@ impl Default for Settings {
             auto_start_on_launch: false,
             daily_goal_minutes: 120,
             theme: THEME_SYSTEM.into(),
+            era: ERA_CYRUS.into(),
             compact_mode: false,
             sound_enabled: true,
             sound_theme: SOUND_SANTUR.into(),
@@ -150,7 +160,7 @@ impl Settings {
         if let Some(dir) = Self::path().parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let header = "# Pangan settings (Dariush Khosrowan)\n";
+        let header = "# تنظیمات پنگان (داریوش خسروان)\n";
         // Chrono/TOML won't preserve comments; write a plain serialized doc.
         let mut body = toml::to_string_pretty(self).unwrap_or_default();
         // TOML arrays of strings we don't use; strip empty fields for clarity.
@@ -184,11 +194,31 @@ impl Settings {
         });
     }
 
+    /// Human-readable era name, shown in Settings.
+    pub fn era_label(&self) -> String {
+        match self.era.as_str() {
+            ERA_DARIUS => "داریوش".into(),
+            ERA_SASANID => "ساسانی".into(),
+            ERA_PARTHIAN => "اشکانی".into(),
+            _ => "کوروش".into(),
+        }
+    }
+
+    /// One-line description of the era, for the settings card.
+    pub fn era_blurb(&self) -> String {
+        match self.era.as_str() {
+            ERA_DARIUS => "مفرغ پارسه بر سنگ خاره".into(),
+            ERA_SASANID => "سیم زنگارگرفته و ترنج سیم‌رغ".into(),
+            ERA_PARTHIAN => "لاجورد و سیم اشکانی".into(),
+            _ => "زر آخامنشی بر لاجورد".into(),
+        }
+    }
+
     pub fn theme_label(&self) -> String {
         match self.theme.as_str() {
-            THEME_DARK => "Dark".into(),
-            THEME_LIGHT => "Light".into(),
-            _ => "System".into(),
+            THEME_DARK => "تاریک".into(),
+            THEME_LIGHT => "روشن".into(),
+            _ => "سامانه".into(),
         }
     }
 }

@@ -10,6 +10,8 @@ use slint::{
     VecModel,
 };
 
+mod events;
+mod calendar;
 mod automation;
 mod clock;
 mod platform;
@@ -45,6 +47,11 @@ struct AppState {
     /// Active sound theme ("santur", "daf", ...).
     sound_theme: Mutex<String>,
     last_sync: Mutex<String>,
+    /// "On this day" table, parsed once at startup (287 KB of JSON).
+    events: events::Events,
+    /// The Jalali date the calendar card was last built for, so the card is
+    /// rebuilt when the day rolls over and not on every 300 ms tick.
+    calendar_day: Mutex<(i32, u32, u32)>,
 }
 
 impl AppState {
@@ -56,7 +63,9 @@ impl AppState {
             store: Mutex::new(store),
             settings: Mutex::new(settings),
             sound_theme: Mutex::new(sound_theme),
-            last_sync: Mutex::new("Cloud sync ready".into()),
+            last_sync: Mutex::new("همگام‌سازی ابری آماده است".into()),
+            events: events::Events::load(),
+            calendar_day: Mutex::new((0, 0, 0)),
         }
     }
 
@@ -106,9 +115,11 @@ fn apply_snapshot(win: &PanganWindow, shared: &Shared) {
     win.set_work_done(snap.work_done as i32);
 }
 
-/// Push the resolved theme into the Slint palette global.
-fn apply_palette(win: &PanganWindow, resolved: &str) {
-    ui::Palette::get(win).set_dark(resolved != "light");
+/// Push the resolved theme and heritage era into the Slint palette global.
+fn apply_palette(win: &PanganWindow, resolved: &str, era: &str) {
+    let p = ui::Palette::get(win);
+    p.set_dark(resolved != "light");
+    p.set_era(SharedString::from(era));
 }
 
 /// Session dots: total = long-break interval, done = position in the cycle.
@@ -169,17 +180,71 @@ fn run_action(
     });
 }
 
+/// Build and push the Persian-calendar card: the Jalali date, the weekday, the
+/// Sasanian day-name, the feast (if today is one) and the day's events.
+///
+/// Rebuilt only when the Jalali day changes, so the 300 ms UI tick does not
+/// re-serialise a few hundred event rows twice a second.
+fn refresh_calendar(win: &PanganWindow, app: &AppState) {
+    let (jy, jm, jd) = calendar::today();
+    {
+        let mut last = app.calendar_day.lock().unwrap();
+        if *last == (jy, jm, jd) {
+            return;
+        }
+        *last = (jy, jm, jd);
+    }
+
+    let month_name = calendar::MONTHS[(jm as usize).clamp(1, 12) - 1];
+    let weekday = calendar::weekday_name(jy, jm, jd);
+    let day = calendar::day_name(jm, jd);
+
+    win.set_cal_date(SharedString::from(format!(
+        "{} {} {}",
+        calendar::fa_num(jd as i64),
+        month_name,
+        calendar::fa_num(jy as i64)
+    )));
+    win.set_cal_weekday(SharedString::from(weekday));
+    win.set_cal_day_name(SharedString::from(day.name));
+    win.set_cal_day_index(SharedString::from(format!(
+        "روز {} ماه",
+        calendar::ordinal_fa(jd)
+    )));
+    win.set_cal_feast(SharedString::from(day.feast.unwrap_or("")));
+
+    // "روز ۷ از ۳۰" — the month's length is the Zoroastrian thirty days, with
+    // the extra day of a 31-day month called out separately.
+    let month_len = calendar::month_len(jy, jm);
+    win.set_cal_month_progress(SharedString::from(format!(
+        "روز {} از {}",
+        calendar::fa_num(jd as i64),
+        calendar::fa_num(month_len as i64)
+    )));
+
+    let evs = app.events.for_day(jm, jd);
+    let rows: Vec<ui::CalEvent> = events::rows(evs)
+        .into_iter()
+        .map(|(section, year, text)| ui::CalEvent {
+            section: SharedString::from(section),
+            year: SharedString::from(year),
+            text: SharedString::from(text),
+        })
+        .collect();
+    win.set_cal_events(ModelRc::new(VecModel::from(rows)));
+}
+
 /// Recompute and set report + task text on the window.
 fn refresh_screens(win: &PanganWindow, app: &AppState) {
     let st = app.store.lock().unwrap();
     let t = stats::report(&st.data.sessions, stats::Period::Today);
     let w = stats::report(&st.data.sessions, stats::Period::Week);
     let m = stats::report(&st.data.sessions, stats::Period::Month);
-    let mut report = String::from("── TODAY ──\n");
+    let mut report = String::from("── امروز ──\n");
     report.push_str(&stats::narrative(&t));
-    report.push_str("\n\n── THIS WEEK ──\n");
+    report.push_str("\n\n── این هفته ──\n");
     report.push_str(&stats::narrative(&w));
-    report.push_str("\n\n── THIS MONTH ──\n");
+    report.push_str("\n\n── این ماه ──\n");
     report.push_str(&stats::narrative(&m));
     win.set_report_text(SharedString::from(report));
 
@@ -192,7 +257,7 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
         .iter()
         .filter(|t| !t.done && t.date == today.format("%Y-%m-%d").to_string())
         .count();
-    tasks_line.push_str(&format!("Tasks: {} open ({} today) ", open, today_open));
+    tasks_line.push_str(&format!("کارها: {} باز ({} امروز) ", open, today_open));
     for task in st
         .data
         .tasks
@@ -210,7 +275,7 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
     // Session counter: current session index vs daily goal.
     let goal = app.settings.lock().unwrap().daily_goal_minutes;
     win.set_session_counter(SharedString::from(format!(
-        "Session {} · Goal {} min",
+        "نشست {} · هدف {} دقیقه",
         st.data.sessions.len() + 1,
         goal
     )));
@@ -267,15 +332,22 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
     win.set_tasks(ModelRc::new(VecModel::from(items)));
 
     drop(st);
+
+    // The calendar card only changes at midnight; it guards itself against
+    // rebuilding on every 300 ms tick.
+    refresh_calendar(win, app);
 }
 
 /// Recompute the automation summary line and push it to the window.
 fn update_automation_summary(win: &slint::Weak<PanganWindow>, app: &AppState) {
     let automation = automation::sorted(&app.settings.lock().unwrap());
     let summary = if automation.is_empty() {
-        "No automation rules yet.".to_string()
+        "هنوز آیینی ساخته نشده است.".to_string()
     } else {
-        let mut s = String::from(format!("{} rule(s): ", automation.len()));
+        let mut s = String::from(format!(
+            "{} آیین: ",
+            calendar::fa_num(automation.len() as i64)
+        ));
         for a in &automation {
             s.push_str(&format!("[{}] {}, ", a.event, a.command));
         }
@@ -374,7 +446,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         win.set_resolved_theme(SharedString::from(resolved));
         win.set_theme_label(SharedString::from(settings.theme_label()));
         win.set_theme_pref(SharedString::from(settings.theme.clone()));
-        apply_palette(&win, resolved);
+        apply_palette(&win, resolved, &settings.era);
     }
 
     // Push settings into the UI.
@@ -393,6 +465,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         win.set_hotkey_enabled(settings.hotkey_enabled);
         win.set_inhibit_enabled(settings.inhibit_enabled);
         win.set_overlay_enabled(settings.overlay_enabled);
+        win.set_era(SharedString::from(settings.era.clone()));
+        win.set_era_label(SharedString::from(settings.era_label()));
+        win.set_era_blurb(SharedString::from(settings.era_blurb()));
     }
 
     // UI tick: countdown + inhibit + session persistence + auto-sync.
@@ -525,6 +600,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // Today (Persian calendar) open/close. Opening rebuilds the card so the
+    // date is right even if the app has been left running across midnight.
+    let today_open_weak = weak.clone();
+    let today_open_app = Arc::clone(&app);
+    win.on_open_today(move || {
+        if let Some(w) = today_open_weak.upgrade() {
+            *today_open_app.calendar_day.lock().unwrap() = (0, 0, 0);
+            refresh_calendar(&w, &today_open_app);
+            w.set_show_view("today".into());
+        }
+    });
+    let today_close_weak = weak.clone();
+    win.on_close_today(move || {
+        if let Some(w) = today_close_weak.upgrade() {
+            w.set_show_view("main".into());
+        }
+    });
+
     // Settings open/close.
     let set_open_weak = weak.clone();
     win.on_open_settings(move || {
@@ -544,7 +637,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             w.set_theme_label(SharedString::from(s.theme_label()));
             let resolved = resolve_theme(&s.theme);
             w.set_resolved_theme(SharedString::from(resolved));
-            apply_palette(&w, resolved);
+            apply_palette(&w, resolved, &s.era);
             w.set_show_view("main".into());
             let _ = cfg;
         }
@@ -567,7 +660,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             w.set_theme_label(SharedString::from(label));
             w.set_theme_pref(SharedString::from(s.theme.clone()));
             w.set_resolved_theme(SharedString::from(resolved));
-            apply_palette(&w, resolved);
+            apply_palette(&w, resolved, &s.era);
         }
     });
 
@@ -638,18 +731,65 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let settheme_weak = weak.clone();
     win.on_set_theme(move |pref| {
         let pref = pref.to_string();
-        let resolved = {
+        let (resolved, era) = {
             let mut s = settheme_app.settings.lock().unwrap();
             s.theme = pref.clone();
             s.save();
-            resolve_theme(&s.theme)
+            (resolve_theme(&s.theme), s.era.clone())
         };
         if let Some(w) = settheme_weak.upgrade() {
             w.set_theme_pref(SharedString::from(pref));
             w.set_resolved_theme(SharedString::from(resolved));
-            apply_palette(&w, resolved);
+            apply_palette(&w, resolved, &era);
         }
-    }); // Frameless window drag: move the window with the pointer.
+    });
+
+    // Heritage era selection from the Settings era picker.
+    let era_app = Arc::clone(&app);
+    let era_weak = weak.clone();
+    win.on_set_era(move |era| {
+        let era = era.to_string();
+        let (resolved, label, blurb) = {
+            let mut s = era_app.settings.lock().unwrap();
+            s.era = era.clone();
+            s.sanitize_mut();
+            s.save();
+            (
+                resolve_theme(&s.theme),
+                s.era_label(),
+                s.era_blurb(),
+            )
+        };
+        if let Some(w) = era_weak.upgrade() {
+            w.set_era(SharedString::from(era.clone()));
+            w.set_era_label(SharedString::from(label));
+            w.set_era_blurb(SharedString::from(blurb));
+            apply_palette(&w, resolved, &era);
+        }
+    });
+
+    // Open an external URL in the user's default browser (About / credits links).
+    // Only http(s) is accepted, so a stray string can never launch a local binary.
+    win.on_open_url(|url| {
+        let url = url.to_string();
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return;
+        }
+        #[cfg(target_os = "linux")]
+        let opener = "xdg-open";
+        #[cfg(target_os = "macos")]
+        let opener = "open";
+        #[cfg(target_os = "windows")]
+        let opener = "explorer";
+
+        let _ = std::process::Command::new(opener)
+            .arg(&url)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    });
+
+    // Frameless window drag: move the window with the pointer.
     let drag_weak = weak.clone();
     win.on_window_drag_start(move || {
         if let Some(w) = drag_weak.upgrade() {
@@ -672,7 +812,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     win.on_backup_now(move || {
         let Some(cfg) = sync::load_config() else {
             if let Some(w) = backup_weak.upgrade() {
-                w.set_sync_status(SharedString::from("Backup disabled (no token)."));
+                w.set_sync_status(SharedString::from("پشتیبان‌گیری خاموش است (نشانه‌ای نیست)."));
             }
             return;
         };
@@ -686,8 +826,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             data: serde_json::to_string_pretty(&d).unwrap_or_default(),
         };
         let status = match sync::push_backup(&cfg, &payload) {
-            Ok(()) => "Backup saved to Google Sheets ✓".into(),
-            Err(e) => format!("Backup error: {e}"),
+            Ok(()) => "پشتیبان در برگه‌های گوگل ذخیره شد ✓".into(),
+            Err(e) => format!("خطای پشتیبان‌گیری: {e}"),
         };
         {
             let mut ls = backup_app.last_sync.lock().unwrap();
@@ -704,7 +844,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     win.on_restore_now(move || {
         let Some(cfg) = sync::load_config() else {
             if let Some(w) = restore_weak.upgrade() {
-                w.set_sync_status(SharedString::from("Restore disabled (no token)."));
+                w.set_sync_status(SharedString::from("بازگردانی خاموش است (نشانه‌ای نیست)."));
             }
             return;
         };
@@ -725,7 +865,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         w.set_theme_label(SharedString::from(s.theme_label()));
                         let resolved = resolve_theme(&s.theme);
                         w.set_resolved_theme(SharedString::from(resolved));
-                        apply_palette(&w, resolved);
+                        apply_palette(&w, resolved, &s.era);
                     }
                 }
                 // Apply data.
@@ -734,9 +874,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     st.data = d;
                     st.save();
                 }
-                format!("Restored backup from {}", payload.ts)
+                format!("پشتیبان بازگردانده شد از {}", payload.ts)
             }
-            Err(e) => format!("Restore error: {e}"),
+            Err(e) => format!("خطای بازگردانی: {e}"),
         };
         {
             let mut ls = restore_app.last_sync.lock().unwrap();
@@ -779,7 +919,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     apply_session_dots(&win, &shared, &app);
     refresh_screens(&win, &app);
     update_automation_summary(&weak, &app);
-    win.set_sync_status(SharedString::from("Cloud sync ready"));
+    win.set_sync_status(SharedString::from("همگام‌سازی ابری آماده است"));
     win.show()?;
 
     slint::run_event_loop()?;

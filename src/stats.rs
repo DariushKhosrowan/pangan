@@ -14,9 +14,9 @@ pub enum Period {
 impl Period {
     pub fn label(&self) -> &'static str {
         match self {
-            Period::Today => "Today",
-            Period::Week => "This Week",
-            Period::Month => "This Month",
+            Period::Today => "امروز",
+            Period::Week => "این هفته",
+            Period::Month => "این ماه",
         }
     }
 
@@ -155,7 +155,7 @@ pub fn report(sessions: &[SessionRecord], period: Period) -> ReportStats {
 /// A short human-readable scientific summary of a period.
 pub fn narrative(s: &ReportStats) -> String {
     let mut out = format!(
-        "{}\n  Sessions: {}   Focus: {} min\n  Avg session: {} min   Active days: {}/{}\n  Consistency: {:.0}%   Best day: {} min\n  Current streak: {} day(s)\n  Deep-work score: {}/100",
+        "{}\n  نشست‌ها: {}   کار ژرف: {} دقیقه\n  میانگین نشست: {} دقیقه   روزهای فعال: {}/{}\n  پیوستگی: {:.0}%   بهترین روز: {} دقیقه\n  زنجیرهٔ کنونی: {} روز\n  سنجهٔ کار ژرف: {}/۱۰۰",
         s.period_label,
         s.sessions,
         s.minutes,
@@ -169,9 +169,9 @@ pub fn narrative(s: &ReportStats) -> String {
     );
     // daily rhythm (last up to 7 active days)
     if !s.daily.is_empty() {
-        out.push_str("\n  Daily: ");
+        out.push_str("\n  روزانه: ");
         for (d, m) in s.daily.iter().rev().take(7) {
-            out.push_str(&format!("{} {}m ", d.format("%m/%d"), m));
+            out.push_str(&format!("{} {}د ", d.format("%m/%d"), m));
         }
     }
     out

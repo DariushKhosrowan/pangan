@@ -38,7 +38,7 @@ impl Default for SyncRow {
     fn default() -> Self {
         Self {
             ts: String::new(),
-            period: "Today".into(),
+            period: "امروز".into(),
             sessions: 0,
             minutes: 0,
             avg_min: 0,
@@ -116,11 +116,11 @@ pub fn push_row(cfg: &SyncCfg, row: &SyncRow) -> Result<(), String> {
 /// Attempt a sync with best-effort error reporting. Returns a status string.
 pub fn try_sync(row: &SyncRow) -> String {
     let Some(cfg) = load_config() else {
-        return "Google sync disabled (no token). See README.".into();
+        return "همگام‌سازی گوگل خاموش است (نشانه‌ای نیست). راهنما را ببینید.".into();
     };
     match push_row(&cfg, row) {
-        Ok(()) => "Synced to Google Sheets ✓".into(),
-        Err(e) => format!("Sync error: {e}"),
+        Ok(()) => "با برگه‌های گوگل همگام شد ✓".into(),
+        Err(e) => format!("خطای همگام‌سازی: {e}"),
     }
 }
 
