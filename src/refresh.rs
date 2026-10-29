@@ -26,7 +26,10 @@ pub fn load_cached() -> Option<String> {
 
 fn get(url: &str) -> Option<String> {
     let resp = ureq::get(url)
-        .header("User-Agent", "Pangan/0.4 (https://github.com/DariushKhosrowan/pangan)")
+        .header(
+            "User-Agent",
+            "Pangan/0.4 (https://github.com/DariushKhosrowan/pangan)",
+        )
         .call()
         .ok()?;
     resp.into_body().read_to_string().ok()
@@ -277,48 +280,89 @@ fn strip_tags(s: &str) -> String {
 /// followed by the section body, so we can walk headings and slice between.
 fn html_sections(html: &str) -> Vec<(String, String)> {
     let mut marks: Vec<(usize, usize, String)> = Vec::new(); // (body_start, heading_start, title)
-    let mut search = 0usize; while let Some(i) = html[search..].find("<h2") {
-        let h_start = search + i; let Some(gt) = html[h_start..].find('>') else { break }; let tag_open_end = h_start + gt + 1; let Some(close) = html[tag_open_end..].find("</h2>") else { break }; let title_html = &html[tag_open_end..tag_open_end + close]; let title = html_text(title_html); let body_start = tag_open_end + close + "</h2>".len(); // Skip the edit-section chrome that follows the heading.
-        marks.push((body_start, h_start, title)); search = body_start; }
-    let mut out = Vec::new(); for (idx, (body_start, _, title)) in marks.iter().enumerate() {
+    let mut search = 0usize;
+    while let Some(i) = html[search..].find("<h2") {
+        let h_start = search + i;
+        let Some(gt) = html[h_start..].find('>') else {
+            break;
+        };
+        let tag_open_end = h_start + gt + 1;
+        let Some(close) = html[tag_open_end..].find("</h2>") else {
+            break;
+        };
+        let title_html = &html[tag_open_end..tag_open_end + close];
+        let title = html_text(title_html);
+        let body_start = tag_open_end + close + "</h2>".len(); // Skip the edit-section chrome that follows the heading.
+        marks.push((body_start, h_start, title));
+        search = body_start;
+    }
+    let mut out = Vec::new();
+    for (idx, (body_start, _, title)) in marks.iter().enumerate() {
         let end = marks
             .get(idx + 1)
             .map(|(_, h_start, _)| *h_start)
-            .unwrap_or(html.len()); out.push((title.clone(), html[*body_start..end].to_string())); }
+            .unwrap_or(html.len());
+        out.push((title.clone(), html[*body_start..end].to_string()));
+    }
     out
 }
 
 /// The `<li>` items of the first `<ul>` in a section body.
 fn html_list_items(body: &str) -> Vec<String> {
     let Some(ul) = body.find("<ul>") else {
-        return vec![]; }; let Some(ul_end) = body[ul..].find("</ul>") else {
-        return vec![]; }; let list = &body[ul + 4..ul + ul_end]; let mut out = Vec::new(); let mut rest = list; while let Some(i) = rest.find("<li>") {
-        let after = &rest[i + 4..]; let Some(j) = after.find("</li>") else { break }; let item = html_text(&after[..j]); if item.chars().count() > 12 {
-            out.push(item); }
-        rest = &after[j + 5..]; }
+        return vec![];
+    };
+    let Some(ul_end) = body[ul..].find("</ul>") else {
+        return vec![];
+    };
+    let list = &body[ul + 4..ul + ul_end];
+    let mut out = Vec::new();
+    let mut rest = list;
+    while let Some(i) = rest.find("<li>") {
+        let after = &rest[i + 4..];
+        let Some(j) = after.find("</li>") else { break };
+        let item = html_text(&after[..j]);
+        if item.chars().count() > 12 {
+            out.push(item);
+        }
+        rest = &after[j + 5..];
+    }
     out
 }
 
 /// Strip tags and decode entities from an HTML fragment.
 fn html_text(frag: &str) -> String {
     // Drop superscripts (citation brackets) and edit-section links outright.
-    let mut t = frag.to_string(); t = strip_between(&t, "<sup", "</sup>"); t = strip_between(&t, "<style", "</style>"); t = strip_between(&t, "<script", "</script>"); // Tags -> nothing, but keep a space where a tag separated words.
-    let mut out = String::with_capacity(t.len()); let mut in_tag = false; for c in t.chars() {
+    let mut t = frag.to_string();
+    t = strip_between(&t, "<sup", "</sup>");
+    t = strip_between(&t, "<style", "</style>");
+    t = strip_between(&t, "<script", "</script>"); // Tags -> nothing, but keep a space where a tag separated words.
+    let mut out = String::with_capacity(t.len());
+    let mut in_tag = false;
+    for c in t.chars() {
         match c {
             '<' => {
-                in_tag = true; out.push(' '); }
+                in_tag = true;
+                out.push(' ');
+            }
             '>' => in_tag = false,
             _ if !in_tag => out.push(c),
             _ => {}
         }
     }
     let mut s = decode_entities(&out); // Collapse whitespace.
-    let mut clean = String::with_capacity(s.len()); let mut prev_space = false; for c in s.chars() {
+    let mut clean = String::with_capacity(s.len());
+    let mut prev_space = false;
+    for c in s.chars() {
         if c.is_whitespace() {
             if !prev_space {
-                clean.push(' '); }
-            prev_space = true; } else {
-            clean.push(c); prev_space = false; }
+                clean.push(' ');
+            }
+            prev_space = true;
+        } else {
+            clean.push(c);
+            prev_space = false;
+        }
     }
     s = clean.trim().to_string();
     // Tags become spaces, which leaves "word ," before punctuation. Close the
@@ -335,9 +379,17 @@ fn html_text(frag: &str) -> String {
 }
 
 fn decode_entities(s: &str) -> String {
-    let mut out = String::with_capacity(s.len()); let mut rest = s; while let Some(i) = rest.find('&') {
-        out.push_str(&rest[..i]); let tail = &rest[i..]; let Some(semi) = tail.find(';') else {
-            out.push_str(tail); return out; }; let ent = &tail[1..semi]; let rep = match ent {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i..];
+        let Some(semi) = tail.find(';') else {
+            out.push_str(tail);
+            return out;
+        };
+        let ent = &tail[1..semi];
+        let rep = match ent {
             "amp" => Some("&"),
             "lt" => Some("<"),
             "gt" => Some(">"),
@@ -392,16 +444,46 @@ fn section_items(html: &str, headings: &[&str]) -> Vec<String> {
 }
 
 const JALALI_MONTHS: [&str; 12] = [
-    "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی",
-    "بهمن", "اسفند",
+    "فروردین",
+    "اردیبهشت",
+    "خرداد",
+    "تیر",
+    "مرداد",
+    "شهریور",
+    "مهر",
+    "آبان",
+    "آذر",
+    "دی",
+    "بهمن",
+    "اسفند",
 ];
 const GREG_MONTHS_FA: [&str; 12] = [
-    "ژانویه", "فوریه", "مارس", "آوریل", "مه", "ژوئن", "ژوئیه", "اوت", "سپتامبر", "اکتبر",
-    "نوامبر", "دسامبر",
+    "ژانویه",
+    "فوریه",
+    "مارس",
+    "آوریل",
+    "مه",
+    "ژوئن",
+    "ژوئیه",
+    "اوت",
+    "سپتامبر",
+    "اکتبر",
+    "نوامبر",
+    "دسامبر",
 ];
 const GREG_MONTHS_EN: [&str; 12] = [
-    "January", "February", "March", "April", "May", "June", "July", "August", "September",
-    "October", "November", "December",
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
 ];
 
 /// What a refresh produced, for the status line.
@@ -456,11 +538,7 @@ pub fn refresh_today(
             w.insert(format!("{gm:02}-{gd:02}"), serde_json::json!(events));
         }
     }
-    let en_page = format!(
-        "{} {}",
-        GREG_MONTHS_EN[(gm as usize).clamp(1, 12) - 1],
-        gd
-    );
+    let en_page = format!("{} {}", GREG_MONTHS_EN[(gm as usize).clamp(1, 12) - 1], gd);
     if let Some(html) = page_html("en", &en_page) {
         // The English page nests Events under year-range h3 headings
         // (===Pre-1600===, ===1601–1900===, ...), so collect the whole
@@ -483,14 +561,20 @@ pub fn refresh_today(
 /// Every list item in the "Events" section, including its h3 subsections.
 fn events_section_all_lists(html: &str) -> Vec<String> {
     // Slice from the Events h2 to the next h2, then take all <ul>s inside.
-    let Some(h2) = html.find("<h2") else { return vec![] };
+    let Some(h2) = html.find("<h2") else {
+        return vec![];
+    };
     let mut start = None;
     let mut search = h2;
     while let Some(i) = html[search..].find("<h2") {
         let at = search + i;
-        let Some(gt) = html[at..].find('>') else { break };
+        let Some(gt) = html[at..].find('>') else {
+            break;
+        };
         let open_end = at + gt + 1;
-        let Some(close) = html[open_end..].find("</h2>") else { break };
+        let Some(close) = html[open_end..].find("</h2>") else {
+            break;
+        };
         let title = html_text(&html[open_end..open_end + close]);
         if title == "Events" {
             start = Some(open_end + close + 5);
@@ -510,7 +594,9 @@ fn events_section_all_lists(html: &str) -> Vec<String> {
     let mut rest = body;
     while let Some(ul) = rest.find("<ul>") {
         let after = &rest[ul + 4..];
-        let Some(ul_end) = after.find("</ul>") else { break };
+        let Some(ul_end) = after.find("</ul>") else {
+            break;
+        };
         let list = &after[..ul_end];
         let mut items = list;
         while let Some(li) = items.find("<li>") {
@@ -545,7 +631,10 @@ mod tests {
     fn no_bracket_marker_survives_clean() {
         for raw in ["a [[b", "a [[b]] c", "x [[y|z", "[[", "]]"] {
             let s = clean(raw);
-            assert!(!s.contains("[[") && !s.contains("]]"), "leaked from {raw:?}: {s:?}");
+            assert!(
+                !s.contains("[[") && !s.contains("]]"),
+                "leaked from {raw:?}: {s:?}"
+            );
         }
     }
 
@@ -601,7 +690,8 @@ mod tests {
 
 #[cfg(test)]
 mod live_tests {
-    use super::*; /// Hits the real Wikipedia API. Ignored by default so the normal test run
+    use super::*;
+    /// Hits the real Wikipedia API. Ignored by default so the normal test run
     /// stays offline and deterministic; run with:
     ///   cargo test -- --ignored live_refresh
     #[test]
@@ -609,8 +699,17 @@ mod live_tests {
     fn live_refresh_returns_data() {
         let mut table: serde_json::Value =
             serde_json::from_str(include_str!("../data/day_events.json")).unwrap(); // 7 Aban 1405 == 29 October 2026
-        let r = refresh_today(&mut table, 8, 7, 10, 29).expect("refresh should succeed"); assert!(r.iran_events > 0, "expected Iranian events, got {r:?}"); assert!(r.world_events > 0, "expected world events, got {r:?}"); let iran = table["iran"]["8-7"]["events"].as_array().unwrap(); assert!(!iran.is_empty()); for e in iran {
-            let s = e.as_str().unwrap(); assert!(!s.contains("[["), "wiki link markup leaked: {s}"); assert!(!s.contains("{{"), "template markup leaked: {s}"); assert!(!s.contains("<ref"), "ref markup leaked: {s}"); }
+        let r = refresh_today(&mut table, 8, 7, 10, 29).expect("refresh should succeed");
+        assert!(r.iran_events > 0, "expected Iranian events, got {r:?}");
+        assert!(r.world_events > 0, "expected world events, got {r:?}");
+        let iran = table["iran"]["8-7"]["events"].as_array().unwrap();
+        assert!(!iran.is_empty());
+        for e in iran {
+            let s = e.as_str().unwrap();
+            assert!(!s.contains("[["), "wiki link markup leaked: {s}");
+            assert!(!s.contains("{{"), "template markup leaked: {s}");
+            assert!(!s.contains("<ref"), "ref markup leaked: {s}");
+        }
         println!("iran={} world={}", r.iran_events, r.world_events);
         for e in table["iran"]["8-7"]["events"].as_array().unwrap() {
             println!("IRAN: {}", e.as_str().unwrap());
@@ -618,9 +717,13 @@ mod live_tests {
         for e in table["world_fa"]["10-29"].as_array().unwrap() {
             println!("WFA: {}", e.as_str().unwrap());
         }
-        for e in table["world_en"]["10-29"].as_array().unwrap().iter().take(3) {
+        for e in table["world_en"]["10-29"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .take(3)
+        {
             println!("WEN: {}", e.as_str().unwrap());
-        } }
+        }
+    }
 }
-
-

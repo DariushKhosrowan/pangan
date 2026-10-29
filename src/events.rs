@@ -60,7 +60,8 @@ impl Table {
         // No Iranian day may be entirely empty, and no event entry may be a
         // bare fragment.
         for day in self.iran.values() {
-            let total = day.events.len() + day.births.len() + day.deaths.len() + day.occasions.len();
+            let total =
+                day.events.len() + day.births.len() + day.deaths.len() + day.occasions.len();
             if total == 0 {
                 return false;
             }
@@ -229,7 +230,12 @@ impl Events {
 
     /// (days with Iranian data, days with world data)
     pub fn coverage(&self) -> (usize, usize) {
-        let iran = self.table.iran.values().filter(|d| !d.events.is_empty()).count();
+        let iran = self
+            .table
+            .iran
+            .values()
+            .filter(|d| !d.events.is_empty())
+            .count();
         let world = self.table.world_fa.len().max(self.table.world_en.len());
         (iran, world)
     }
@@ -314,11 +320,8 @@ mod tests {
         // Take the good table and damage one day the way the old build did.
         let mut table: serde_json::Value =
             serde_json::from_str(include_str!("../data/day_events.json")).unwrap();
-        table["iran"]["8-7"]["deaths"] = serde_json::json!([
-            "مظفرالدین‌شاه قاجار",
-            "زندانی سیاسی",
-            "دادستان تهران"
-        ]);
+        table["iran"]["8-7"]["deaths"] =
+            serde_json::json!(["مظفرالدین‌شاه قاجار", "زندانی سیاسی", "دادستان تهران"]);
         let damaged = serde_json::to_string(&table).unwrap();
 
         let e = Events::from_cache_or_embedded(&damaged);
@@ -352,14 +355,23 @@ mod tests {
             .flat_map(|m| (1..=30).map(move |d| (m, d)))
             .filter(|&(m, d)| !e.iran(m, d).0.is_empty())
             .count();
-        assert!(with_events > 250, "expected most Jalali days, got {with_events}");
+        assert!(
+            with_events > 250,
+            "expected most Jalali days, got {with_events}"
+        );
     }
 
     #[test]
     fn world_day_has_events_in_both_languages() {
         let e = Events::load();
-        assert!(!e.world("fa", 8, 7).is_empty(), "7 August should have fa events");
-        assert!(!e.world("en", 8, 7).is_empty(), "7 August should have en events");
+        assert!(
+            !e.world("fa", 8, 7).is_empty(),
+            "7 August should have fa events"
+        );
+        assert!(
+            !e.world("en", 8, 7).is_empty(),
+            "7 August should have en events"
+        );
     }
 
     #[test]
@@ -370,18 +382,12 @@ mod tests {
         );
         assert_eq!(
             split_year("۱۰۷۰ قبل از هجرت - به رسمیت شناختن حاکمیت"),
-            Some((
-                "۱۰۷۰ قبل از هجرت".into(),
-                "به رسمیت شناختن حاکمیت".into()
-            ))
+            Some(("۱۰۷۰ قبل از هجرت".into(), "به رسمیت شناختن حاکمیت".into()))
         );
         // BCE years, with and without parentheses.
         assert_eq!(
             split_year("۵۳۹ (پیش از میلاد) - ورود کوروش بزرگ به بابل"),
-            Some((
-                "۵۳۹ (پیش از میلاد)".into(),
-                "ورود کوروش بزرگ به بابل".into()
-            ))
+            Some(("۵۳۹ (پیش از میلاد)".into(), "ورود کوروش بزرگ به بابل".into()))
         );
         // The en-dash form used by the English pages.
         assert_eq!(

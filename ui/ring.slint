@@ -15,6 +15,8 @@
 // path string from a straight-line helper.
 // ═══════════════════════════════════════════════════════════════════════════
 
+import { Motion } from "motion.slint";
+
 // ── geometry helpers ──────────────────────────────────────────────────────
 // All of these work in a 100×100 viewbox and are scaled by the Path element.
 global SunGeom {
@@ -79,25 +81,47 @@ global SunGeom {
 
 // ── the ring ──────────────────────────────────────────────────────────────
 export component SunRing {
-    in property <float> progress: 0;
+    // `in-out` rather than `in`: Slint only animates properties a component
+    // owns, and the arc has to glide between the clock's one-second steps.
+    in-out property <float> progress: 0;
     in property <length> d: 236px;
     in property <length> t: 7px;
     in property <bool> glow: false;
+    /// 0..1 breathing phase for the halo, advanced by the window while running.
+    in property <float> pulse: 0;
     in property <brush> track-color: #232833;
     in property <brush> fill-color: #D6A84E;
+    /// Peak opacity of the breathing halo. A gold wash at 8% reads clearly on
+    /// the dark palette but vanishes on the cream one, so the window passes a
+    /// stronger value for the light theme rather than the ring guessing.
+    in property <float> halo-alpha: 0.09;
 
     width: d;
     height: d;
 
+    // The clock advances progress in whole one-second steps. Gliding across a
+    // little more than one tick turns that step into continuous motion; the
+    // easing is linear on purpose, because an eased curve would surge and
+    // stall once per second instead of flowing. The corona reads the same
+    // animated value, so the rays rise in step with the arc.
+    animate progress { duration: Motion.arc; easing: linear; }
+
+    // The halo breathes while a session runs: a slow swell and settle, the way
+    // a lamp behind the disc would. `pulse` is a 0..1 phase the window advances
+    // on a timer, so this costs one property change per frame rather than an
+    // animation per element. The sine turns the linear phase into a breath;
+    // without it the halo would grow and then snap back to nothing.
+    private property <float> breath: 0.5 + 0.5 * sin(360deg * root.pulse);
+
     // A soft disc of light behind everything, only while running.
     if glow : Rectangle {
-        width: parent.width * 0.86;
-        height: parent.height * 0.86;
+        width: parent.width * (0.80 + root.breath * 0.12);
+        height: parent.height * (0.80 + root.breath * 0.12);
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         border-radius: self.width / 2;
         background: fill-color;
-        opacity: 0.055;
+        opacity: root.halo-alpha * (0.45 + root.breath * 0.55);
     }
 
     // The corona — rays standing up as the sweep passes them.

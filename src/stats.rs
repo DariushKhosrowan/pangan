@@ -197,7 +197,11 @@ pub fn narrative(s: &ReportStats, en: bool) -> String {
     };
     // daily rhythm (last up to 7 active days)
     if !s.daily.is_empty() {
-        out.push_str(if en { "\n  Daily: " } else { "\n  روزانه: " });
+        out.push_str(if en {
+            "\n  Daily: "
+        } else {
+            "\n  روزانه: "
+        });
         for (d, m) in s.daily.iter().rev().take(7) {
             out.push_str(&format!(
                 "{} {}{} ",

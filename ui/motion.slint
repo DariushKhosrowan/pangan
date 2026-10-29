@@ -1,0 +1,37 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// motion.slint — every animation duration in the app, in one place.
+//
+// It lives in its own file because both the window and the ring need it, and
+// a global defined in appwindow.slint cannot be imported back into ring.slint
+// without a cycle.
+//
+// Turning `enabled` off collapses every duration to zero, so transitions
+// become instant rather than merely faster. That is what the setting is for:
+// a slow machine, a remote desktop, or a user who prefers reduced motion
+// should not have to pay for easing curves they cannot see. Because every
+// duration in the app is derived from this one flag, no animation can be left
+// running after the user has switched motion off.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export global Motion {
+    // Set from Rust (and from the settings toggle) — never written from Slint,
+    // because a component cannot assign to a global property.
+    in-out property <bool> enabled: true;
+
+    // Durations, in milliseconds. Zero when motion is off.
+    out property <duration> instant: enabled ? 90ms : 0ms;
+    out property <duration> quick: enabled ? 130ms : 0ms;
+    out property <duration> normal: enabled ? 200ms : 0ms;
+    out property <duration> slow: enabled ? 320ms : 0ms;
+    out property <duration> lazy: enabled ? 460ms : 0ms;
+
+    // The ring's arc. The clock ticks once a second, so the arc has to travel
+    // a whole second's worth of sweep in one step; a linear glide across
+    // slightly more than a tick makes it read as continuous motion instead of
+    // a stutter. Linear on purpose — an eased arc would visibly surge and
+    // stall once per second.
+    out property <duration> arc: enabled ? 340ms : 0ms;
+
+    // How far a view rises as it comes in, and how long it takes.
+    out property <length> enter-rise: enabled ? 10px : 0px;
+}

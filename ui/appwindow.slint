@@ -3,8 +3,10 @@ import { Shahbaz, Faravahar, Derafsh, Senmurv, Boteh, BotehDivider, EmblemField,
 import { SunRing } from "ring.slint";
 import { Digits } from "digits.slint";
 import { Strings } from "strings.slint";
+import { Motion } from "motion.slint";
 export { Strings } from "strings.slint";
 export { Digits } from "digits.slint";
+export { Motion } from "motion.slint";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Pangan — پنگان
@@ -263,7 +265,7 @@ component IconButton inherits Rectangle {
         hovered when ta1.has-hover : {
             background: root.hover-bg;
             in {
-                animate background { duration: 120ms; easing: ease-out; }
+                animate background { duration: Motion.quick; easing: ease-out; }
             }
         }
     ]
@@ -343,7 +345,7 @@ component Segmented inherits Rectangle {
         background: Palette.surface;
         border-width: 1px;
         border-color: Palette.border;
-        animate x { duration: 180ms; easing: ease-out; }
+        animate x { duration: Motion.normal; easing: ease-out; }
     }
 
     HorizontalLayout {
@@ -368,7 +370,7 @@ component Segmented inherits Rectangle {
                 horizontal-alignment: center;
                 width: parent.width;
                 height: parent.height;
-                animate color { duration: 150ms; }
+                animate color { duration: Motion.quick; }
             }
         }
     }
@@ -386,7 +388,7 @@ component Toggle inherits Rectangle {
     border-radius: 12px;
     background: checked ? Palette.accent : Palette.surface-3;
 
-    animate background { duration: 160ms; easing: ease-out; }
+    animate background { duration: Motion.normal; easing: ease-out; }
 
     Rectangle {
         width: 18px;
@@ -395,7 +397,7 @@ component Toggle inherits Rectangle {
         x: root.checked ? parent.width - 21px : 3px;
         border-radius: 9px;
         background: root.checked ? Palette.on-accent : Palette.surface;
-        animate x { duration: 160ms; easing: ease-out; }
+        animate x { duration: Motion.normal; easing: ease-out; }
     }
 
     TouchArea {
@@ -443,7 +445,7 @@ component Stepper inherits Rectangle {
             states [
                 hovered when ta3.has-hover : {
                     background: Palette.surface-3;
-                    in { animate background { duration: 100ms; } }
+                    in { animate background { duration: Motion.instant; } }
                 }
             ]
             Text {
@@ -483,7 +485,7 @@ component Stepper inherits Rectangle {
             states [
                 hovered when ta2.has-hover : {
                     background: Palette.surface-3;
-                    in { animate background { duration: 100ms; } }
+                    in { animate background { duration: Motion.instant; } }
                 }
             ]
             Text {
@@ -569,8 +571,8 @@ component BarChart {
                     horizontal-stretch: 1;
                     border-radius: 5px;
                     background: i == root.highlight ? Palette.accent : Palette.surface-3;
-                    animate height { duration: 320ms; easing: ease-out; }
-                    animate background { duration: 200ms; }
+                    animate height { duration: Motion.slow; easing: ease-out; }
+                    animate background { duration: Motion.normal; }
                 }
             }
         }
@@ -613,6 +615,10 @@ component TaskRow inherits Rectangle {
         spacing: 11px;
         alignment: start;
 
+        // The checkbox. Completing a task is the one moment in the list that
+        // deserves a flourish, so the ring scales up a touch and settles as
+        // the check appears. It is a transform, not a size change, so nothing
+        // around it reflows — the row stays exactly as tall as it was.
         Rectangle {
             width: 19px;
             height: 19px;
@@ -621,6 +627,10 @@ component TaskRow inherits Rectangle {
             border-color: item.done ? Palette.accent : Palette.surface-3;
             background: item.done ? Palette.accent : transparent;
             y: (parent.height - self.height) / 2;
+            transform-scale: item.done ? 1.0 : 0.92;
+            animate transform-scale { duration: Motion.normal; easing: ease-out-back; }
+            animate background { duration: Motion.normal; }
+            animate border-color { duration: Motion.normal; }
 
             if item.done : Icon {
                 kind: "check";
@@ -633,6 +643,13 @@ component TaskRow inherits Rectangle {
             TouchArea { clicked => { root.toggle(item.id); } }
         }
 
+        // Done tasks dim rather than vanish, and the dimming is animated so
+        // ticking a box reads as the row settling back instead of blinking.
+        //
+        // `vertical-alignment: center` is not optional here: a Text given the
+        // full row height lays its glyphs out from the top, which left every
+        // title floating well above the checkbox it belongs to. Centering the
+        // text box is what actually lines the two up.
         Text {
             text: item.title;
             font-size: 13px;
@@ -640,6 +657,8 @@ component TaskRow inherits Rectangle {
             overflow: elide;
             horizontal-stretch: 1;
             height: parent.height;
+            vertical-alignment: center;
+            animate color { duration: Motion.normal; }
         }
 
         Text {
@@ -647,6 +666,8 @@ component TaskRow inherits Rectangle {
             font-size: 11px;
             color: Palette.text-faint;
             visible: item.time != "";
+            height: parent.height;
+            vertical-alignment: center;
         }
     }
 }
@@ -736,9 +757,9 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in-out property <string> refresh-status: "";
     in property <string> cal-empty: "برای این روز رویدادی ثبت نشده است."; // ---- Reports / status / sync / task input ----
     in property <string> status-line; in property <string> report-text; in property <string> sync-status; in-out property <string> new-task-text; in-out property <string> show-view: "main"; // ---- Settings (edited in the Settings screen) ----
-    in-out property <int> work-minutes: 25; in-out property <int> short-break-minutes: 5; in-out property <int> long-break-minutes: 15; in-out property <int> long-break-interval: 4; in-out property <int> daily-goal-minutes: 120; in-out property <bool> auto-start-next: true; in-out property <bool> auto-start-on-launch: false; in-out property <bool> sound-enabled: true; in-out property <string> sound-theme: "santur"; in-out property <bool> hotkey-enabled: true; in-out property <bool> inhibit-enabled: true; in-out property <bool> overlay-enabled: true; in-out property <bool> compact-mode: false; in-out property <int> sound-volume: 80; in property <string> automation-summary; // ---- Rich data (pushed from Rust) ----
+    in-out property <int> work-minutes: 25; in-out property <int> short-break-minutes: 5; in-out property <int> long-break-minutes: 15; in-out property <int> long-break-interval: 4; in-out property <int> daily-goal-minutes: 120; in-out property <bool> auto-start-next: true; in-out property <bool> auto-start-on-launch: false; in-out property <bool> sound-enabled: true; in-out property <string> sound-theme: "santur"; in-out property <bool> hotkey-enabled: true; in-out property <bool> inhibit-enabled: true; in-out property <bool> overlay-enabled: true; in-out property <bool> compact-mode: false; in-out property <bool> animations: true; in-out property <int> sound-volume: 80; in property <string> automation-summary; // ---- Rich data (pushed from Rust) ----
     in property <[TaskItem]> tasks: []; in property <[float]> week-bars: [0, 0, 0, 0, 0, 0, 0]; in property <[string]> week-labels: ["ش", "ی", "د", "س", "چ", "پ", "ج"]; in property <int> today-sessions: 0; in property <int> today-minutes: 0; in property <int> today-score: 0; in property <int> today-streak: 0; in property <int> today-consistency: 0; in property <int> today-best: 0; in property <int> session-total: 4; in property <int> session-done: 0; in property <int> goal-minutes: 120; in property <int> goal-done-minutes: 0; // ---- Callbacks to Rust ----
-    callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback refresh-events; callback open-url(string); callback window-drag-start; callback set-compact-mode(bool);
+    callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback refresh-events; callback open-url(string); callback window-drag-start; callback set-compact-mode(bool); callback set-animations(bool);
     // Resize: the edge/corner grab zones report the pointer's screen position
     // and which edge is being dragged; Rust turns that into a new window size.
 
@@ -747,6 +768,38 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     out property <length> drag-origin-y: self.absolute-position.y - root.drag-start-y;
     in-out property <length> drag-start-x: 0px;
     in-out property <length> drag-start-y: 0px;
+
+    // Breathing phase for the ring's halo, 0..1. Advanced by a timer only
+    // while a session is running and motion is enabled, so an idle window
+    // costs nothing. A full breath is about 5.5s: slow enough to read as
+    // breathing rather than blinking, which is the point of it.
+    in-out property <float> pulse-phase: 0; timer := Timer {
+        interval: 60ms; running: root.running && Motion.enabled; triggered => {
+            root.pulse-phase = Math.mod(root.pulse-phase + 0.011, 1.0); }
+    }
+
+    // ── view transition ──────────────────────────────────────────────────
+    // Navigating between screens fades the incoming view up and lifts it a
+    // few pixels, so a switch reads as a change of place rather than a hard
+    // cut. `view-enter` runs 0 → 1 over ~260ms; every screen binds its own
+    // opacity and offset to it, which keeps the whole thing to one animated
+    // property instead of one per screen.
+    in-out property <float> view-enter: 1;
+    // With motion off the transition never runs, so the screens must not be
+    // left transparent: both derived properties fall back to the settled
+    // state when `Motion.enabled` is false.
+    private property <float> view-opacity: Motion.enabled ? root.view-enter : 1.0;
+    private property <length> view-offset: Motion.enter-rise * (1 - root.view-enter);
+    changed show-view => {
+        root.view-enter = 0;
+    }
+    enter-timer := Timer {
+        interval: 16ms;
+        running: root.view-enter < 1 && Motion.enabled;
+        triggered => {
+            root.view-enter = Math.min(1, root.view-enter + 0.062);
+        }
+    }
 
     title: "Pangan";
     // A real window frame, not a frameless one.
@@ -771,19 +824,49 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     default-font-family: Strings.fa ? "Vazirmatn" : "Inter";
 
     // ─────────────────────────────────────────────────────────────────────
-    // Heritage texture — the era emblem repeated at very low opacity, so the
-    // pattern reads as paper grain rather than decoration.
+    // Heritage texture
+    //
+    // This used to be a 6×9 tiling of the era emblem across the whole window,
+    // including behind the header. At that density it stopped reading as paper
+    // grain and started competing with the wordmark and the controls, which is
+    // exactly what made the top of the window feel cluttered.
+    //
+    // It is now a single large watermark, centred in the body and kept well
+    // below the header, so the emblem is present as a quiet ground without
+    // ever sitting behind text. One mark at low opacity reads as intent; a
+    // grid of them reads as noise.
     // ─────────────────────────────────────────────────────────────────────
-    EmblemField {
-        x: 0px;
-        y: 0px;
+    Rectangle {
+        y: 56px;
         width: root.width;
-        height: root.height;
-        cols: 6;
-        rows: 9;
-        emblem: root.era == "sasanid" ? 1 : (root.era == "cyrus" ? 2 : 0);
-        color: Palette.accent;
-        fade: root.resolved-theme == "light" ? 0.05 : 0.035;
+        height: root.height - 56px;
+        background: transparent;
+        clip: true;
+
+        // The watermark is deliberately oversized and offset so its edges fall
+        // outside the body and it reads as a cropped detail rather than a
+        // centred logo. Pushed well down the body so it never crowds the
+        // header above it.
+        Rectangle {
+            width: root.width * 1.15;
+            height: root.width * 1.15;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2 + 64px;
+            background: transparent;
+
+            if root.era == "cyrus" : Shahbaz {
+                width: 100%; height: 100%; color: Palette.accent;
+                fade: root.resolved-theme == "light" ? 0.045 : 0.035; }
+            if root.era == "darius" : Faravahar {
+                width: 100%; height: 100%; color: Palette.accent;
+                fade: root.resolved-theme == "light" ? 0.045 : 0.035; }
+            if root.era == "parthian" : Derafsh {
+                width: 100%; height: 100%; color: Palette.accent;
+                fade: root.resolved-theme == "light" ? 0.045 : 0.035; }
+            if root.era == "sasanid" : Senmurv {
+                width: 100%; height: 100%; color: Palette.accent;
+                fade: root.resolved-theme == "light" ? 0.045 : 0.035; }
+        }
     }
   // ─────────────────────────────────────────────────────────────────────
     // Header — draggable, minimal. Title left, controls right.
@@ -858,17 +941,19 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             }
         }
 
-        // The stepped merlon of the Apadana parapet, drawn as a hairline of
-        // crenellations along the bottom edge of the header. It gives the
-        // window a skyline instead of a flat cut.
-        SteppedCrenellation {
-            x: 0px;
-            y: parent.height - self.height;
+        // No ornament along the header edge.
+        //
+        // There used to be a decorative band here (first a stepped sawtooth,
+        // then the Apadana lotus frieze). Both were wrong: the header already
+        // carries the era emblem, the wordmark, the tagline and two controls,
+        // and a patterned edge on top of that made the top of the window read
+        // as clutter. The header is now just the mark and the controls, with
+        // a single hairline to separate it from the body.
+        Rectangle {
+            y: parent.height - 1px;
             width: parent.width;
-            count: Math.max(8, Math.round(parent.width / 26px));
-            unit: 26px;
-            color: Palette.accent;
-            fade: root.resolved-theme == "light" ? 0.42 : 0.38;
+            height: 1px;
+            background: Palette.hairline;
         }
     }
 
@@ -878,6 +963,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     Rectangle {
         y: 56px; width: parent.width; height: parent.height - 56px; background: transparent; // ═══ COMPACT ═══
         if root.show-view == "main" && root.compact-mode : VerticalLayout {
+            opacity: root.view-opacity;
+            y: root.view-offset;
             padding: 16px; spacing: 10px; HorizontalLayout {
                 spacing: 8px; alignment: space-between; Text {
                     text: root.session-name; font-size: 11px; font-weight: 700; letter-spacing: 1.4px; color: Palette.text-faint; vertical-alignment: center; }
@@ -890,7 +977,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
             Rectangle {
                 height: 4px; border-radius: 2px; background: Palette.track; Rectangle {
-                    width: parent.width * root.progress; height: parent.height; border-radius: 2px; background: Palette.accent; animate width { duration: 300ms; easing: ease-out; }
+                    width: parent.width * root.progress; height: parent.height; border-radius: 2px; background: Palette.accent; animate width { duration: Motion.slow; easing: ease-out; }
                 }
             }
 
@@ -903,7 +990,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     states [
                         h when ta4.has-hover : {
                             background: Palette.text;
-                            in { animate background { duration: 120ms; } }
+                            in { animate background { duration: Motion.quick; } }
                         }
                     ]
                     Icon {
@@ -921,6 +1008,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
         // holding a fixed 268px, which is what used to squeeze the task list
         // down to four pixels.
         if root.show-view == "main" && !root.compact-mode : Flickable {
+            opacity: root.view-opacity;
+            y: root.view-offset;
             vertical-stretch: 1;
             content-height: main-col.preferred-height;
             interactive: main-col.preferred-height > self.height;
@@ -950,6 +1039,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     d: Math.max(120px, Math.min(236px, parent.height - 32px));
                     t: 7px;
                     glow: root.running;
+                    pulse: root.pulse-phase;
+                    halo-alpha: Palette.dark ? 0.10 : 0.16;
                     track-color: Palette.track; fill-color: Palette.accent;
                     x: (parent.width - self.width) / 2; y: 6px; }
 
@@ -970,8 +1061,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             // ---- session dots ----
             HorizontalLayout {
                 height: 22px; spacing: 6px; alignment: center; for i in max(root.session-total, 1) : Rectangle {
-                    width: i < root.session-done ? 18px : 6px; height: 6px; border-radius: 3px; background: i < root.session-done ? Palette.accent : Palette.surface-3; animate width { duration: 220ms; easing: ease-out; }
-                    animate background { duration: 220ms; }
+                    width: i < root.session-done ? 18px : 6px; height: 6px; border-radius: 3px; background: i < root.session-done ? Palette.accent : Palette.surface-3; animate width { duration: Motion.normal; easing: ease-out; }
+                    animate background { duration: Motion.normal; }
                 }
             }
 
@@ -1000,7 +1091,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     states [
                         h when ta5.has-hover : {
                             background: Palette.text;
-                            in { animate background { duration: 130ms; } }
+                            in { animate background { duration: Motion.quick; } }
                         }
                     ]
                     Icon {
@@ -1114,7 +1205,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             height: parent.height;
                             border-radius: 2.5px;
                             background: Palette.accent;
-                            animate width { duration: 400ms; easing: ease-out; }
+                            animate width { duration: Motion.lazy; easing: ease-out; }
                         }
                     }
                 }
@@ -1230,7 +1321,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 states [
                                     h when ta6.has-hover && root.new-task-text != "" : {
                                         background: Palette.text;
-                                        in { animate background { duration: 120ms; } }
+                                        in { animate background { duration: Motion.quick; } }
                                     }
                                 ]
                                 Icon {
@@ -1272,7 +1363,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     states [
                         h when ta7.has-hover : {
                             color: Palette.accent;
-                            in { animate color { duration: 120ms; } }
+                            in { animate color { duration: Motion.quick; } }
                         }
                     ]
                 }
@@ -1283,6 +1374,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
         // ═══ STATS ═══
         // ═══ TODAY — Persian calendar ═══
         if root.show-view == "today" : VerticalLayout {
+            opacity: root.view-opacity;
+            y: root.view-offset;
             padding: 0px; spacing: 0px; // ---- title bar ----
             HorizontalLayout {
                 height: 44px; padding-left: 14px; padding-right: 14px; spacing: 8px; IconButton {
@@ -1296,7 +1389,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     width: 30px; height: 30px; border-radius: 15px; background: Palette.surface-2;
                     ta-ref := TouchArea { clicked => { root.refresh-events(); } }
                     states [
-                        h when ta-ref.has-hover : { background: Palette.surface-3; in { animate background { duration: 120ms; } } }
+                        h when ta-ref.has-hover : { background: Palette.surface-3; in { animate background { duration: Motion.quick; } } }
                     ]
                     Icon { kind: "reset"; size: 14px; color: Palette.text-dim; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
                 }
@@ -1415,6 +1508,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
         }
 
         if root.show-view == "report" : VerticalLayout {
+            opacity: root.view-opacity;
+            y: root.view-offset;
             padding: 0px;
             spacing: 0px;
 
@@ -1562,6 +1657,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
         // ═══ SETTINGS ═══
         if root.show-view == "settings" : VerticalLayout {
+            opacity: root.view-opacity;
+            y: root.view-offset;
             padding: 0px;
             spacing: 0px;
 
@@ -1593,7 +1690,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     states [
                         h when ta8.has-hover : {
                             background: Palette.text;
-                            in { animate background { duration: 120ms; } }
+                            in { animate background { duration: Motion.quick; } }
                         }
                     ]
                     Text {
@@ -1797,7 +1894,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                     SectionLabel { text: Strings.sec-appearance; }
                     Card {
-                        height: 118px;
+                        height: 171px;
                         VerticalLayout {
                             padding: 14px;
                             spacing: 0px;
@@ -1828,6 +1925,26 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     // layout — otherwise the compact view opens
                                     // inside a full-size window.
                                     toggled(v) => { root.set-compact-mode(v); }
+                                }
+                            }
+                            Rectangle { height: 1px; background: Palette.hairline; }
+                            // Motion on/off. Off makes every transition
+                            // instant, which is what a slow machine or a
+                            // reduced-motion preference actually needs.
+                            HorizontalLayout {
+                                height: 52px;
+                                VerticalLayout {
+                                    spacing: 1px;
+                                    alignment: center;
+                                    vertical-stretch: 0;
+                                    Text { text: Strings.lbl-animations; font-size: 13px; color: Palette.text; }
+                                    Text { text: Strings.hint-animations; font-size: 10px; color: Palette.text-faint; overflow: elide; }
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                                Toggle {
+                                    checked <=> root.animations;
+                                    y: (parent.height - self.height) / 2;
+                                    toggled(v) => { root.set-animations(v); }
                                 }
                             }
                         }
@@ -1881,7 +1998,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     states [
                                         h when ta9.has-hover && root.sound-theme != s : {
                                             background: Palette.surface-3;
-                                            in { animate background { duration: 120ms; } }
+                                            in { animate background { duration: Motion.quick; } }
                                         }
                                     ]
                                     Text {
@@ -1904,7 +2021,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     states [
                                         h when ta10.has-hover && root.sound-theme != s : {
                                             background: Palette.surface-3;
-                                            in { animate background { duration: 120ms; } }
+                                            in { animate background { duration: Motion.quick; } }
                                         }
                                     ]
                                     Text {
@@ -1964,7 +2081,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     states [
                                         h when ta11.has-hover : {
                                             background: Palette.surface-3;
-                                            in { animate background { duration: 120ms; } }
+                                            in { animate background { duration: Motion.quick; } }
                                         }
                                     ]
                                     Text {
@@ -2049,7 +2166,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     states [
                                         h when ta12.has-hover : {
                                             background: Palette.text;
-                                            in { animate background { duration: 120ms; } }
+                                            in { animate background { duration: Motion.quick; } }
                                         }
                                     ]
                                     Text {
@@ -2088,7 +2205,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     states [
                                         h when ta13.has-hover : {
                                             background: Palette.surface-3;
-                                            in { animate background { duration: 120ms; } }
+                                            in { animate background { duration: Motion.quick; } }
                                         }
                                     ]
                                     Text {
@@ -2107,7 +2224,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     states [
                                         h when ta14.has-hover : {
                                             background: Palette.surface-3;
-                                            in { animate background { duration: 120ms; } }
+                                            in { animate background { duration: Motion.quick; } }
                                         }
                                     ]
                                     Text {
@@ -2156,7 +2273,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     states [
                                         h when ta15.has-hover : {
                                             color: Palette.text;
-                                            in { animate color { duration: 120ms; } }
+                                            in { animate color { duration: Motion.quick; } }
                                         }
                                     ]
                                 }
@@ -2173,7 +2290,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 states [
                                     h when ta16.has-hover : {
                                         color: Palette.accent;
-                                        in { animate color { duration: 120ms; } }
+                                        in { animate color { duration: Motion.quick; } }
                                     }
                                 ]
                             }

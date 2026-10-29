@@ -12,7 +12,8 @@ pub const THEME_SYSTEM: &str = "system";
 // --- UI language -------------------------------------------------------------
 pub const LANG_FA: &str = "fa";
 pub const LANG_EN: &str = "en";
-pub const LANGS: [&str; 2] = [LANG_FA, LANG_EN];pub const THEME_DARK: &str = "dark";
+pub const LANGS: [&str; 2] = [LANG_FA, LANG_EN];
+pub const THEME_DARK: &str = "dark";
 pub const THEME_LIGHT: &str = "light";
 
 // --- Heritage eras (visual identity) -----------------------------------------
@@ -79,6 +80,12 @@ pub const DEFAULT_SHORTCUTS: [(&str, &str); 4] = [
     ("toggle_window", "<Super>w"),
 ];
 
+/// Serde default for boolean settings that should be on unless the config
+/// says otherwise (a config written before the field existed has no key).
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -98,6 +105,12 @@ pub struct Settings {
     /// Visual identity: which Iranian dynasty's palette and motifs are shown.
     pub era: String,
     pub compact_mode: bool,
+    /// Whether interface motion (transitions, easing, the pulsing ring) is
+    /// played. Turning it off makes every animation instantaneous, which is
+    /// what a user on a slow machine, or one who prefers reduced motion,
+    /// actually wants.
+    #[serde(default = "default_true")]
+    pub animations: bool,
 
     // --- Language ---
     /// UI language: "fa" (default) or "en".
@@ -139,6 +152,7 @@ impl Default for Settings {
             era: ERA_CYRUS.into(),
             lang: LANG_FA.into(),
             compact_mode: false,
+            animations: true,
             sound_enabled: true,
             sound_theme: SOUND_SANTUR.into(),
             tick_sound: false,

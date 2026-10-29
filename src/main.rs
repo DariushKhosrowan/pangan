@@ -10,12 +10,12 @@ use slint::{
     VecModel,
 };
 
-mod events;
-mod calendar;
-mod refresh;
 mod automation;
+mod calendar;
 mod clock;
+mod events;
 mod platform;
+mod refresh;
 mod settings;
 mod sound;
 mod stats;
@@ -269,11 +269,17 @@ fn refresh_calendar(win: &PanganWindow, app: &AppState) {
                 text: SharedString::from(r.text),
             })
             .collect()
-    }; let (l_ev, l_birth, l_death, l_occ) = if en {
+    };
+    let (l_ev, l_birth, l_death, l_occ) = if en {
         ("Events", "Born", "Died", "Occasions")
     } else {
         ("رخداد", "زادروز", "درگذشت", "مناسبت")
-    }; let mut iran_rows = to_ui(evs, l_ev); iran_rows.extend(to_ui(occasions, l_occ)); iran_rows.extend(to_ui(births, l_birth)); iran_rows.extend(to_ui(deaths, l_death)); win.set_cal_events(ModelRc::new(VecModel::from(iran_rows))); // ── World stream: keyed by the Gregorian day, shown after Iran's ──
+    };
+    let mut iran_rows = to_ui(evs, l_ev);
+    iran_rows.extend(to_ui(occasions, l_occ));
+    iran_rows.extend(to_ui(births, l_birth));
+    iran_rows.extend(to_ui(deaths, l_death));
+    win.set_cal_events(ModelRc::new(VecModel::from(iran_rows))); // ── World stream: keyed by the Gregorian day, shown after Iran's ──
     let (_, gm, gd) = calendar::to_gregorian(jy, jm, jd);
     let world = app.events.lock().unwrap().world(&lang, gm, gd);
     let world_label = if en { "World" } else { "جهان" };
@@ -287,11 +293,23 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
     let w = stats::report(&st.data.sessions, stats::Period::Week);
     let m = stats::report(&st.data.sessions, stats::Period::Month);
     let en = app.settings.lock().unwrap().lang == "en";
-    let mut report = String::from(if en { "── TODAY ──\n" } else { "── امروز ──\n" });
+    let mut report = String::from(if en {
+        "── TODAY ──\n"
+    } else {
+        "── امروز ──\n"
+    });
     report.push_str(&stats::narrative(&t, en));
-    report.push_str(if en { "\n\n── THIS WEEK ──\n" } else { "\n\n── این هفته ──\n" });
+    report.push_str(if en {
+        "\n\n── THIS WEEK ──\n"
+    } else {
+        "\n\n── این هفته ──\n"
+    });
     report.push_str(&stats::narrative(&w, en));
-    report.push_str(if en { "\n\n── THIS MONTH ──\n" } else { "\n\n── این ماه ──\n" });
+    report.push_str(if en {
+        "\n\n── THIS MONTH ──\n"
+    } else {
+        "\n\n── این ماه ──\n"
+    });
     report.push_str(&stats::narrative(&m, en));
     win.set_report_text(SharedString::from(report));
 
@@ -328,11 +346,7 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
     win.set_session_counter(SharedString::from(if en {
         format!("Session {} · goal {} min", st.data.sessions.len() + 1, goal)
     } else {
-        format!(
-            "نشست {} · هدف {} دقیقه",
-            st.data.sessions.len() + 1,
-            goal
-        )
+        format!("نشست {} · هدف {} دقیقه", st.data.sessions.len() + 1, goal)
     }));
 
     // ---- Rich data for the redesigned UI ----
@@ -467,6 +481,7 @@ fn apply_ui_settings(win: &PanganWindow, app: &AppState) -> Settings {
     s.daily_goal_minutes = win.get_daily_goal_minutes().max(15) as u64;
     s.theme = win.get_theme_pref().to_string();
     s.compact_mode = win.get_compact_mode();
+    s.animations = win.get_animations();
     s.sound_enabled = win.get_sound_enabled();
     s.sound_theme = win.get_sound_theme().to_string();
     s.sound_volume = win.get_sound_volume().clamp(0, 100) as u8;
@@ -524,13 +539,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         win.set_auto_start_on_launch(settings.auto_start_on_launch);
         win.set_daily_goal_minutes(settings.daily_goal_minutes as i32);
         win.set_compact_mode(settings.compact_mode);
+        win.set_animations(settings.animations);
+        ui::Motion::get(&win).set_enabled(settings.animations);
         // The UI deliberately has no width/height binding (that would undo any
         // user resize), so the initial size is applied here, once. After this
         // the window manager owns the geometry.
-        let (w0, h0) = if settings.compact_mode { (320.0, 300.0) } else { (420.0, 680.0) };
-        let _ = win.window().set_size(slint::WindowSize::Logical(
-            slint::LogicalSize::new(w0, h0),
-        ));
+        let (w0, h0) = if settings.compact_mode {
+            (320.0, 300.0)
+        } else {
+            (420.0, 680.0)
+        };
+        let _ = win
+            .window()
+            .set_size(slint::WindowSize::Logical(slint::LogicalSize::new(w0, h0)));
         win.set_sound_enabled(settings.sound_enabled);
         win.set_sound_theme(SharedString::from(settings.sound_theme.clone()));
         win.set_sound_volume(settings.sound_volume as i32);
@@ -828,11 +849,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             s.era = era.clone();
             s.sanitize_mut();
             s.save();
-            (
-                resolve_theme(&s.theme),
-                s.era_label(),
-                s.era_blurb(),
-            )
+            (resolve_theme(&s.theme), s.era_label(), s.era_blurb())
         };
         if let Some(w) = era_weak.upgrade() {
             w.set_era(SharedString::from(era.clone()));
@@ -843,23 +860,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Refresh the day's events from Wikipedia, off the UI thread.
-    let ref_weak = weak.clone(); let ref_app = Arc::clone(&app); win.on_refresh_events(move || {
-        let Some(w) = ref_weak.upgrade() else { return }; let g = ui::Strings::get(&w); w.set_refresh_status(SharedString::from(g.get_refreshing())); let app2 = Arc::clone(&ref_app); let weak2 = ref_weak.clone(); std::thread::spawn(move || {
-            let (jy, jm, jd) = calendar::today(); let (_, gm, gd) = calendar::to_gregorian(jy, jm, jd); // Start from the embedded table so a partial refresh never loses
-            // days it did not touch.
+    let ref_weak = weak.clone();
+    let ref_app = Arc::clone(&app);
+    win.on_refresh_events(move || {
+        let Some(w) = ref_weak.upgrade() else { return };
+        let g = ui::Strings::get(&w);
+        w.set_refresh_status(SharedString::from(g.get_refreshing()));
+        let app2 = Arc::clone(&ref_app);
+        let weak2 = ref_weak.clone();
+        std::thread::spawn(move || {
+            let (jy, jm, jd) = calendar::today();
+            let (_, gm, gd) = calendar::to_gregorian(jy, jm, jd); // Start from the embedded table so a partial refresh never loses
+                                                                  // days it did not touch.
             let mut table: serde_json::Value =
                 serde_json::from_str(include_str!("../data/day_events.json"))
-                    .unwrap_or_else(|_| serde_json::json!({"iran":{},"world_fa":{},"world_en":{}})); let result = refresh::refresh_today(&mut table, jm, jd, gm, gd); let status = match result {
+                    .unwrap_or_else(|_| serde_json::json!({"iran":{},"world_fa":{},"world_en":{}}));
+            let result = refresh::refresh_today(&mut table, jm, jd, gm, gd);
+            let status = match result {
                 Ok(r) => {
                     let text = serde_json::to_string(&table).unwrap_or_default(); // Cache it, then swap the live table.
-                    let _ = std::fs::write(refresh::cache_path(), &text); *app2.events.lock().unwrap() = events::Events::from_str(&text); *app2.calendar_day.lock().unwrap() = (0, 0, 0); format!("{} / {}", r.iran_events, r.world_events)
+                    let _ = std::fs::write(refresh::cache_path(), &text);
+                    *app2.events.lock().unwrap() = events::Events::from_str(&text);
+                    *app2.calendar_day.lock().unwrap() = (0, 0, 0);
+                    format!("{} / {}", r.iran_events, r.world_events)
                 }
                 Err(e) => format!("— {e}"),
-            }; let _ = slint::invoke_from_event_loop(move || {
+            };
+            let _ = slint::invoke_from_event_loop(move || {
                 if let Some(w) = weak2.upgrade() {
-                    w.set_refresh_status(SharedString::from(status.clone())); refresh_calendar(&w, &app2); }
-            }); }); }); // Language switch. Every visible string lives in the Strings global, so
-    // this only has to flip that and refresh the strings Rust owns.
+                    w.set_refresh_status(SharedString::from(status.clone()));
+                    refresh_calendar(&w, &app2);
+                }
+            });
+        });
+    }); // Language switch. Every visible string lives in the Strings global, so
+        // this only has to flip that and refresh the strings Rust owns.
     let lang_weak = weak.clone();
     let lang_app = Arc::clone(&app);
     win.on_set_lang(move |lang| {
@@ -916,19 +951,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ));
         }
     });
+    // Motion on/off takes effect immediately: the global drives every
+    // duration, so flipping it is all that is needed.
+    let an_weak = weak.clone();
+    win.on_set_animations(move |on| {
+        if let Some(w) = an_weak.upgrade() {
+            w.set_animations(on);
+            ui::Motion::get(&w).set_enabled(on);
+        }
+    });
+
     // Compact mode: swap the layout and resize the window to match.
     let cm_weak = weak.clone();
     win.on_set_compact_mode(move |on| {
         if let Some(w) = cm_weak.upgrade() {
             w.set_compact_mode(on);
             let (cw, ch) = if on { (320.0, 300.0) } else { (420.0, 680.0) };
-            let _ = w.window().set_size(slint::WindowSize::Logical(
-                slint::LogicalSize::new(cw, ch),
-            ));
+            let _ = w
+                .window()
+                .set_size(slint::WindowSize::Logical(slint::LogicalSize::new(cw, ch)));
         }
     });
 
- // Sync now.
+    // Sync now.
     let sync_app = Arc::clone(&app);
     let sync_weak = weak.clone();
     win.on_sync_now(move || {
@@ -990,10 +1035,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         w.set_sound_theme(SharedString::from(s.sound_theme.clone()));
                         w.set_sound_volume(s.sound_volume as i32);
                         w.set_compact_mode(s.compact_mode);
-                        let (cw, ch) = if s.compact_mode { (320.0, 300.0) } else { (420.0, 680.0) };
-                        let _ = w.window().set_size(slint::WindowSize::Logical(
-                            slint::LogicalSize::new(cw, ch),
-                        ));
+                        w.set_animations(s.animations);
+                        ui::Motion::get(&w).set_enabled(s.animations);
+                        let (cw, ch) = if s.compact_mode {
+                            (320.0, 300.0)
+                        } else {
+                            (420.0, 680.0)
+                        };
+                        let _ = w
+                            .window()
+                            .set_size(slint::WindowSize::Logical(slint::LogicalSize::new(cw, ch)));
                         w.set_theme_pref(SharedString::from(s.theme.clone()));
                         w.set_theme_label(SharedString::from(s.theme_label()));
                         let resolved = resolve_theme(&s.theme);
