@@ -29,13 +29,18 @@ export global Palette {
     in-out property <string> era: "cyrus"; // ── Era accents ────────────────────────────────────────────────────────
     // Cyrus: Achaemenid gold. Darius: Persepolis bronze. All pre-Islamic.
     // Parthian: lapis blue. Sasanid: verdigris silver.
+    // The light-theme accents are deliberately darker than the dark-theme
+    // ones. The same hue cannot serve both: gold at #A67A2B on an off-white
+    // page is 3.5:1, which is not readable text, while the same gold on the
+    // dark page is 8.7:1. Each theme gets the lightness its background needs,
+    // and every value here clears 4.5:1 against both the page and a card.
     out property <brush> accent: era == "darius"
-        ? (dark ? #C87941 : #A85F2C)
+        ? (dark ? #C87941 : #8A4A1C)
         : era == "sasanid"
-        ? (dark ? #4FA89B : #2E7D72)
+        ? (dark ? #4FA89B : #216158)
         : era == "parthian"
-        ? (dark ? #5B8FD6 : #2F5FA8)
-        : (dark ? #D6A84E : #A67A2B); out property <brush> accent-soft: era == "darius"
+        ? (dark ? #5B8FD6 : #2A5495)
+        : (dark ? #D6A84E : #8A6419); out property <brush> accent-soft: era == "darius"
         ? (dark ? #2A2018 : #F5E9DC)
         : era == "sasanid"
         ? (dark ? #14251F : #E2F0EC)
@@ -84,7 +89,7 @@ export global Palette {
         ? (dark ? #182722 : #E8F0ED)
         : era == "parthian"
         ? (dark ? #1A2334 : #E7ECF5)
-        : (dark ? #1E222B : #EDE9E1); out property <brush> text: dark ? #E9E7EF : #1B1A20; out property <brush> text-dim: dark ? #9A9DAD : #6B6774; out property <brush> text-faint: dark ? #6A6E7E : #98939F; out property <brush> track: era == "darius"
+        : (dark ? #1E222B : #EDE9E1); out property <brush> text: dark ? #E9E7EF : #1B1A20; out property <brush> text-dim: dark ? #9A9DAD : #6B6774; out property <brush> text-faint: dark ? #868B9C : #726D7A; out property <brush> track: era == "darius"
         ? (dark ? #2A241B : #E8DFD0)
         : era == "sasanid"
         ? (dark ? #1E2E28 : #DCE8E4)
@@ -1165,7 +1170,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             y: root.view-offset;
             padding: 16px; spacing: 10px; HorizontalLayout {
                 spacing: 8px; alignment: space-between; Text {
-                    text: root.session-name; font-size: 11px; font-weight: 700; letter-spacing: 1.4px; color: Palette.text-faint; vertical-alignment: center; }
+                    text: root.session-name; font-size: 11px; font-weight: 700; color: Palette.text-faint; vertical-alignment: center; }
                 Text {
                     text: root.session-counter; font-size: 10px; color: Palette.text-faint; vertical-alignment: center; }
             }
@@ -1248,11 +1253,11 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
                     spacing: 2px; alignment: center; Text {
-                        text: root.session-name; font-size: 10px; font-weight: 700; letter-spacing: 2px; color: Palette.accent; horizontal-alignment: center; }
+                        text: root.session-name; font-size: 11px; font-weight: 700; color: Palette.accent; horizontal-alignment: center; }
                     Text {
                         text: Digits.pad2(root.time-minutes) + ":" + Digits.pad2(root.time-seconds); font-size: Math.max(34px, Math.min(62px, hero-ring.width * 0.26)); font-weight: 300; letter-spacing: 0.5px; color: Palette.text; horizontal-alignment: center; }
                     Text {
-                        text: root.phase; font-size: 11px; color: Palette.text-faint; horizontal-alignment: center; }
+                        text: root.phase; font-size: 11px; color: Palette.text-dim; horizontal-alignment: center; }
                     // The day's goal, inside the ring rather than in a card of
                     // its own. It belongs to the timer — it is the same number
                     // the ring is filling towards — and a separate bar below
@@ -1349,8 +1354,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             Text {
                                 text: root.day-headline;
                                 font-family: "Vazirmatn";
-                                font-size: 15px;
-                                font-weight: 600;
+                                font-size: 16px;
+                                font-weight: 700;
                                 color: Palette.text;
                                 horizontal-alignment: center;
                                 overflow: elide;
@@ -1359,8 +1364,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             Text {
                                 text: root.day-subline;
                                 font-family: "Vazirmatn";
-                                font-size: 9px;
-                                color: Palette.text-faint;
+                                font-size: 11px;
+                                color: Palette.text-dim;
                                 horizontal-alignment: center;
                                 overflow: elide;
                             }
@@ -1880,7 +1885,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             Text {
                                 text: root.cal-date; font-family: "Vazirmatn"; font-size: 24px; font-weight: 600; color: Palette.text; }
                             Text {
-                                text: root.cal-month-progress; font-family: "Vazirmatn"; font-size: 10px; color: Palette.text-faint; }
+                                text: root.cal-month-progress; font-family: "Vazirmatn"; font-size: 11px; color: Palette.text-dim; }
                             Text {
                                 text: Strings.heritage-title + " · " + Strings.heritage-sub;
                                 font-family: "Vazirmatn"; font-size: 9px; color: Palette.accent; }
@@ -1891,12 +1896,12 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     Rectangle {
                         height: 74px; border-radius: 14px; background: Palette.accent-soft; border-width: 1px; border-color: Palette.accent; VerticalLayout {
                             padding-left: 16px; padding-right: 16px; padding-top: 12px; padding-bottom: 12px; spacing: 2px; Text {
-                                text: Strings.day-name-label; font-family: "Vazirmatn"; font-size: 9px; font-weight: 700; letter-spacing: 0.6px; color: Palette.text-faint; }
+                                text: Strings.day-name-label; font-family: "Vazirmatn"; font-size: 11px; font-weight: 700; color: Palette.text-faint; }
                             HorizontalLayout {
                                 spacing: 8px; Text {
                                     text: root.cal-day-name; font-family: "Vazirmatn"; font-size: 20px; font-weight: 600; color: Palette.accent; vertical-alignment: center; }
                                 Text {
-                                    text: root.cal-day-index; font-family: "Vazirmatn"; font-size: 10px; color: Palette.text-dim; vertical-alignment: center; horizontal-stretch: 1; }
+                                    text: root.cal-day-index; font-family: "Vazirmatn"; font-size: 11px; color: Palette.text-dim; vertical-alignment: center; horizontal-stretch: 1; }
                             }
                         }
                     }
@@ -1914,7 +1919,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 Text {
                                     text: Strings.feast-prefix + root.cal-feast; font-family: "Vazirmatn"; font-size: 13px; font-weight: 600; color: Palette.text; vertical-alignment: center; }
                                 if root.cal-feast-note != "" : Text {
-                                    text: root.cal-feast-note; font-family: "Vazirmatn"; font-size: 10px; color: Palette.text-faint; overflow: elide; }
+                                    text: root.cal-feast-note; font-family: "Vazirmatn"; font-size: 11px; color: Palette.text-dim; overflow: elide; }
                             }
                         }
                     }
@@ -1922,7 +1927,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     // ---- events ----
                     HorizontalLayout {
                         height: 20px; padding-left: 2px; spacing: 6px; alignment: start; Text {
-                            text: Strings.iran-events; font-family: "Vazirmatn"; font-size: 10px; font-weight: 700; letter-spacing: 0.6px; color: Palette.text-faint; vertical-alignment: center; }
+                            text: Strings.iran-events; font-family: "Vazirmatn"; font-size: 11px; font-weight: 700; color: Palette.text-faint; vertical-alignment: center; }
                         Text {
                             text: root.cal-events.length > 0 ? "(" + root.cal-events.length + ")" : ""; font-size: 10px; color: Palette.text-faint; vertical-alignment: center; }
                     }
