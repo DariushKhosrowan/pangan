@@ -1037,7 +1037,15 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in-out property <bool> cal-world-open: false;
     in-out property <string> refresh-status: "";
     in property <string> cal-empty: "برای این روز رویدادی ثبت نشده است."; // ---- Reports / status / sync / task input ----
-    in property <string> status-line; in property <string> report-text; in property <string> sync-status; in-out property <string> new-task-text; in-out property <string> show-view: "main"; // ---- Settings (edited in the Settings screen) ----
+    in property <string> status-line; in property <string> report-text; in property <string> sync-status;
+    // ---- Google account sync ----
+    in property <bool> sync-signed-in: false;
+    in property <string> sync-account: "";
+    in property <bool> sync-auto-on: false;
+    in property <string> sync-device-code: "";
+    in property <string> sync-device-url: "https://www.google.com/device";
+    in property <bool> sync-waiting: false;
+    in property <bool> sync-available: true; in-out property <string> new-task-text; in-out property <string> show-view: "main"; // ---- Settings (edited in the Settings screen) ----
     in-out property <int> work-minutes: 25; in-out property <int> short-break-minutes: 5; in-out property <int> long-break-minutes: 15; in-out property <int> long-break-interval: 4; in-out property <int> daily-goal-minutes: 120; in-out property <bool> auto-start-next: true; in-out property <bool> auto-start-on-launch: false; in-out property <bool> sound-enabled: true; in-out property <string> sound-theme: "santur"; in-out property <bool> hotkey-enabled: true; in-out property <bool> inhibit-enabled: true; in-out property <bool> overlay-enabled: true; in-out property <bool> compact-mode: false; in-out property <bool> animations: true; in-out property <int> sound-volume: 80; in property <string> automation-summary; // ---- Rich data (pushed from Rust) ----
     in property <[TaskItem]> tasks: []; in property <[DayRow]> month-rows: []; in property <[TaskItem]> day-tasks: []; in property <string> month-title: ""; in property <string> selected-day-title: ""; in property <string> selected-day-sub: ""; in property <bool> selected-is-today: false; in-out property <string> cal-selected: "";
     // Which task row is open for renaming (its id), or 0 for none. Only one row
@@ -1050,7 +1058,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in property <bool> day-is-today: true;
     in-out property <string> edit-text: "";
     in property <[float]> week-bars: [0, 0, 0, 0, 0, 0, 0]; in property <[string]> week-labels: ["ش", "ی", "د", "س", "چ", "پ", "ج"]; in property <int> today-sessions: 0; in property <int> today-minutes: 0; in property <int> today-score: 0; in property <int> today-streak: 0; in property <int> today-consistency: 0; in property <int> today-best: 0; in property <int> session-total: 4; in property <int> session-done: 0; in property <int> goal-minutes: 120; in property <int> goal-done-minutes: 0; // ---- Callbacks to Rust ----
-    callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback refresh-events; callback open-url(string); callback window-drag-start; callback set-compact-mode(bool); callback set-animations(bool); callback pick-day(string); callback shift-month(int); callback goto-today; callback add-task-on(string); callback delete-task(int); callback rename-task(int, string); callback move-task(int, int); callback step-day(int);
+    callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback sync-connect; callback sync-disconnect; callback set-sync-auto(bool); callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback refresh-events; callback open-url(string); callback window-drag-start; callback set-compact-mode(bool); callback set-animations(bool); callback pick-day(string); callback shift-month(int); callback goto-today; callback add-task-on(string); callback delete-task(int); callback rename-task(int, string); callback move-task(int, int); callback step-day(int);
     // Resize: the edge/corner grab zones report the pointer's screen position
     // and which edge is being dragged; Rust turns that into a new window size.
 
@@ -2760,6 +2768,173 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                     // ── cloud ──
                     SectionLabel { text: Strings.sec-cloud; }
+
+                    // Google account card. This is the whole sign-in flow: one
+                    // button, then a short code the user types on whatever
+                    // device already has a browser. No password ever touches
+                    // the app, and no local port has to be reachable.
+                    Card {
+                        height: root.sync-signed-in ? 132px : (root.sync-device-code == "" ? 132px : 196px);
+                        VerticalLayout {
+                            padding: 14px;
+                            spacing: 9px;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Rectangle {
+                                    width: 8px;
+                                    height: 8px;
+                                    border-radius: 4px;
+                                    y: (parent.height - self.height) / 2;
+                                    background: root.sync-signed-in ? Palette.accent : Palette.text-faint;
+                                }
+                                Text {
+                                    text: root.sync-signed-in ? Strings.sync-connected : Strings.sync-off;
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: root.sync-signed-in ? Palette.accent : Palette.text-dim;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: root.sync-account;
+                                    font-size: 11px;
+                                    color: Palette.text-faint;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
+                                }
+                            }
+
+                            Text {
+                                text: Strings.sync-blurb;
+                                font-size: 10px;
+                                color: Palette.text-faint;
+                                wrap: word-wrap;
+                                visible: !root.sync-signed-in;
+                            }
+
+                            // The device code, shown only while waiting.
+                            Rectangle {
+                                height: 54px;
+                                border-radius: 10px;
+                                background: Palette.surface-2;
+                                visible: root.sync-device-code != "";
+                                VerticalLayout {
+                                    padding: 8px;
+                                    spacing: 3px;
+                                    alignment: center;
+                                    Text {
+                                        text: Strings.sync-code-hint;
+                                        font-size: 9px;
+                                        color: Palette.text-faint;
+                                        horizontal-alignment: center;
+                                    }
+                                    Text {
+                                        text: root.sync-device-code;
+                                        font-size: 20px;
+                                        font-weight: 700;
+                                        color: Palette.accent;
+                                        horizontal-alignment: center;
+                                        letter-spacing: 3px;
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+
+                                Rectangle {
+                                    height: 34px;
+                                    horizontal-stretch: 1;
+                                    border-radius: 9px;
+                                    background: Palette.surface-2;
+                                    visible: !root.sync-signed-in;
+                                    ta-sync-connect := TouchArea {
+                                        clicked => { if (root.sync-available && !root.sync-waiting) { root.sync-connect(); } }
+                                    }
+                                    states [
+                                        h when ta-sync-connect.has-hover && root.sync-available : {
+                                            background: Palette.surface-3;
+                                            in { animate background { duration: Motion.quick; } }
+                                        }
+                                    ]
+                                    Text {
+                                        text: root.sync-waiting ? Strings.sync-waiting : (root.sync-available ? Strings.sync-connect : Strings.sync-no-client);
+                                        font-size: 12px;
+                                        color: root.sync-available ? Palette.text : Palette.text-faint;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                // Sync now, for a user who does not want to wait
+                                // for the timer.
+                                Rectangle {
+                                    height: 34px;
+                                    horizontal-stretch: 1;
+                                    border-radius: 9px;
+                                    background: Palette.surface-2;
+                                    visible: root.sync-signed-in;
+                                    ta-sync-now := TouchArea { clicked => { root.sync-now(); } }
+                                    states [
+                                        h when ta-sync-now.has-hover : {
+                                            background: Palette.surface-3;
+                                            in { animate background { duration: Motion.quick; } }
+                                        }
+                                    ]
+                                    Text {
+                                        text: Strings.sync-last;
+                                        font-size: 12px;
+                                        color: Palette.text;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                Rectangle {
+                                    height: 34px;
+                                    horizontal-stretch: 1;
+                                    border-radius: 9px;
+                                    background: Palette.surface-2;
+                                    visible: root.sync-signed-in;
+                                    ta-sync-off := TouchArea { clicked => { root.sync-disconnect(); } }
+                                    states [
+                                        h when ta-sync-off.has-hover : {
+                                            background: Palette.surface-3;
+                                            in { animate background { duration: Motion.quick; } }
+                                        }
+                                    ]
+                                    Text {
+                                        text: Strings.sync-disconnect;
+                                        font-size: 12px;
+                                        color: Palette.text-dim;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            // Automatic sync switch.
+                            HorizontalLayout {
+                                height: 26px;
+                                visible: root.sync-signed-in;
+                                alignment: center;
+                                Text {
+                                    text: Strings.sync-auto;
+                                    font-size: 12px;
+                                    color: Palette.text;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                    horizontal-alignment: Strings.fa ? end : start;
+                                }
+                                Toggle {
+                                    checked: root.sync-auto-on;
+                                    toggled(v) => { root.set-sync-auto(v); }
+                                }
+                            }
+                        }
+                    }
+
                     Card {
                         height: 62px;
                         VerticalLayout {

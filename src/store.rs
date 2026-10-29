@@ -25,6 +25,17 @@ pub struct Task {
     /// true when the task is completed.
     pub done: bool,
     pub created_at: i64,
+    /// Unix seconds of the last local edit. Sync merges per task, so it needs
+    /// to know which side of a conflict is newer; without this the only
+    /// option was "last writer wins for the whole file", which silently threw
+    /// away edits made on the other device.
+    #[serde(default)]
+    pub updated_at: i64,
+    /// Set when the task is deleted. The row stays in the store (invisible to
+    /// the UI) so the deletion can travel to other devices; a row that simply
+    /// vanishes cannot be told apart from a row the other device never saw.
+    #[serde(default)]
+    pub deleted: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -101,35 +112,56 @@ impl Store {
 
     pub fn add_task(&mut self, title: String, date: String, time: String) -> u64 {
         let id = self.data.next_task_id();
+        let now = chrono::Utc::now().timestamp();
         let t = Task {
             id,
             title,
             date,
             time,
             done: false,
-            created_at: chrono::Utc::now().timestamp(),
+            created_at: now,
+            updated_at: now,
+            deleted: false,
         };
         self.data.tasks.push(t);
         self.save();
         id
     }
 
+    /// Stamp a task as edited now. Every mutation goes through this, because a
+    /// task whose `updated_at` did not move would lose the merge against the
+    /// other device's older copy.
+    fn touch(t: &mut Task) {
+        t.updated_at = chrono::Utc::now().timestamp();
+    }
+
     pub fn set_done(&mut self, id: u64, done: bool) {
         if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
             t.done = done;
+            Self::touch(t);
             self.save();
         }
     }
 
+    /// Delete a task by marking it, not by dropping the row.
+    ///
+    /// A row that simply disappears cannot be told apart from a row another
+    /// device has never seen, so the other device would happily push its copy
+    /// back on the next sync and the task would return. The tombstone travels
+    /// instead, and the UI filters deleted rows out.
     pub fn remove_task(&mut self, id: u64) {
-        self.data.tasks.retain(|t| t.id != id);
-        self.save();
+        if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
+            t.deleted = true;
+            Self::touch(t);
+            self.save();
+        }
     }
 
     /// Move a task to another day, keeping its time.
     pub fn set_task_date(&mut self, id: u64, date: String) {
         if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
             t.date = date;
+            Self::touch(t);
             self.save();
         }
     }
@@ -144,6 +176,7 @@ impl Store {
         }
         if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
             t.title = title;
+            Self::touch(t);
             self.save();
         }
     }
@@ -159,6 +192,7 @@ impl Store {
         let next = crate::calendar::shift_day_key(base, delta)?;
         if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
             t.date = next.clone();
+            Self::touch(t);
             self.save();
         }
         Some(next)
@@ -169,11 +203,21 @@ impl Store {
     /// A task with no date is not "due never" — it is an undated back-burner
     /// item, and it belongs on the day you are looking at so it stays visible
     /// instead of silently disappearing from every view.
+    /// Every task that is not a deletion tombstone.
+    ///
+    /// Deleted tasks stay in the store so the deletion can sync (see
+    /// `remove_task`), so every read path has to filter them out. Going
+    /// through this one method means a new screen cannot forget to.
+    pub fn live_tasks(&self) -> impl Iterator<Item = &Task> {
+        self.data.tasks.iter().filter(|t| !t.deleted)
+    }
+
     pub fn tasks_on(&self, date: &str) -> Vec<Task> {
         let mut out: Vec<Task> = self
             .data
             .tasks
             .iter()
+            .filter(|t| !t.deleted)
             .filter(|t| t.date == date || t.date.is_empty())
             .cloned()
             .collect();
@@ -230,7 +274,25 @@ mod tests {
         store.set_done(id, true);
         assert!(store.data.tasks[0].done);
         store.remove_task(id);
-        assert!(store.data.tasks.is_empty());
+        // The row stays as a tombstone so the deletion can reach other
+        // devices; every read path filters it out.
+        assert_eq!(store.data.tasks.len(), 1, "the row is kept as a tombstone");
+        assert!(store.data.tasks[0].deleted);
+        assert_eq!(store.live_tasks().count(), 0, "but it is not visible");
+    }
+
+    #[test]
+    fn an_edit_moves_the_updated_stamp() {
+        let mut store = Store::load();
+        store.data = Data::default();
+        store.data.next_task_id = 0;
+        let id = store.add_task("A".into(), String::new(), String::new());
+        store.data.tasks[0].updated_at = 1; // pretend it was written long ago
+        store.set_task_title(id, "B".into());
+        assert!(
+            store.data.tasks[0].updated_at > 1,
+            "a rename must win the merge against the older copy"
+        );
     }
 
     #[test]

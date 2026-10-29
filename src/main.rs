@@ -13,7 +13,10 @@ use slint::{
 mod automation;
 mod calendar;
 mod clock;
+mod cloudsync;
 mod events;
+mod gdrive;
+mod merge;
 mod platform;
 mod refresh;
 mod settings;
@@ -59,6 +62,10 @@ struct AppState {
     /// The Jalali month the grid is showing, independent of the selected day:
     /// you can page to next month and look around without moving the selection.
     shown_month: Mutex<(i32, u32)>,
+    /// Automatic cloud sync: the timer reads this, the UI writes it.
+    cloud: Arc<cloudsync::Engine>,
+    /// Google credentials, refreshed in place when they age out.
+    tokens: Arc<Mutex<gdrive::Tokens>>,
 }
 
 impl AppState {
@@ -86,6 +93,8 @@ impl AppState {
             calendar_day: Mutex::new((0, 0, 0)),
             selected_day: Mutex::new(String::new()),
             shown_month: Mutex::new((0, 0)),
+            cloud: Arc::new(cloudsync::Engine::new()),
+            tokens: Arc::new(Mutex::new(sync::load_tokens().unwrap_or_default())),
         }
     }
 
@@ -578,12 +587,11 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
 
     let today = chrono::Local::now().date_naive();
     let mut tasks_line = String::new();
-    let open = st.data.tasks.iter().filter(|t| !t.done).count();
+    let open = st.live_tasks().filter(|t| !t.done).count();
+    let today_key = today.format("%Y-%m-%d").to_string();
     let today_open = st
-        .data
-        .tasks
-        .iter()
-        .filter(|t| !t.done && t.date == today.format("%Y-%m-%d").to_string())
+        .live_tasks()
+        .filter(|t| !t.done && t.date == today_key)
         .count();
     if en {
         tasks_line.push_str(&format!("Tasks: {} open ({} today) ", open, today_open));
@@ -660,9 +668,7 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
 
     // Task list for the redesigned panel: open tasks first, then done.
     let mut items: Vec<ui::TaskItem> = st
-        .data
-        .tasks
-        .iter()
+        .live_tasks()
         .map(|t| ui::TaskItem {
             id: t.id as i32,
             title: SharedString::from(t.title.clone()),
@@ -713,7 +719,7 @@ fn update_automation_summary(win: &slint::Weak<PanganWindow>, app: &AppState) {
 fn sync_row(app: &AppState) -> sync::SyncRow {
     let st = app.store.lock().unwrap();
     let t = stats::report(&st.data.sessions, stats::Period::Today);
-    let open = st.data.tasks.iter().filter(|t| !t.done).count();
+    let open = st.live_tasks().filter(|t| !t.done).count();
     let row = sync::SyncRow {
         ts: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
         period: "Today".into(),
@@ -729,17 +735,108 @@ fn sync_row(app: &AppState) -> sync::SyncRow {
 }
 
 /// Perform a sync (used by the button and the auto-sync timer).
-fn do_sync(win: &slint::Weak<PanganWindow>, app: &AppState) {
-    let row = sync_row(app);
+/// Run one cloud sync on a background thread.
+///
+/// The network call must not happen on the UI thread: a slow Drive request
+/// would freeze the countdown, which is the one thing this app cannot do.
+fn do_sync(win: &slint::Weak<PanganWindow>, app: &Arc<AppState>) {
     let en = app.settings.lock().unwrap().lang == "en";
-    let status = sync::try_sync(&row, en);
+    let tokens = app.tokens.lock().unwrap().clone();
+    if tokens.is_empty() {
+        let status = if en {
+            "Not signed in".to_string()
+        } else {
+            "وارد نشده‌اید".to_string()
+        };
+        *app.last_sync.lock().unwrap() = status.clone();
+        if let Some(w) = win.upgrade() {
+            w.set_sync_status(SharedString::from(status));
+        }
+        return;
+    }
+
+    // Snapshot the data now; the merge happens against this copy.
+    let local = app.store.lock().unwrap().data.clone();
+
+    let weak = win.clone();
+    let app2 = Arc::clone(app);
+    let tokens_arc = Arc::clone(&app.tokens);
+    let engine = Arc::clone(&app.cloud);
+
     {
-        let mut ls = app.last_sync.lock().unwrap();
-        *ls = status.clone();
+        let mut st = engine.state.lock().unwrap();
+        if st.busy {
+            return; // one cycle at a time; the running one will report
+        }
+        st.busy = true;
     }
-    if let Some(w) = win.upgrade() {
-        w.set_sync_status(SharedString::from(status));
-    }
+
+    std::thread::spawn(move || {
+        let result = {
+            let mut t = tokens_arc.lock().unwrap();
+            cloudsync::sync_once(&mut t, &local, &mut |merged: &store::Data| {
+                let mut st = app2.store.lock().unwrap();
+                st.data = merged.clone();
+                st.save();
+            })
+        };
+        // Persist refreshed credentials so the next launch does not sign in
+        // again, and so a rotated refresh token is not lost.
+        {
+            let t = tokens_arc.lock().unwrap().clone();
+            if !t.is_empty() {
+                let _ = sync::save_tokens(&t);
+            }
+        }
+
+        let status = match &result {
+            Ok(out) => {
+                let stamp = chrono::Local::now().format("%H:%M").to_string();
+                if out.quiet() {
+                    if en {
+                        format!("Synced {stamp}")
+                    } else {
+                        format!("همگام شد {stamp}")
+                    }
+                } else if out.pulled {
+                    if en {
+                        format!("Updated from cloud {stamp}")
+                    } else {
+                        format!("از ابر به‌روز شد {stamp}")
+                    }
+                } else {
+                    if en {
+                        format!("Uploaded {stamp}")
+                    } else {
+                        format!("بارگذاری شد {stamp}")
+                    }
+                }
+            }
+            Err(e) => {
+                if en {
+                    format!("Sync error: {e}")
+                } else {
+                    format!("خطای همگام‌سازی: {e}")
+                }
+            }
+        };
+
+        {
+            let mut st = engine.state.lock().unwrap();
+            st.busy = false;
+            st.status = status.clone();
+            if result.is_ok() {
+                st.last_ok = chrono::Utc::now().timestamp();
+            }
+        }
+        *app2.last_sync.lock().unwrap() = status.clone();
+
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(w) = weak.upgrade() {
+                w.set_sync_status(SharedString::from(status));
+            }
+        });
+    });
 }
 
 /// Push the current settings values from the window back into the model and
@@ -793,6 +890,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (tx, rx) = channel::<TrayAction>();
 
     let inhibit = Arc::new(Mutex::new(None::<platform::inhibit::InhibitGuard>));
+
+    // Initial state of the Google account card, read from what was stored on
+    // the last run, so a signed-in user does not see "Not connected" flash.
+    {
+        let tokens = app.tokens.lock().unwrap().clone();
+        let signed_in = !tokens.is_empty();
+        win.set_sync_signed_in(signed_in);
+        win.set_sync_auto_on(settings.sync_enabled);
+        win.set_sync_available(gdrive::has_client_id());
+        if signed_in {
+            win.set_sync_account(SharedString::from(tokens.email.clone()));
+        }
+    }
 
     // Initial theme application.
     {
@@ -867,6 +977,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut st = tick_app.store.lock().unwrap();
                 st.add_sessions(&recs);
             }
+            // A finished focus block is the most important thing to sync: it
+            // is the user's actual history.
+            tick_app.cloud.mark_dirty();
             if tick_app.settings.lock().unwrap().sound_enabled {
                 sound::play(&tick_sounds_work, volume);
             }
@@ -892,11 +1005,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        // Auto-sync every 10 minutes if a token is configured.
-        if chrono::Local::now() - last_auto_sync > chrono::Duration::minutes(10) {
-            last_auto_sync = chrono::Local::now();
-            if sync::has_config() {
-                do_sync(&tick_weak, &tick_app);
+        // Automatic sync. Two triggers, both needed:
+        //
+        //  * a change just happened, so push it now — waiting for the interval
+        //    would leave the user staring at a stale phone for minutes;
+        //  * the interval elapsed, so pull — this is how a change made
+        //    elsewhere arrives when nothing is happening locally.
+        //
+        // The engine refuses to start a second cycle while one is running, so
+        // a burst of edits cannot stack up requests.
+        {
+            let settings = tick_app.settings.lock().unwrap().clone();
+            let signed_in = !tick_app.tokens.lock().unwrap().is_empty();
+            if settings.sync_enabled && signed_in {
+                let interval = settings.sync_interval_secs.max(30);
+                let due = chrono::Local::now() - last_auto_sync
+                    > chrono::Duration::seconds(interval as i64);
+                if tick_app.cloud.take_dirty() || due {
+                    last_auto_sync = chrono::Local::now();
+                    do_sync(&tick_weak, &tick_app);
+                }
             }
         }
 
@@ -1075,6 +1203,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut st = task_app.store.lock().unwrap();
             st.add_task(txt.trim().to_string(), today, String::new());
         }
+        task_app.cloud.mark_dirty();
         if let Some(w) = task_weak.upgrade() {
             w.set_new_task_text(SharedString::from(""));
             refresh_screens(&w, &task_app);
@@ -1163,6 +1292,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut st = del_app.store.lock().unwrap();
             st.remove_task(id as u64);
         }
+        del_app.cloud.mark_dirty();
         if let Some(w) = del_weak.upgrade() {
             refresh_screens(&w, &del_app);
             refresh_day_view(&w, &del_app);
@@ -1176,6 +1306,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut st = ren_app.store.lock().unwrap();
             st.set_task_title(id as u64, title.to_string());
         }
+        ren_app.cloud.mark_dirty();
         if let Some(w) = ren_weak.upgrade() {
             w.set_edit_text(SharedString::new());
             refresh_screens(&w, &ren_app);
@@ -1195,6 +1326,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut st = mv_app.store.lock().unwrap();
             st.shift_task_days(id as u64, delta, &today_key)
         };
+        if landed.is_some() {
+            mv_app.cloud.mark_dirty();
+        }
         if let Some(w) = mv_weak.upgrade() {
             if let Some(next) = landed {
                 *mv_app.selected_day.lock().unwrap() = next.clone();
@@ -1247,6 +1381,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or(false);
             st.set_done(id as u64, !current);
         }
+        toggle_app.cloud.mark_dirty();
         if let Some(w) = toggle_weak.upgrade() {
             refresh_screens(&w, &toggle_app);
             // The calendar's dots and the day's list both depend on done state.
@@ -1422,6 +1557,194 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sync_weak = weak.clone();
     win.on_sync_now(move || {
         do_sync(&sync_weak, &sync_app);
+    });
+
+    // ── Google sign-in (device flow) ──
+    //
+    // The button starts the flow, shows the code, and polls Google in the
+    // background until the user approves on their phone. The UI thread never
+    // blocks: it only receives the final result.
+    let conn_app = Arc::clone(&app);
+    let conn_weak = weak.clone();
+    win.on_sync_connect(move || {
+        let en = conn_app.settings.lock().unwrap().lang == "en";
+        let weak2 = conn_weak.clone();
+        let app2 = Arc::clone(&conn_app);
+
+        if !gdrive::has_client_id() {
+            if let Some(w) = weak2.upgrade() {
+                w.set_sync_available(false);
+                w.set_sync_status(SharedString::from(if en {
+                    "This build has no Google client id.".to_string()
+                } else {
+                    "این نسخه شناسهٔ کلاینت گوگل ندارد.".to_string()
+                }));
+            }
+            return;
+        }
+
+        if let Some(w) = conn_weak.upgrade() {
+            w.set_sync_waiting(true);
+            w.set_sync_status(SharedString::from(if en {
+                "Waiting for approval…".to_string()
+            } else {
+                "در انتظار تأیید…".to_string()
+            }));
+        }
+
+        std::thread::spawn(move || {
+            let code = match gdrive::request_device_code() {
+                Ok(c) => c,
+                Err(e) => {
+                    let msg = if en {
+                        format!("Google refused the request: {e}")
+                    } else {
+                        format!("گوگل درخواست را رد کرد: {e}")
+                    };
+                    let w3 = weak2.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = w3.upgrade() {
+                            w.set_sync_waiting(false);
+                            w.set_sync_status(SharedString::from(msg));
+                        }
+                    });
+                    return;
+                }
+            };
+
+            // Show the code before polling, so the user can start typing.
+            {
+                let user_code = code.user_code.clone();
+                let url = code.verification_url.clone();
+                let w3 = weak2.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = w3.upgrade() {
+                        w.set_sync_device_code(SharedString::from(user_code));
+                        w.set_sync_device_url(SharedString::from(url));
+                    }
+                });
+            }
+
+            // Poll until approved or expired. The deadline comes from Google,
+            // so this cannot spin forever.
+            let deadline = std::time::Instant::now()
+                + std::time::Duration::from_secs(code.expires_in.min(1800));
+            let interval = gdrive::poll_interval(code.interval);
+            loop {
+                std::thread::sleep(interval);
+                if std::time::Instant::now() > deadline {
+                    let msg = if en {
+                        "The code expired. Try again.".to_string()
+                    } else {
+                        "کد منقضی شد. دوباره تلاش کنید.".to_string()
+                    };
+                    let w3 = weak2.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = w3.upgrade() {
+                            w.set_sync_waiting(false);
+                            w.set_sync_device_code(SharedString::new());
+                            w.set_sync_status(SharedString::from(msg));
+                        }
+                    });
+                    return;
+                }
+                match gdrive::poll_token(&code.device_code) {
+                    gdrive::PollOutcome::Pending => continue,
+                    gdrive::PollOutcome::Failed(e) => {
+                        let msg = if en {
+                            format!("Sign-in failed: {e}")
+                        } else {
+                            format!("ورود ناموفق بود: {e}")
+                        };
+                        let w3 = weak2.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = w3.upgrade() {
+                                w.set_sync_waiting(false);
+                                w.set_sync_device_code(SharedString::new());
+                                w.set_sync_status(SharedString::from(msg));
+                            }
+                        });
+                        return;
+                    }
+                    gdrive::PollOutcome::Approved(mut tokens) => {
+                        // Name the account so the card can show who is signed
+                        // in, which is the only way the user can tell two
+                        // Google accounts apart.
+                        if let Ok(tok) = gdrive::access_token(&mut tokens) {
+                            tokens.email = gdrive::fetch_email(&tok).unwrap_or_default();
+                        }
+                        let _ = sync::save_tokens(&tokens);
+                        *app2.tokens.lock().unwrap() = tokens.clone();
+
+                        // Turn automatic sync on: the user just asked for sync
+                        // by signing in, so making them flip a second switch
+                        // would be a puzzle, not a choice.
+                        {
+                            let mut st = app2.settings.lock().unwrap();
+                            st.sync_enabled = true;
+                            st.save();
+                        }
+
+                        let email = tokens.email.clone();
+                        let w3 = weak2.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = w3.upgrade() {
+                                w.set_sync_waiting(false);
+                                w.set_sync_device_code(SharedString::new());
+                                w.set_sync_signed_in(true);
+                                w.set_sync_auto_on(true);
+                                w.set_sync_account(SharedString::from(email));
+                                w.set_sync_status(SharedString::from(if en {
+                                    "Connected".to_string()
+                                } else {
+                                    "متصل شد".to_string()
+                                }));
+                            }
+                        });
+                        // First sync immediately, so the account card is not
+                        // the only thing that changed.
+                        do_sync(&weak2, &app2);
+                        return;
+                    }
+                }
+            }
+        });
+    });
+
+    let disc_app = Arc::clone(&app);
+    let disc_weak = weak.clone();
+    win.on_sync_disconnect(move || {
+        let en = disc_app.settings.lock().unwrap().lang == "en";
+        let _ = sync::clear_tokens();
+        *disc_app.tokens.lock().unwrap() = gdrive::Tokens::default();
+        {
+            let mut st = disc_app.settings.lock().unwrap();
+            st.sync_enabled = false;
+            st.save();
+        }
+        if let Some(w) = disc_weak.upgrade() {
+            w.set_sync_signed_in(false);
+            w.set_sync_auto_on(false);
+            w.set_sync_account(SharedString::new());
+            w.set_sync_device_code(SharedString::new());
+            w.set_sync_status(SharedString::from(if en {
+                "Disconnected".to_string()
+            } else {
+                "قطع شد".to_string()
+            }));
+        }
+    });
+
+    let auto_app = Arc::clone(&app);
+    win.on_set_sync_auto(move |on| {
+        {
+            let mut st = auto_app.settings.lock().unwrap();
+            st.sync_enabled = on;
+            st.save();
+        }
+        if on {
+            auto_app.cloud.mark_dirty();
+        }
     });
 
     // Cloud backup (push full settings+data snapshot to the backup sheet).

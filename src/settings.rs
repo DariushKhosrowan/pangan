@@ -132,6 +132,17 @@ pub struct Settings {
 
     // --- Global hotkeys (action -> accelerator) ---
     pub shortcuts: std::collections::BTreeMap<String, String>,
+
+    // --- Cloud sync ---
+    /// Whether automatic sync runs. Off until the user signs in, so a fresh
+    /// install never makes a network call on its own.
+    #[serde(default)]
+    pub sync_enabled: bool,
+    /// Seconds between automatic syncs. Short enough that a change lands on
+    /// the other device while the user is still looking at it, long enough
+    /// that a laptop left open all day is not hammering the API.
+    #[serde(default = "default_sync_interval")]
+    pub sync_interval_secs: u64,
 }
 
 impl Default for Settings {
@@ -162,8 +173,17 @@ impl Default for Settings {
             overlay_enabled: true,
             automation: Vec::new(),
             shortcuts,
+            sync_enabled: false,
+            sync_interval_secs: default_sync_interval(),
         }
     }
+}
+
+/// Two minutes: a change made on the phone shows up on the desktop about as
+/// fast as the user would bother to check, and an idle app costs 30 requests
+/// an hour, well inside Drive's quota.
+fn default_sync_interval() -> u64 {
+    120
 }
 
 impl Settings {
