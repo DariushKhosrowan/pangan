@@ -476,52 +476,6 @@ component TimerButton inherits Rectangle {
 // ───────────────────────────────────────────────────────────────────────────
 // Ring — a true arc progress ring with a rounded cap.
 // ───────────────────────────────────────────────────────────────────────────
-component Ring {
-    in property <float> progress: 0;
-    in property <float> d: 236;
-    in property <float> t: 7;
-    in property <brush> track-color: Palette.track;
-    in property <brush> fill-color: Palette.accent;
-    in property <bool> glow: false;
-    // Dot count for the progress arc. High enough that neighbouring dots
-    // overlap and the arc reads as one continuous stroke.
-    in property <int> steps: 180;
-
-    width: d * 1px;
-    height: d * 1px;
-
-    pure function cx() -> float { return d / 2; }
-    pure function rad() -> float { return (d - t) / 2; }
-    pure function ax(i: int) -> float { return cx() + rad() * sin(360deg * (i * 1.0 / steps)); }
-    pure function ay(i: int) -> float { return cx() - rad() * cos(360deg * (i * 1.0 / steps)); }
-
-    // Soft halo behind the ring while a session is running.
-    if glow : Rectangle {
-        width: parent.width - 2 * t * 1px;
-        height: parent.height - 2 * t * 1px;
-        x: t * 1px;
-        y: t * 1px;
-        border-radius: self.width / 2;
-        background: Palette.accent;
-        opacity: 0.05;
-    }
-
-    // Track: a true stroked circle, so it is continuous at any size.
-    Rectangle {
-        width: parent.width;
-        height: parent.height;
-        border-radius: self.width / 2;
-        background: transparent;
-        border-width: root.t * 1px;
-        border-color: track-color;
-    }
-
-    // Progress: overlapping dots swept from 12 o'clock, clockwise.
-    for i in root.steps : Rectangle {
-        width: root.t * 1px; height: root.t * 1px; border-radius: root.t * 0.5px; background: fill-color; x: (root.ax(i) - root.t / 2) * 1px; y: (root.ay(i) - root.t / 2) * 1px; visible: (i * 1.0 / root.steps) < root.progress; }
-}
-
-// ───────────────────────────────────────────────────────────────────────────
 // Segmented — a quiet two-or-three way switch.
 // ───────────────────────────────────────────────────────────────────────────
 component Segmented inherits Rectangle {
@@ -1018,6 +972,167 @@ component EraCard inherits Rectangle {
     }
 }
 
+
+// ───────────────────────────────────────────────────────────────────────────
+// DynastyRow — one reign in the chronicle.
+//
+// The row is built as a table, not prose: name and span on the ruling line,
+// then capital, notable figure and legacy stacked beneath. A vertical rule on
+// the leading edge ties the rows into one continuous line, which is the whole
+// point of the view — the dynasties are a sequence, not a list.
+// ───────────────────────────────────────────────────────────────────────────
+// One reign, as data. A struct rather than a component so the list can be a
+// model built in Rust: the facts then live in one place and follow the UI
+// language without being duplicated in the markup.
+export struct Dynasty {
+    name: string,
+    span: string,
+    capital: string,
+    figure: string,
+    legacy: string,
+}
+
+component DynastyRow inherits Rectangle {
+    in property <string> name: "";
+    in property <string> span: "";
+    in property <string> capital: "";
+    in property <string> figure: "";
+    in property <string> legacy: "";
+    in property <string> capital-label: "";
+    in property <string> figure-label: "";
+    in property <string> legacy-label: "";
+    in property <bool> first: false;
+    in property <bool> last: false;
+    in property <int> index: 0;
+
+    // Entrance: each row fades and lifts into place, staggered by its index so
+    // the chronicle assembles top-down instead of appearing all at once.
+    in-out property <float> reveal: 0;
+    animate reveal { duration: 420ms; easing: ease-out; delay: root.index * 55ms; }
+
+    height: row-col.preferred-height + 26px;
+    border-radius: 12px;
+    background: row-ta.has-hover ? Palette.surface-2 : transparent;
+
+    row-ta := TouchArea { }
+
+    states [
+        hover when row-ta.has-hover : {
+            background: Palette.surface-2;
+            in { animate background { duration: Motion.quick; } }
+        }
+    ]
+
+    // The spine: a hairline running the full height, broken at the first and
+    // last rows so the sequence has a clear beginning and end.
+    Rectangle {
+        x: 13px;
+        y: root.first ? 18px : 0px;
+        width: 1px;
+        height: root.first
+            ? parent.height - 18px
+            : root.last
+            ? 18px
+            : parent.height;
+        background: Palette.hairline;
+    }
+
+    // The node: a small diamond on the spine, gilded. Diamonds rather than
+    // dots because the Achaemenid window motif is a diamond.
+    Rectangle {
+        x: 9px;
+        y: 15px;
+        width: 9px;
+        height: 9px;
+        background: Palette.accent;
+        opacity: 0.85;
+    }
+
+    row-col := VerticalLayout {
+        x: 34px;
+        width: parent.width - 34px - 10px;
+        padding-top: 12px;
+        padding-bottom: 12px;
+        spacing: 3px;
+        opacity: root.reveal;
+        y: (1 - root.reveal) * 10px;
+
+        // Ruling line: name, then the span pushed to the far edge.
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.name;
+                font-family: "Vazirmatn";
+                font-size: 14px;
+                font-weight: 700;
+                color: Palette.text;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Text {
+                text: root.span;
+                font-family: "Vazirmatn";
+                font-size: 10px;
+                color: Palette.accent;
+                vertical-alignment: center;
+            }
+        }
+
+        // Capital and figure share a line: two short facts, side by side.
+        HorizontalLayout {
+            spacing: 6px;
+            Text {
+                text: root.capital-label + " ";
+                font-family: "Vazirmatn";
+                font-size: 9px;
+                color: Palette.text-faint;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.capital;
+                font-family: "Vazirmatn";
+                font-size: 10px;
+                color: Palette.text-dim;
+                vertical-alignment: center;
+            }
+            Rectangle { width: 8px; }
+            Text {
+                text: root.figure-label + " ";
+                font-family: "Vazirmatn";
+                font-size: 9px;
+                color: Palette.text-faint;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.figure;
+                font-family: "Vazirmatn";
+                font-size: 10px;
+                color: Palette.text-dim;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+        }
+
+        // Legacy: the one sentence that says why the reign mattered.
+        Text {
+            text: root.legacy;
+            font-family: "Vazirmatn";
+            font-size: 10px;
+            color: Palette.text-faint;
+            wrap: word-wrap;
+        }
+    }
+}
+
+
+// ───────────────────────────────────────────────────────────────────────────
+// Dynasties — the chronicle's data, in one place.
+//
+// Kept as a global rather than inlined in the view so the order and the facts
+// can be read at a glance, and so a future "jump to dynasty" control has
+// something to index into. Every entry is pre-Islamic or later Iranian rule; // the list is deliberately continuous, because that continuity is the point.
+// ───────────────────────────────────────────────────────────────────────────
 export component PanganWindow inherits Window {
     // ---- Live timer state (pushed from Rust each tick) ----
     in property <string> time-left; in property <int> time-minutes; in property <int> time-seconds; in property <string> session-name; in property <float> progress; in property <string> phase; in property <bool> running; in property <int> work-done; in property <string> session-counter; // ---- Theme ----
@@ -1045,7 +1160,12 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in property <string> sync-device-code: "";
     in property <string> sync-device-url: "https://www.google.com/device";
     in property <bool> sync-waiting: false;
-    in property <bool> sync-available: true; in-out property <string> new-task-text; in-out property <string> show-view: "main"; // ---- Settings (edited in the Settings screen) ----
+    in property <bool> sync-available: true;
+    in-out property <string> sync-client-id: ""; in-out property <bool> code-copied: false;
+    // The chronicle rows, built in Rust so the facts live in one place and
+    // follow the UI language.
+    in property <[Dynasty]> dynasties;
+    in-out property <string> new-task-text; in-out property <string> show-view: "main"; // ---- Settings (edited in the Settings screen) ----
     in-out property <int> work-minutes: 25; in-out property <int> short-break-minutes: 5; in-out property <int> long-break-minutes: 15; in-out property <int> long-break-interval: 4; in-out property <int> daily-goal-minutes: 120; in-out property <bool> auto-start-next: true; in-out property <bool> auto-start-on-launch: false; in-out property <bool> sound-enabled: true; in-out property <string> sound-theme: "santur"; in-out property <bool> hotkey-enabled: true; in-out property <bool> inhibit-enabled: true; in-out property <bool> overlay-enabled: true; in-out property <bool> compact-mode: false; in-out property <bool> animations: true; in-out property <int> sound-volume: 80; in property <string> automation-summary; // ---- Rich data (pushed from Rust) ----
     in property <[TaskItem]> tasks: []; in property <[DayRow]> month-rows: []; in property <[TaskItem]> day-tasks: []; in property <string> month-title: ""; in property <string> selected-day-title: ""; in property <string> selected-day-sub: ""; in property <bool> selected-is-today: false; in-out property <string> cal-selected: "";
     // Which task row is open for renaming (its id), or 0 for none. Only one row
@@ -1058,7 +1178,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in property <bool> day-is-today: true;
     in-out property <string> edit-text: "";
     in property <[float]> week-bars: [0, 0, 0, 0, 0, 0, 0]; in property <[string]> week-labels: ["ش", "ی", "د", "س", "چ", "پ", "ج"]; in property <int> today-sessions: 0; in property <int> today-minutes: 0; in property <int> today-score: 0; in property <int> today-streak: 0; in property <int> today-consistency: 0; in property <int> today-best: 0; in property <int> session-total: 4; in property <int> session-done: 0; in property <int> goal-minutes: 120; in property <int> goal-done-minutes: 0; // ---- Callbacks to Rust ----
-    callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback sync-connect; callback sync-disconnect; callback set-sync-auto(bool); callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback refresh-events; callback open-url(string); callback window-drag-start; callback set-compact-mode(bool); callback set-animations(bool); callback pick-day(string); callback shift-month(int); callback goto-today; callback add-task-on(string); callback delete-task(int); callback rename-task(int, string); callback move-task(int, int); callback step-day(int);
+    callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-chronicle; callback close-chronicle; callback copy-code(string); callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback sync-connect; callback sync-disconnect; callback set-client-id(string); callback set-sync-auto(bool); callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback refresh-events; callback open-url(string); callback window-drag-start; callback set-compact-mode(bool); callback set-animations(bool); callback pick-day(string); callback shift-month(int); callback goto-today; callback add-task-on(string); callback delete-task(int); callback rename-task(int, string); callback move-task(int, int); callback step-day(int);
     // Resize: the edge/corner grab zones report the pointer's screen position
     // and which edge is being dragged; Rust turns that into a new window size.
 
@@ -1328,9 +1448,10 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             width: parent.width; padding-bottom: 14px; spacing: 0px; // view switcher
             HorizontalLayout {
                 height: 40px; alignment: center; Segmented {
-                    options: [Strings.nav-timer, Strings.nav-today, Strings.nav-stats]; current: 0; selected(i) => {
+                    options: [Strings.nav-timer, Strings.nav-today, Strings.nav-chronicle, Strings.nav-stats]; current: 0; selected(i) => {
                         if (i == 1) { root.open-today(); }
-                        if (i == 2) { root.open-report(); }
+                        if (i == 2) { root.open-chronicle(); }
+                        if (i == 3) { root.open-report(); }
                     }
                 }
             }
@@ -2078,6 +2199,116 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             }
         }
 
+        // ═══ CHRONICLE ═══
+        // The imperial timeline: every dynasty from the Medes to the Pahlavi,
+        // in order, each with its span, capital, a notable figure and the one
+        // thing it is remembered for. This is the view that gives the app its
+        // sense of depth — the timer measures an hour, this measures 2,500
+        // years.
+        if root.show-view == "chronicle" : VerticalLayout {
+            opacity: root.view-opacity;
+            y: root.view-offset;
+            padding: 0px;
+            spacing: 0px;
+
+            // ---- title bar ----
+            HorizontalLayout {
+                height: 44px;
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 8px;
+                IconButton {
+                    icon: "back";
+                    size: 30px;
+                    icon-size: 15px;
+                    clicked => { root.close-chronicle(); }
+                }
+                Text {
+                    text: Strings.nav-chronicle;
+                    font-family: "Vazirmatn";
+                    font-size: 15px;
+                    font-weight: 600;
+                    color: Palette.text;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            Flickable {
+                vertical-stretch: 1;
+                content-height: chron-col.preferred-height;
+                interactive: true;
+
+                chron-col := VerticalLayout {
+                    width: parent.width;
+                    padding-left: 18px;
+                    padding-right: 18px;
+                    padding-bottom: 22px;
+                    spacing: 0px;
+
+                    // ---- header: the claim the view makes ----
+                    Text {
+                        text: Strings.chron-title;
+                        font-family: "Vazirmatn";
+                        font-size: 17px;
+                        font-weight: 700;
+                        color: Palette.text;
+                        horizontal-alignment: Strings.fa ? right : left;
+                    }
+                    Text {
+                        text: Strings.chron-sub;
+                        font-family: "Vazirmatn";
+                        font-size: 10px;
+                        color: Palette.text-faint;
+                        wrap: word-wrap;
+                        horizontal-alignment: Strings.fa ? right : left;
+                    }
+
+                    Rectangle {
+                        height: 14px;
+                        WingedDivider { width: parent.width; color: Palette.accent; fade: 0.55; }
+                    }
+
+                    // ---- the dynasties ----
+                    // Staggered entrance: each row reveals a beat after the one
+                    // above it, so the chronicle assembles top-down.
+                    for d[i] in root.dynasties : DynastyRow {
+                        name: d.name;
+                        span: d.span;
+                        capital: d.capital;
+                        figure: d.figure;
+                        legacy: d.legacy;
+                        capital-label: Strings.chron-capital-label;
+                        figure-label: Strings.chron-figure-label;
+                        legacy-label: Strings.chron-legacy-label;
+                        first: i == 0;
+                        last: i == root.dynasties.length - 1;
+                        index: i;
+                        reveal: root.view-opacity;
+                    }
+
+                    Rectangle {
+                        height: 16px;
+                        LotusRow {
+                            count: 9;
+                            unit: 15px;
+                            x: (parent.width - self.width) / 2;
+                            color: Palette.accent;
+                            fade: 0.30;
+                        }
+                    }
+
+                    Text {
+                        text: Strings.chron-foot;
+                        font-family: "Vazirmatn";
+                        font-size: 9px;
+                        color: Palette.text-faint;
+                        wrap: word-wrap;
+                        horizontal-alignment: Strings.fa ? right : left;
+                    }
+                }
+            }
+        }
+
         if root.show-view == "report" : VerticalLayout {
             opacity: root.view-opacity;
             y: root.view-offset;
@@ -2774,7 +3005,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     // device already has a browser. No password ever touches
                     // the app, and no local port has to be reachable.
                     Card {
-                        height: root.sync-signed-in ? 132px : (root.sync-device-code == "" ? 132px : 196px);
+                        height: root.sync-signed-in ? 150px : (root.sync-device-code == "" ? (root.sync-available ? 190px : 268px) : 300px);
                         VerticalLayout {
                             padding: 14px;
                             spacing: 9px;
@@ -2813,29 +3044,119 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 visible: !root.sync-signed-in;
                             }
 
-                            // The device code, shown only while waiting.
+                            // The device code, shown only while waiting. The
+                            // browser has already opened on Google's page, so
+                            // the only thing the user has to do is type this.
                             Rectangle {
-                                height: 54px;
-                                border-radius: 10px;
-                                background: Palette.surface-2;
-                                visible: root.sync-device-code != "";
-                                VerticalLayout {
-                                    padding: 8px;
-                                    spacing: 3px;
-                                    alignment: center;
+                                height: 88px; border-radius: 10px; background: Palette.accent-soft; border-width: 1px; border-color: Palette.accent; visible: root.sync-device-code != ""; VerticalLayout {
+                                    padding: 10px; spacing: 6px; alignment: center; Text {
+                                        text: Strings.sync-code-hint; font-size: 9px; color: Palette.text-dim; horizontal-alignment: center; }
                                     Text {
-                                        text: Strings.sync-code-hint;
-                                        font-size: 9px;
-                                        color: Palette.text-faint;
-                                        horizontal-alignment: center;
+                                        text: root.sync-device-code; font-size: 24px; font-weight: 700; color: Palette.accent; horizontal-alignment: center; letter-spacing: 4px; }
+                                    // Copy, and a way back to the page if the
+                                    // browser did not come up.
+                                    HorizontalLayout {
+                                        spacing: 6px; alignment: center; Rectangle {
+                                            height: 22px; width: copy-lbl.preferred-width + 20px; border-radius: 11px; background: Palette.surface; ta-copy := TouchArea {
+                                                clicked => { root.copy-code(root.sync-device-code); }
+                                            }
+                                            states [
+                                                h when ta-copy.has-hover : {
+                                                    background: Palette.surface-3; in { animate background { duration: Motion.quick; } }
+                                                }
+                                            ]
+                                            copy-lbl := Text {
+                                                text: root.code-copied ? Strings.sync-copied : Strings.sync-copy-code; font-size: 9px; color: root.code-copied ? Palette.accent : Palette.text-dim; horizontal-alignment: center; vertical-alignment: center; x: (parent.width - self.width) / 2; }
+                                        }
+                                        Rectangle {
+                                            height: 22px; width: open-lbl.preferred-width + 20px; border-radius: 11px; background: Palette.surface; ta-open := TouchArea {
+                                                clicked => { root.open-url(root.sync-device-url); }
+                                            }
+                                            states [
+                                                h when ta-open.has-hover : {
+                                                    background: Palette.surface-3; in { animate background { duration: Motion.quick; } }
+                                                }
+                                            ]
+                                            open-lbl := Text {
+                                                text: Strings.sync-open-browser; font-size: 9px; color: Palette.text-dim; horizontal-alignment: center; vertical-alignment: center; x: (parent.width - self.width) / 2; }
+                                        }
                                     }
-                                    Text {
-                                        text: root.sync-device-code;
-                                        font-size: 20px;
-                                        font-weight: 700;
+                                }
+                            }
+
+                            // Three numbered steps, shown before the code
+                            // appears. The device flow is not obvious, so the
+                            // card says what will happen rather than leaving
+                            // the user to work it out.
+                            VerticalLayout {
+                                spacing: 2px; visible: !root.sync-signed-in && root.sync-device-code == "" && root.sync-available; Text { text: Strings.sync-step-1; font-size: 9px; color: Palette.text-faint; }
+                                Text { text: Strings.sync-step-2; font-size: 9px; color: Palette.text-faint; }
+                                Text { text: Strings.sync-step-3; font-size: 9px; color: Palette.text-faint; }
+                            }
+
+                            // Once signed in, say plainly that nothing further
+                            // is required of them.
+                            Text {
+                                text: Strings.sync-signed-in-hint; font-size: 9px; color: Palette.text-faint; wrap: word-wrap; visible: root.sync-signed-in; }
+
+                            // Only shown when the build has no registered
+                            // client. Google issues a client id per project, so
+                            // it cannot ship in the source; letting the user
+                            // paste one avoids a rebuild.
+                            VerticalLayout {
+                                spacing: 5px;
+                                visible: !root.sync-available;
+
+                                Text {
+                                    text: Strings.sync-client-hint;
+                                    font-size: 10px;
+                                    color: Palette.text-dim;
+                                    horizontal-alignment: Strings.fa ? end : start;
+                                    wrap: word-wrap;
+                                }
+                                Text {
+                                    text: Strings.sync-client-steps;
+                                    font-size: 9px;
+                                    color: Palette.text-faint;
+                                    horizontal-alignment: Strings.fa ? end : start;
+                                    wrap: word-wrap;
+                                }
+                                // Straight to the page where the client id is
+                                // made, so the user is not hunting for it.
+                                Rectangle {
+                                    height: 24px;
+                                    width: console-lbl.preferred-width + 22px;
+                                    border-radius: 12px;
+                                    background: Palette.surface-2;
+                                    ta-console := TouchArea {
+                                        clicked => { root.open-url("https://console.cloud.google.com/apis/credentials"); }
+                                    }
+                                    states [
+                                        h when ta-console.has-hover : {
+                                            background: Palette.surface-3;
+                                            in { animate background { duration: Motion.quick; } }
+                                        }
+                                    ]
+                                    console-lbl := Text {
+                                        text: Strings.sync-console;
+                                        font-size: 9px;
                                         color: Palette.accent;
                                         horizontal-alignment: center;
-                                        letter-spacing: 3px;
+                                        vertical-alignment: center;
+                                        x: (parent.width - self.width) / 2;
+                                    }
+                                }
+
+                                Rectangle {
+                                    height: 32px;
+                                    border-radius: 9px;
+                                    background: Palette.surface-2;
+                                    LineEdit {
+                                        text: root.sync-client-id;
+                                        placeholder-text: Strings.sync-client-placeholder;
+                                        font-size: 10px;
+                                        edited(t) => { root.sync-client-id = t; }
+                                        accepted(t) => { root.set-client-id(t); }
                                     }
                                 }
                             }

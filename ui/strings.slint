@@ -140,7 +140,7 @@ export global Strings {
     out property <string> add: fa ? "افزودن" : "Add";
     out property <string> automation-hint: fa ? "هنگام آغاز کار ژرف اجرا می‌شود. متغیرها: %event%، %session%." : "Runs on focus_start. Variables: %event%, %session%.";
 
-    out property <string> sec-cloud: fa ? "ابر" : "CLOUD";
+    out property <string> sec-cloud: fa ? "همگام‌سازی با گوگل" : "GOOGLE SYNC";
     out property <string> backup: fa ? "پشتیبان‌گیری" : "Back up";
     out property <string> restore: fa ? "بازگردانی" : "Restore";
 
@@ -153,9 +153,28 @@ export global Strings {
     out property <string> sync-off: fa ? "وصل نشده" : "Not connected";
     out property <string> sync-auto: fa ? "همگام‌سازی خودکار" : "Sync automatically";
     out property <string> sync-code-hint: fa ? "این کد را در google.com/device وارد کنید" : "Enter this code at google.com/device";
+    // The sign-in card walks the user through it in three numbered steps,
+    // because the device flow is unfamiliar: a code appears, a browser opens,
+    // the code goes in.
+    out property <string> sync-step-1: fa ? "۱. دکمهٔ زیر را بزنید" : "1. Press the button below";
+    out property <string> sync-step-2: fa ? "۲. مرورگر خودکار باز می‌شود" : "2. Your browser opens automatically";
+    out property <string> sync-step-3: fa ? "۳. کد را وارد کنید و تأیید بزنید" : "3. Enter the code and approve";
+    out property <string> sync-open-browser: fa ? "باز کردن مرورگر" : "Open browser";
+    out property <string> sync-copy-code: fa ? "رونوشت کد" : "Copy code";
+    out property <string> sync-copied: fa ? "رونوشت شد" : "Copied";
+    out property <string> sync-signed-in-hint: fa
+        ? "همگام‌سازی خودکار روشن است؛ هر تغییری خودش فرستاده می‌شود."
+        : "Automatic sync is on; every change is sent on its own.";
     out property <string> sync-waiting: fa ? "در انتظار تأیید…" : "Waiting for approval…";
     out property <string> sync-copy: fa ? "کپی نشانی" : "Copy link";
     out property <string> sync-no-client: fa ? "این نسخه برای گوگل ثبت نشده است" : "This build is not registered with Google";
+    out property <string> sync-client-hint: fa ? "این نسخه هنوز برای گوگل ثبت نشده است. شناسهٔ کلاینت خود را از Google Cloud Console بچسبانید." : "This build is not registered with Google yet. Paste your own client id from Google Cloud Console.";
+    out property <string> sync-client-steps: fa
+        ? "در Google Cloud Console پروژه بسازید، Google Drive API را روشن کنید، و یک کلاینت OAuth از نوع «TV and Limited Input» بسازید. شناسهٔ آن را اینجا بچسبانید."
+        : "In Google Cloud Console create a project, enable the Drive API, and create an OAuth client of type \"TV and Limited Input\". Paste its id here.";
+    out property <string> sync-console: fa ? "گشودن Google Cloud Console" : "Open Google Cloud Console";
+    out property <string> sync-save-id: fa ? "ذخیرهٔ شناسه" : "Save id";
+    out property <string> sync-client-placeholder: fa ? "شناسهٔ کلاینت…apps.googleusercontent.com" : "client id…apps.googleusercontent.com";
     out property <string> sync-last: fa ? "آخرین همگام‌سازی" : "Last sync";
 
     out property <string> sec-about: fa ? "شناسنامه" : "ABOUT";
@@ -191,4 +210,104 @@ export global Strings {
     out property <string> heritage-sub: fa
         ? "از کوروش بزرگ تا امروز"
         : "From Cyrus the Great to the present";
+
+    // ── Chronicle view: the imperial timeline ──────────────────────────────
+    // A single scroll through Iranian rule, dynasty by dynasty. This is the
+    // view that answers "how long have we been doing this", which the timer
+    // and the calendar cannot.
+    out property <string> nav-chronicle: fa ? "گاه‌شمار" : "Chronicle";
+    out property <string> chron-title: fa ? "گاه‌شمار پادشاهی ایران" : "Chronicle of the Iranian Kingdom";
+    out property <string> chron-sub: fa
+        ? "دو هزار و پانصد سال فرمانروایی، از کوروش تا امروز"
+        : "Two and a half thousand years of rule, from Cyrus to the present";
+    out property <string> chron-span-label: fa ? "دوره" : "Span";
+    out property <string> chron-capital-label: fa ? "پایتخت" : "Capital";
+    out property <string> chron-figure-label: fa ? "چهرهٔ نامدار" : "Notable figure";
+    out property <string> chron-legacy-label: fa ? "میراث" : "Legacy";
+
+    // The dynasties, in order. Each carries the same four facts so the rows
+    // read as a table rather than prose.
+    out property <string> dyn-medes: fa ? "ماد" : "Medes";
+    out property <string> dyn-medes-span: fa ? "۶۷۸ – ۵۵۰ پ.م." : "678 – 550 BC";
+    out property <string> dyn-medes-capital: fa ? "هگمتانه" : "Ecbatana";
+    out property <string> dyn-medes-figure: fa ? "دیاکو، هووخشتره" : "Deioces, Cyaxares";
+    out property <string> dyn-medes-legacy: fa
+        ? "نخستین گردآمدن ایرانیان زیر یک فرمان؛ هگمتانه و راه شاهی شرق."
+        : "The first union of the Iranian peoples under one crown; Ecbatana and the eastern royal road.";
+
+    out property <string> dyn-achaemenid: fa ? "هخامنشی" : "Achaemenid";
+    out property <string> dyn-achaemenid-span: fa ? "۵۵۰ – ۳۳۰ پ.م." : "550 – 330 BC";
+    out property <string> dyn-achaemenid-capital: fa ? "پارسه، شوش" : "Persepolis, Susa";
+    out property <string> dyn-achaemenid-figure: fa ? "کوروش بزرگ، داریوش بزرگ" : "Cyrus the Great, Darius the Great";
+    out property <string> dyn-achaemenid-legacy: fa
+        ? "بزرگ‌ترین شاهنشاهی جهان باستان؛ منشور کوروش، راه شاهی، و نخستین دیوان جهانی."
+        : "The largest empire of the ancient world; the Cyrus Cylinder, the Royal Road, the first world administration.";
+
+    out property <string> dyn-seleucid: fa ? "سلوکی" : "Seleucid";
+    out property <string> dyn-seleucid-span: fa ? "۳۱۲ – ۲۴۷ پ.م." : "312 – 247 BC";
+    out property <string> dyn-seleucid-capital: fa ? "سلوکیه" : "Seleucia";
+    out property <string> dyn-seleucid-figure: fa ? "سلوکوس، آنتیوخوس" : "Seleucus, Antiochus";
+    out property <string> dyn-seleucid-legacy: fa
+        ? "دورهٔ هلنی میان هخامنشی و اشکانی؛ ایرانیان در آن پارسه را رها نکردند."
+        : "The Hellenistic interlude between Achaemenid and Parthian; the Iranians never abandoned Persepolis.";
+
+    out property <string> dyn-parthian: fa ? "اشکانی" : "Parthian";
+    out property <string> dyn-parthian-span: fa ? "۲۴۷ پ.م. – ۲۲۴ م." : "247 BC – 224 AD";
+    out property <string> dyn-parthian-capital: fa ? "نسـا، تیسفون" : "Nisa, Ctesiphon";
+    out property <string> dyn-parthian-figure: fa ? "مهرداد یکم، سورنا" : "Mithridates I, Surena";
+    out property <string> dyn-parthian-legacy: fa
+        ? "درفش کاویانی و سواره‌نظام سنگین؛ چهار سده روم را در فرات نگه داشت."
+        : "The Derafsh Kaviani and heavy cavalry; four centuries holding Rome at the Euphrates.";
+
+    out property <string> dyn-sasanid: fa ? "ساسانی" : "Sasanian";
+    out property <string> dyn-sasanid-span: fa ? "۲۲۴ – ۶۵۱ م." : "224 – 651 AD";
+    out property <string> dyn-sasanid-capital: fa ? "تیسفون، بیشاپور" : "Ctesiphon, Bishapur";
+    out property <string> dyn-sasanid-figure: fa ? "اردشیر بابکان، خسرو انوشیروان" : "Ardashir I, Khosrow Anushirvan";
+    out property <string> dyn-sasanid-legacy: fa
+        ? "اوج هنر و دیوان‌سالاری ایرانی؛ سیم‌رغ، زنگار، و آیین کشورداری که به سه قاره رسید."
+        : "The height of Iranian art and administration; the simurgh, verdigris, and a statecraft that reached three continents.";
+
+    out property <string> dyn-safavid: fa ? "صفوی" : "Safavid";
+    out property <string> dyn-safavid-span: fa ? "۱۵۰۱ – ۱۷۳۶ م." : "1501 – 1736 AD";
+    out property <string> dyn-safavid-capital: fa ? "تبریز، اصفهان" : "Tabriz, Isfahan";
+    out property <string> dyn-safavid-figure: fa ? "شاه اسماعیل، شاه عباس" : "Shah Ismail, Shah Abbas";
+    out property <string> dyn-safavid-legacy: fa
+        ? "بازگرداندن یکپارچگی ایران پس از هشت سده؛ اصفهان پایتخت نیم جهان."
+        : "Restored Iranian unity after eight centuries; Isfahan, the capital that was half the world.";
+
+    out property <string> dyn-afsharid: fa ? "افشاری" : "Afsharid";
+    out property <string> dyn-afsharid-span: fa ? "۱۷۳۶ – ۱۷۹۶ م." : "1736 – 1796 AD";
+    out property <string> dyn-afsharid-capital: fa ? "مشهد" : "Mashhad";
+    out property <string> dyn-afsharid-figure: fa ? "نادرشاه" : "Nader Shah";
+    out property <string> dyn-afsharid-legacy: fa
+        ? "بازپس‌گیری مرزهای شمالی و شرقی؛ آخرین لشکرکشی بزرگ ایرانی به بیرون."
+        : "Recovered the northern and eastern frontiers; the last great Iranian campaign abroad.";
+
+    out property <string> dyn-zand: fa ? "زند" : "Zand";
+    out property <string> dyn-zand-span: fa ? "۱۷۵۱ – ۱۷۹۴ م." : "1751 – 1794 AD";
+    out property <string> dyn-zand-capital: fa ? "شیراز" : "Shiraz";
+    out property <string> dyn-zand-figure: fa ? "کریم‌خان زند" : "Karim Khan Zand";
+    out property <string> dyn-zand-legacy: fa
+        ? "چهل سال آرامش؛ شیراز، ارگ و بازار وکیل."
+        : "Forty years of peace; Shiraz, the citadel and the Vakil bazaar.";
+
+    out property <string> dyn-qajar: fa ? "قاجار" : "Qajar";
+    out property <string> dyn-qajar-span: fa ? "۱۷۸۹ – ۱۹۲۵ م." : "1789 – 1925 AD";
+    out property <string> dyn-qajar-capital: fa ? "تهران" : "Tehran";
+    out property <string> dyn-qajar-figure: fa ? "فتحعلی‌شاه، امیرکبیر" : "Fath-Ali Shah, Amir Kabir";
+    out property <string> dyn-qajar-legacy: fa
+        ? "تهران پایتخت شد؛ دارالفنون و نخستین نهادهای نوین ایران."
+        : "Tehran became the capital; the first modern Iranian institutions and the Dar ul-Funun.";
+
+    out property <string> dyn-pahlavi: fa ? "پهلوی" : "Pahlavi";
+    out property <string> dyn-pahlavi-span: fa ? "۱۹۲۵ – ۱۹۷۹ م." : "1925 – 1979 AD";
+    out property <string> dyn-pahlavi-capital: fa ? "تهران" : "Tehran";
+    out property <string> dyn-pahlavi-figure: fa ? "رضاشاه، محمدرضاشاه" : "Reza Shah, Mohammad Reza Shah";
+    out property <string> dyn-pahlavi-legacy: fa
+        ? "راه‌آهن سراسری، دانشگاه تهران، و جشن‌های دوهزار و پانصد ساله."
+        : "The trans-Iranian railway, the University of Tehran, and the 2,500-year celebrations.";
+
+    out property <string> chron-foot: fa
+        ? "این گاه‌شمار پیوسته است: هر سلسله از دل سلسلهٔ پیش برخاست و همان سرزمین را نگه داشت."
+        : "The chronicle is continuous: each dynasty rose from the last and held the same land.";
 }

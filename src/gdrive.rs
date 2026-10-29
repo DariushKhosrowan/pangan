@@ -53,6 +53,12 @@ const REMOTE_FILE: &str = "pangan-sync.json";
 /// Client id of the Pangan desktop app. Overridable for forks and for local
 /// testing without a rebuild.
 pub fn client_id() -> String {
+    // Precedence: a value the user pasted in Settings, then the build-time
+    // environment variable, then the placeholder. Settings wins because it is
+    // the only one an end user can change without a compiler.
+    if let Some(id) = crate::sync::load_client_id() {
+        return id;
+    }
     std::env::var("PANGAN_GOOGLE_CLIENT_ID")
         .ok()
         .filter(|s| !s.trim().is_empty())
@@ -62,7 +68,17 @@ pub fn client_id() -> String {
 /// True when a real client id is configured. Without one, device flow cannot
 /// start, and the UI should say so plainly instead of failing at the network.
 pub fn has_client_id() -> bool {
-    !client_id().starts_with("PANGAN_DESKTOP_CLIENT_ID")
+    !is_placeholder(&client_id())
+}
+
+/// A client id is usable unless it is the shipped placeholder or blank.
+///
+/// This is a separate function because "is this the placeholder" is the exact
+/// condition that decides whether the connect button is enabled, and getting it
+/// wrong is silent: the button looks fine and Google rejects the request.
+fn is_placeholder(id: &str) -> bool {
+    let id = id.trim();
+    id.is_empty() || id.starts_with("PANGAN_DESKTOP_CLIENT_ID")
 }
 
 // ---------------------------------------------------------------------------
@@ -265,9 +281,12 @@ pub fn fetch_email(token: &str) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 /// Find the sync file's id inside `appDataFolder`, if it exists.
-fn find_file(token: &str) -> Result<Option<String>, String> {
-    let url = "https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&fields=files(id,name)&q=name%20%3D%20%27pangan-sync.json%27";
-    let resp = ureq::get(url)
+fn find_file(token: &str, name: &str) -> Result<Option<String>, String> {
+    let url = format!(
+        "https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&fields=files(id,name)&q=name%20%3D%20%27{}%27",
+        name
+    );
+    let resp = ureq::get(&url)
         .header("Authorization", &format!("Bearer {token}"))
         .call();
     let text = match resp {
@@ -285,7 +304,12 @@ fn find_file(token: &str) -> Result<Option<String>, String> {
 
 /// Download the sync file. `Ok(None)` means no device has uploaded yet.
 pub fn download(token: &str) -> Result<Option<String>, String> {
-    let Some(id) = find_file(token)? else {
+    download_named(token, REMOTE_FILE)
+}
+
+/// Download any file from `appDataFolder` by name.
+pub fn download_named(token: &str, name: &str) -> Result<Option<String>, String> {
+    let Some(id) = find_file(token, name)? else {
         return Ok(None);
     };
     let url = format!("https://www.googleapis.com/drive/v3/files/{id}?alt=media");
@@ -300,7 +324,12 @@ pub fn download(token: &str) -> Result<Option<String>, String> {
 
 /// Upload the sync file, creating it on first use and updating it after.
 pub fn upload(token: &str, body: &str) -> Result<(), String> {
-    match find_file(token)? {
+    upload_named(token, REMOTE_FILE, body)
+}
+
+/// Upload any file to `appDataFolder` by name, creating or updating it.
+pub fn upload_named(token: &str, name: &str, body: &str) -> Result<(), String> {
+    match find_file(token, name)? {
         Some(id) => {
             // Content-only update: PATCH the media, leave metadata alone.
             let url =
@@ -319,7 +348,7 @@ pub fn upload(token: &str, body: &str) -> Result<(), String> {
             // Multipart: metadata (name + parent appDataFolder) then content.
             let boundary = "pangan-sync-boundary";
             let meta = serde_json::json!({
-                "name": REMOTE_FILE,
+                "name": name,
                 "parents": ["appDataFolder"],
             });
             let payload = format!(
@@ -384,6 +413,21 @@ mod tests {
             ..Default::default()
         };
         assert!(!t.usable());
+    }
+
+    #[test]
+    fn a_placeholder_client_id_is_not_usable() {
+        // The shipped placeholder must never be treated as a real client, or
+        // the connect button would send a request Google rejects.
+        assert!(is_placeholder(
+            "PANGAN_DESKTOP_CLIENT_ID.apps.googleusercontent.com"
+        ));
+        assert!(!is_placeholder("1234-abc.apps.googleusercontent.com"));
+        assert!(
+            is_placeholder(""),
+            "a blank id cannot drive the device flow"
+        );
+        assert!(is_placeholder("   "), "whitespace is not an id either");
     }
 
     #[test]

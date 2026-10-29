@@ -12,6 +12,7 @@ use slint::{
 
 mod automation;
 mod calendar;
+mod chronicle;
 mod clock;
 mod cloudsync;
 mod events;
@@ -136,6 +137,7 @@ fn resolve_theme(pref: &str) -> &'static str {
 
 fn apply_snapshot(win: &PanganWindow, shared: &Shared) {
     let snap = shared.snapshot();
+
     win.set_time_left(SharedString::from(snap.time));
     win.set_time_minutes(snap.minutes as i32);
     win.set_time_seconds(snap.seconds as i32);
@@ -144,6 +146,83 @@ fn apply_snapshot(win: &PanganWindow, shared: &Shared) {
     win.set_phase(SharedString::from(snap.phase));
     win.set_running(snap.running);
     win.set_work_done(snap.work_done as i32);
+}
+
+/// Open an http(s) URL in the user's default browser.
+///
+/// Only http(s) is accepted, so a stray string can never launch a local binary.
+/// Used by the About links and by the sign-in flow, which opens Google's device
+/// page for the user rather than making them copy a URL by hand.
+fn open_in_browser(url: &str) {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return;
+    }
+    #[cfg(target_os = "linux")]
+    let opener = "xdg-open";
+    #[cfg(target_os = "macos")]
+    let opener = "open";
+    #[cfg(target_os = "windows")]
+    let opener = "explorer";
+
+    let _ = std::process::Command::new(opener)
+        .arg(url)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
+/// Flush pending changes before the app goes away.
+///
+/// Automatic sync already pushes a change within a tick of it happening, so
+/// quitting is normally a no-op. But the last edit before a quit can still be
+/// in flight, and quitting on it used to mean the edit sat unsynced until the
+/// next launch — and if the user never reopened the app, it never reached their
+/// other machine at all. This runs one synchronous cycle with a hard timeout,
+/// so a stalled network cannot trap the process; whatever is still dirty stays
+/// on disk and goes out next time.
+fn flush_on_quit(app: &Arc<AppState>) {
+    if !app.cloud.take_dirty() {
+        return;
+    }
+    if app.tokens.lock().unwrap().is_empty() || !app.settings.lock().unwrap().sync_enabled {
+        // Nothing to sync with. Put the flag back so the next launch retries
+        // rather than believing this change was already delivered.
+        app.cloud.mark_dirty();
+        return;
+    }
+
+    let local = app.store.lock().unwrap().data.clone();
+    let mut t = app.tokens.lock().unwrap().clone();
+
+    // Run the cycle here rather than on a spawned thread: `store` is a plain
+    // mutex, not an Arc, so it cannot move into a thread. Blocking the quit for
+    // the length of one request is the right trade — the alternative is losing
+    // the edit. The HTTP layer has its own timeouts, so this cannot hang
+    // indefinitely.
+    let result = {
+        let mut merged_out: Option<store::Data> = None;
+        let out = cloudsync::sync_once(&mut t, &local, &mut |merged: &store::Data| {
+            merged_out = Some(merged.clone());
+        });
+        if let Some(merged) = merged_out {
+            let mut st = app.store.lock().unwrap();
+            st.data = merged;
+            st.save();
+        }
+        out
+    };
+
+    // Persist a rotated refresh token before the process dies, or the next
+    // launch would sign out.
+    if !t.is_empty() {
+        let _ = sync::save_tokens(&t);
+        *app.tokens.lock().unwrap() = t;
+    }
+
+    if result.is_err() {
+        // Leave the change marked so the next launch pushes it.
+        app.cloud.mark_dirty();
+    }
 }
 
 /// Push the resolved theme and heritage era into the Slint palette global.
@@ -183,6 +262,8 @@ fn run_action(
             None
         }
         TrayAction::Quit => {
+            // Last chance to deliver anything still unsynced.
+            flush_on_quit(&app);
             shared.quit.store(true, Ordering::Relaxed);
             let _ = slint::quit_event_loop();
             return;
@@ -716,25 +797,6 @@ fn update_automation_summary(win: &slint::Weak<PanganWindow>, app: &AppState) {
     }
 }
 
-fn sync_row(app: &AppState) -> sync::SyncRow {
-    let st = app.store.lock().unwrap();
-    let t = stats::report(&st.data.sessions, stats::Period::Today);
-    let open = st.live_tasks().filter(|t| !t.done).count();
-    let row = sync::SyncRow {
-        ts: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
-        period: "Today".into(),
-        sessions: t.sessions,
-        minutes: t.minutes,
-        avg_min: t.avg,
-        consistency_pct: (t.consistency * 100.0) as u32,
-        streak_days: t.streak,
-        score: t.score,
-        tasks_open: open as u64,
-    };
-    row
-}
-
-/// Perform a sync (used by the button and the auto-sync timer).
 /// Run one cloud sync on a background thread.
 ///
 /// The network call must not happen on the UI thread: a slow Drive request
@@ -899,6 +961,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         win.set_sync_signed_in(signed_in);
         win.set_sync_auto_on(settings.sync_enabled);
         win.set_sync_available(gdrive::has_client_id());
+        if let Some(id) = sync::load_client_id() {
+            win.set_sync_client_id(SharedString::from(id));
+        }
         if signed_in {
             win.set_sync_account(SharedString::from(tokens.email.clone()));
         }
@@ -1498,25 +1563,105 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // Chronicle view: open, close, and keep its rows in the active language.
+    let chron_weak = weak.clone();
+    let chron_app = Arc::clone(&app);
+    win.on_open_chronicle(move || {
+        let en = chron_app.settings.lock().unwrap().lang == "en";
+        if let Some(w) = chron_weak.upgrade() {
+            w.set_dynasties(ModelRc::new(VecModel::from(chronicle::rows(en))));
+            w.set_show_view("chronicle".into());
+        }
+    });
+    let chron_back = weak.clone();
+    win.on_close_chronicle(move || {
+        if let Some(w) = chron_back.upgrade() {
+            w.set_show_view("main".into());
+        }
+    });
+
+    // Copy the device code to the clipboard, so the user can paste it into
+    // Google's page instead of typing eight characters by hand. The label
+    // flips to "Copied" for a moment, then back.
+    let copy_weak = weak.clone();
+    win.on_copy_code(move |code| {
+        let code = code.to_string();
+        if code.is_empty() {
+            return;
+        }
+        if let Some(w) = copy_weak.upgrade() {
+            w.set_code_copied(true);
+        }
+        // Prefer the platform clipboard tools; fall back to the X11 selection
+        // on Linux, which is what a bare Wayland/X session offers.
+        #[cfg(target_os = "linux")]
+        {
+            let ok = std::process::Command::new("wl-copy")
+                .arg(&code)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if !ok {
+                let _ = std::process::Command::new("xclip")
+                    .args(["-selection", "clipboard"])
+                    .stdin(std::process::Stdio::piped())
+                    .spawn()
+                    .and_then(|mut c| {
+                        use std::io::Write;
+                        if let Some(stdin) = c.stdin.as_mut() {
+                            let _ = stdin.write_all(code.as_bytes());
+                        }
+                        c.wait()
+                    });
+            }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("pbcopy")
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+                .and_then(|mut c| {
+                    use std::io::Write;
+                    if let Some(stdin) = c.stdin.as_mut() {
+                        let _ = stdin.write_all(code.as_bytes());
+                    }
+                    c.wait()
+                });
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::process::Command::new("cmd")
+                .args(["/C", "clip"])
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+                .and_then(|mut c| {
+                    use std::io::Write;
+                    if let Some(stdin) = c.stdin.as_mut() {
+                        let _ = stdin.write_all(code.as_bytes());
+                    }
+                    c.wait()
+                });
+        }
+
+        // Reset the label after a beat.
+        let reset_weak = copy_weak.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(1600));
+            let w3 = reset_weak.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(w) = w3.upgrade() {
+                    w.set_code_copied(false);
+                }
+            });
+        });
+    });
+
     // Open an external URL in the user's default browser (About / credits links).
     // Only http(s) is accepted, so a stray string can never launch a local binary.
     win.on_open_url(|url| {
-        let url = url.to_string();
-        if !(url.starts_with("https://") || url.starts_with("http://")) {
-            return;
-        }
-        #[cfg(target_os = "linux")]
-        let opener = "xdg-open";
-        #[cfg(target_os = "macos")]
-        let opener = "open";
-        #[cfg(target_os = "windows")]
-        let opener = "explorer";
-
-        let _ = std::process::Command::new(opener)
-            .arg(&url)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
+        open_in_browser(&url.to_string());
     });
 
     // Frameless window drag: move the window with the pointer.
@@ -1557,6 +1702,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sync_weak = weak.clone();
     win.on_sync_now(move || {
         do_sync(&sync_weak, &sync_app);
+    });
+
+    // ── Google client id ──
+    //
+    // Storing the id re-evaluates availability immediately: the connect button
+    // is disabled while `sync-available` is false, and a user who has just
+    // pasted a valid id should not have to restart the app to use it.
+    let cid_app = Arc::clone(&app);
+    let cid_weak = weak.clone();
+    win.on_set_client_id(move |id: SharedString| {
+        let en = cid_app.settings.lock().unwrap().lang == "en";
+        let id = id.trim().to_string();
+        let status = match sync::save_client_id(&id) {
+            Ok(()) => {
+                let ok = gdrive::has_client_id();
+                if let Some(w) = cid_weak.upgrade() {
+                    w.set_sync_available(ok);
+                }
+                if ok {
+                    if en {
+                        "Client id saved. You can connect now.".to_string()
+                    } else {
+                        "شناسهٔ کلاینت ذخیره شد. حالا می‌توانید وصل شوید.".to_string()
+                    }
+                } else if en {
+                    "That does not look like a client id.".to_string()
+                } else {
+                    "این شبیه شناسهٔ کلاینت نیست.".to_string()
+                }
+            }
+            Err(e) => {
+                if en {
+                    format!("Could not save: {e}")
+                } else {
+                    format!("ذخیره نشد: {e}")
+                }
+            }
+        };
+        if let Some(w) = cid_weak.upgrade() {
+            w.set_sync_status(SharedString::from(status));
+        }
     });
 
     // ── Google sign-in (device flow) ──
@@ -1616,13 +1802,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             {
                 let user_code = code.user_code.clone();
                 let url = code.verification_url.clone();
+                let url_for_ui = url.clone();
                 let w3 = weak2.clone();
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = w3.upgrade() {
                         w.set_sync_device_code(SharedString::from(user_code));
-                        w.set_sync_device_url(SharedString::from(url));
+                        w.set_sync_device_url(SharedString::from(url_for_ui));
                     }
                 });
+                // Open the device page for the user. The device flow is
+                // unfamiliar and the whole point is to be easy: the code is on
+                // screen, the page is already open, they type four characters.
+                // A failure here is harmless — the card still shows the code
+                // and a button to retry the browser.
+                open_in_browser(&url);
             }
 
             // Poll until approved or expired. The deadline comes from Google,
@@ -1752,16 +1945,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backup_weak = weak.clone();
     win.on_backup_now(move || {
         let en = backup_app.settings.lock().unwrap().lang == "en";
-        let Some(cfg) = sync::load_config() else {
+        let mut tokens = backup_app.tokens.lock().unwrap().clone();
+        if tokens.is_empty() {
             if let Some(w) = backup_weak.upgrade() {
                 w.set_sync_status(SharedString::from(if en {
-                    "Backup is off (no token)."
+                    "Connect Google first."
                 } else {
-                    "پشتیبان‌گیری خاموش است (نشانه‌ای نیست)."
+                    "اول به گوگل وصل شوید."
                 }));
             }
             return;
-        };
+        }
         let s = backup_app.settings.lock().unwrap().clone();
         let d = backup_app.store.lock().unwrap().data.clone();
         let payload = sync::BackupPayload {
@@ -1771,12 +1965,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings: toml::to_string_pretty(&s).unwrap_or_default(),
             data: serde_json::to_string_pretty(&d).unwrap_or_default(),
         };
-        let status = match sync::push_backup(&cfg, &payload) {
+        let status = match sync::push_backup(&mut tokens, &payload) {
             Ok(()) => {
+                // Persist a rotated access token so the next call does not
+                // refresh again.
+                let mut held = backup_app.tokens.lock().unwrap();
+                *held = tokens.clone();
+                let _ = sync::save_tokens(&tokens);
                 if en {
-                    "Backup saved to Google Sheets ✓".to_string()
+                    "Backup saved to Google Drive ✓".to_string()
                 } else {
-                    "پشتیبان در برگه‌های گوگل ذخیره شد ✓".to_string()
+                    "پشتیبان در گوگل درایو ذخیره شد ✓".to_string()
                 }
             }
             Err(e) => {
@@ -1801,18 +2000,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let restore_weak = weak.clone();
     win.on_restore_now(move || {
         let en = restore_app.settings.lock().unwrap().lang == "en";
-        let Some(cfg) = sync::load_config() else {
+        let mut tokens = restore_app.tokens.lock().unwrap().clone();
+        if tokens.is_empty() {
             if let Some(w) = restore_weak.upgrade() {
                 w.set_sync_status(SharedString::from(if en {
-                    "Restore is off (no token)."
+                    "Connect Google first."
                 } else {
-                    "بازگردانی خاموش است (نشانه‌ای نیست)."
+                    "اول به گوگل وصل شوید."
                 }));
             }
             return;
-        };
-        let status = match sync::pull_latest_backup(&cfg) {
+        }
+        let status = match sync::pull_backup(&mut tokens) {
             Ok(payload) => {
+                {
+                    let mut held = restore_app.tokens.lock().unwrap();
+                    *held = tokens.clone();
+                    let _ = sync::save_tokens(&tokens);
+                }
                 // Apply settings.
                 if let Ok(s) = toml::from_str::<Settings>(&payload.settings) {
                     let mut s = s;
