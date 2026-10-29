@@ -95,7 +95,19 @@ export global Palette {
         ? (dark ? #1E2E28 : #DCE8E4)
         : era == "parthian"
         ? (dark ? #212C40 : #DCE3F0)
-        : (dark ? #232833 : #E7E2D8); out property <brush> danger: dark ? #C9635B : #B04A42; }
+        : (dark ? #232833 : #E7E2D8); // The accent, one step deeper. Used for the pressed/hover state of any
+    // control filled with the accent, so the label keeps its contrast: white
+    // on the light-theme gold goes from 5.36:1 to 6.12:1, where a lightened
+    // hover dropped it to 4.40:1.
+    out property <brush> accent-strong: era == "darius"
+        ? (dark ? #D0834C : #7E4419)
+        : era == "sasanid"
+        ? (dark ? #5CB4A8 : #1E5950)
+        : era == "parthian"
+        ? (dark ? #6E9CDA : #264D89)
+        : (dark ? #DAB263 : #7E5C17); // A shadow that works on both themes: a warm grey at low alpha in light, a
+    // true black in dark. A grey shadow on a dark page reads as a smudge.
+    out property <color> shadow: dark ? #00000066 : #2A211433; out property <brush> danger: dark ? #C9635B : #B04A42; }
 
 export struct TaskItem {
     id: int,
@@ -337,7 +349,7 @@ component TaskAction inherits Rectangle {
 // touch so the click is felt.
 // ───────────────────────────────────────────────────────────────────────────
 component DayStep inherits Rectangle {
-    in property <bool> forward: false; callback clicked; width: 34px; height: 34px; border-radius: 11px; background: Palette.surface-2; border-width: 1px; border-color: Palette.hairline; ta := TouchArea { clicked => { root.clicked(); } }
+    in property <bool> forward: false; callback clicked; width: 32px; height: 32px; border-radius: 16px; background: transparent; border-width: 1px; border-color: transparent; ta := TouchArea { clicked => { root.clicked(); } }
 
     states [
         hovered when ta.has-hover : {
@@ -389,6 +401,76 @@ component IconButton inherits Rectangle {
             }
         }
     ]
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// TimerButton — the transport controls under the clock.
+//
+// These used to be bare icons floating on the page with no surface at all,
+// which is why they read as decoration rather than as buttons: nothing told
+// you they were pressable. Each one now sits on a real surface with a hairline,
+// and the primary (play/pause) is filled with the accent so the row has one
+// obvious target. Hover deepens the fill instead of replacing it with
+// Palette.text, which made the button look like it had changed identity.
+// ───────────────────────────────────────────────────────────────────────────
+component TimerButton inherits Rectangle {
+    in property <string> icon: "reset";
+    in property <length> size: 44px;
+    in property <length> icon-size: 18px;
+    in property <bool> primary: false;
+    in property <bool> running: false;
+    callback clicked;
+
+    width: size;
+    height: size;
+    // A Rectangle in a HorizontalLayout stretches to fill by default, which
+    // turned all three of these into full-width bars. Pin them to their size.
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: size / 2;
+
+    // Primary carries the accent and a shadow so it sits above the row;
+    // secondary is a quiet tile that only wakes on hover.
+    //
+    // The secondary fill is `surface` (white in light, the card colour in
+    // dark) rather than `surface-2`, because surface-2 is only 1.07:1 against
+    // the page — the tiles were there but invisible, so the icons looked like
+    // they were floating loose on the background. White plus a real hairline
+    // gives them an edge without making them shout.
+    background: primary ? Palette.accent : Palette.surface;
+    border-width: primary ? 0px : 1px;
+    border-color: primary ? transparent : Palette.border;
+    // A tight shadow. At 10px blur on a light page the shadow spread wider
+    // than the button and read as a pale rectangle behind the whole row.
+    drop-shadow-blur: primary ? 5px : 0px;
+    drop-shadow-color: primary ? Palette.shadow : transparent;
+    drop-shadow-offset-y: primary ? 2px : 0px;
+
+    ta := TouchArea { clicked => { root.clicked(); } }
+
+    states [
+        hovered when ta.has-hover && !primary : {
+            background: Palette.surface-3;
+            border-color: Palette.accent;
+            in { animate background { duration: Motion.quick; } animate border-color { duration: Motion.quick; } }
+        }
+        hovered-primary when ta.has-hover && primary : {
+            background: Palette.accent-strong;
+            in { animate background { duration: Motion.quick; } }
+        }
+        pressed when ta.pressed : {
+            drop-shadow-blur: 0px;
+            drop-shadow-offset-y: 0px;
+            in { animate drop-shadow-blur { duration: Motion.instant; } }
+        }
+    ]
+
+    Icon {
+        kind: root.icon;
+        size: root.icon-size;
+        // The play triangle is optically left-heavy, so it is nudged right to
+        // sit in the circle's true centre. Pause is symmetric and is not.
+        color: root.primary ? Palette.on-accent : (ta.has-hover ? Palette.accent : Palette.text-dim); x: (parent.width - self.width) / 2 + (root.primary && root.icon == "play" ? 2px : 0px); y: (parent.height - self.height) / 2; }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -1185,22 +1267,29 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             }
 
             HorizontalLayout {
-                spacing: 10px; alignment: center; IconButton {
-                    icon: "reset"; size: 38px; clicked => { root.reset(); }
+                spacing: 12px;
+                alignment: center;
+
+                TimerButton {
+                    icon: "reset";
+                    size: 38px;
+                    icon-size: 16px;
+                    clicked => { root.reset(); }
                 }
-                Rectangle {
-                    width: 52px; height: 52px; border-radius: 26px; background: Palette.accent; ta4 := TouchArea { clicked => { root.start-pause(); } }
-                    states [
-                        h when ta4.has-hover : {
-                            background: Palette.text;
-                            in { animate background { duration: Motion.quick; } }
-                        }
-                    ]
-                    Icon {
-                        kind: root.running ? "pause" : "play"; size: 20px; color: Palette.on-accent; x: (parent.width - self.width) / 2 + (root.running ? 0px : 1.5px); y: (parent.height - self.height) / 2; }
+
+                TimerButton {
+                    icon: root.running ? "pause" : "play";
+                    size: 52px;
+                    icon-size: 20px;
+                    primary: true;
+                    clicked => { root.start-pause(); }
                 }
-                IconButton {
-                    icon: "skip"; size: 38px; clicked => { root.skip(); }
+
+                TimerButton {
+                    icon: "skip";
+                    size: 38px;
+                    icon-size: 16px;
+                    clicked => { root.skip(); }
                 }
             }
         }
@@ -1296,24 +1385,30 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
             // ---- controls ----
             HorizontalLayout {
-                height: 64px; spacing: 22px; alignment: center; IconButton {
-                    icon: "reset"; size: 42px; icon-size: 18px; clicked => { root.reset(); }
+                height: 64px;
+                spacing: 16px;
+                alignment: center;
+
+                TimerButton {
+                    icon: "reset";
+                    size: 44px;
+                    icon-size: 18px;
+                    clicked => { root.reset(); }
                 }
 
-                Rectangle {
-                    width: 64px; height: 64px; border-radius: 32px; background: Palette.accent; ta5 := TouchArea { clicked => { root.start-pause(); } }
-                    states [
-                        h when ta5.has-hover : {
-                            background: Palette.text;
-                            in { animate background { duration: Motion.quick; } }
-                        }
-                    ]
-                    Icon {
-                        kind: root.running ? "pause" : "play"; size: 24px; color: Palette.on-accent; x: (parent.width - self.width) / 2 + (root.running ? 0px : 2px); y: (parent.height - self.height) / 2; }
+                TimerButton {
+                    icon: root.running ? "pause" : "play";
+                    size: 64px;
+                    icon-size: 24px;
+                    primary: true;
+                    clicked => { root.start-pause(); }
                 }
 
-                IconButton {
-                    icon: "skip"; size: 42px; icon-size: 18px; clicked => { root.skip(); }
+                TimerButton {
+                    icon: "skip";
+                    size: 44px;
+                    icon-size: 18px;
+                    clicked => { root.skip(); }
                 }
             }
 
@@ -1325,7 +1420,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             // "(today)" marker, the chevrons step a day at a time, and tapping
             // the date opens the month grid.
             Rectangle {
-                height: 64px;
+                height: 60px;
                 x: 22px;
                 width: parent.width - 22px - 22px;
                 border-radius: 16px;
@@ -1333,48 +1428,30 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                 border-width: 1px;
                 border-color: Palette.hairline;
 
+                // The chevrons sit at the card's edges and the date block is
+                // centred in what is left. Before, the date block stretched to
+                // fill the gap, so its text was centred in the *gap* rather
+                // than in the card, and the whole group drifted left whenever
+                // the date string was short.
                 HorizontalLayout {
-                    padding-left: 8px;
-                    padding-right: 8px;
-                    spacing: 4px;
-
-                    DayStep {
+                    padding-left: 10px; padding-right: 10px; spacing: 0px; alignment: center; DayStep {
                         clicked => { root.step-day(-1); }
                     }
 
                     Rectangle {
-                        horizontal-stretch: 1;
-                        background: transparent;
-                        ta-day := TouchArea { clicked => { root.open-today(); } }
+                        horizontal-stretch: 1; background: transparent; ta-day := TouchArea { clicked => { root.open-today(); } }
 
                         VerticalLayout {
-                            alignment: center;
-                            spacing: 1px;
+                            alignment: center; spacing: 2px; Text {
+                                text: root.day-headline; font-family: "Vazirmatn"; font-size: 16px; font-weight: 700; color: Palette.text; horizontal-alignment: center; overflow: elide; }
 
                             Text {
-                                text: root.day-headline;
-                                font-family: "Vazirmatn";
-                                font-size: 16px;
-                                font-weight: 700;
-                                color: Palette.text;
-                                horizontal-alignment: center;
-                                overflow: elide;
-                            }
-
-                            Text {
-                                text: root.day-subline;
-                                font-family: "Vazirmatn";
-                                font-size: 11px;
-                                color: Palette.text-dim;
-                                horizontal-alignment: center;
-                                overflow: elide;
-                            }
+                                text: root.day-subline; font-family: "Vazirmatn"; font-size: 11px; color: Palette.text-dim; horizontal-alignment: center; overflow: elide; }
                         }
                     }
 
                     DayStep {
-                        forward: true;
-                        clicked => { root.step-day(1); }
+                        forward: true; clicked => { root.step-day(1); }
                     }
                 }
             }
@@ -2209,25 +2286,25 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                             HorizontalLayout {
                                 height: 40px;
-                                Text { text: Strings.lbl-work; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-work; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Stepper { value <=> root.work-minutes; min: 1; max: 180; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.work-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
-                                Text { text: Strings.lbl-short; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-short; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Stepper { value <=> root.short-break-minutes; min: 1; max: 60; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.short-break-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
-                                Text { text: Strings.lbl-long; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-long; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Stepper { value <=> root.long-break-minutes; min: 1; max: 90; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.long-break-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
-                                Text { text: Strings.lbl-long-every; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-long-every; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Stepper { value <=> root.long-break-interval; min: 1; max: 12; suffix: ""; changed(v) => { root.long-break-interval = v; } }
                             }
                         }
@@ -2240,7 +2317,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         VerticalLayout {
                             padding: 14px;
                             HorizontalLayout {
-                                Text { text: Strings.lbl-goal; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-goal; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Stepper { value <=> root.daily-goal-minutes; min: 15; max: 600; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.daily-goal-minutes = v; } }
                             }
                         }
@@ -2255,13 +2332,13 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             spacing: 0px;
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-autostart-next; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-autostart-next; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Toggle { checked <=> root.auto-start-next; y: (parent.height - self.height) / 2; }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-autostart-launch; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-autostart-launch; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Toggle { checked <=> root.auto-start-on-launch; y: (parent.height - self.height) / 2; }
                             }
                         }
@@ -2380,7 +2457,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             spacing: 0px;
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-theme; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-theme; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Segmented {
                                     options: [Strings.theme-system, Strings.theme-dark, Strings.theme-light];
                                     current: root.theme-pref == "dark" ? 1 : (root.theme-pref == "light" ? 2 : 0);
@@ -2395,7 +2472,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-compact; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-compact; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Toggle {
                                     checked <=> root.compact-mode;
                                     y: (parent.height - self.height) / 2;
@@ -2417,8 +2494,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     spacing: 1px;
                                     alignment: center;
                                     vertical-stretch: 0;
-                                    Text { text: Strings.lbl-animations; font-size: 13px; color: Palette.text; }
-                                    Text { text: Strings.hint-animations; font-size: 10px; color: Palette.text-faint; overflow: elide; }
+                                    Text { text: Strings.lbl-animations; font-size: 13px; color: Palette.text; horizontal-alignment: Strings.fa ? end : start; }
+                                    Text { text: Strings.hint-animations; font-size: 11px; color: Palette.text-dim; overflow: elide; horizontal-alignment: Strings.fa ? end : start; }
                                 }
                                 Rectangle { horizontal-stretch: 1; }
                                 Toggle {
@@ -2438,7 +2515,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             padding: 14px;
                             HorizontalLayout {
                                 height: 34px;
-                                Text { text: Strings.lbl-language; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-language; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Segmented {
                                     options: [Strings.lang-fa, Strings.lang-en];
                                     current: Strings.lang == "fa" ? 0 : 1;
@@ -2461,11 +2538,11 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                             HorizontalLayout {
                                 height: 26px;
-                                Text { text: Strings.lbl-sound-on; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-sound-on; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Toggle { checked <=> root.sound-enabled; y: (parent.height - self.height) / 2; }
                             }
 
-                            Text { text: Strings.lbl-chime; font-size: 11px; color: Palette.text-faint; }
+                            Text { text: Strings.lbl-chime; font-size: 11px; color: Palette.text-dim; horizontal-alignment: Strings.fa ? end : start; }
 
                             HorizontalLayout {
                                 spacing: 6px;
@@ -2584,19 +2661,19 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             spacing: 0px;
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-hotkeys; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-hotkeys; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Toggle { checked <=> root.hotkey-enabled; y: (parent.height - self.height) / 2; }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-awake; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-awake; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Toggle { checked <=> root.inhibit-enabled; y: (parent.height - self.height) / 2; }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-overlay; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-overlay; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Toggle { checked <=> root.overlay-enabled; y: (parent.height - self.height) / 2; }
                             }
                         }
@@ -2613,6 +2690,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             Text {
                                 text: root.automation-summary;
                                 font-size: 11px;
+                                horizontal-alignment: Strings.fa ? end : start;
                                 color: Palette.text-faint;
                                 wrap: word-wrap;
                                 max-lines: 2;
@@ -2661,7 +2739,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                             Text {
                                 text: Strings.automation-hint;
-                                font-size: 10px;
+                                font-size: 11px;
+                                horizontal-alignment: Strings.fa ? end : start;
                                 color: Palette.text-faint;
                                 wrap: word-wrap;
                             }

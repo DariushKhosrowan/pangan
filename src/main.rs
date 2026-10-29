@@ -273,9 +273,16 @@ fn refresh_calendar(win: &PanganWindow, app: &AppState, day: (i32, u32, u32)) {
     // The festival for today, with its one-line gloss. This covers the fixed
     // festivals (Nowruz, the six Gahambars, the fire and water feasts) as well
     // as the twelve name-day ones, so a day that is a festival at all says so.
-    let (feast_name, feast_note) = match calendar::feast_on(jm, jd) {
-        Some((name, note)) => (name, note),
-        None => ("", ""),
+    // The feast card follows the language too. The note is only available in
+    // Persian, so in English the name is transliterated and the note is left
+    // off rather than printing Persian prose inside an English screen.
+    let (feast_name, feast_note) = if en {
+        (calendar::feast_name_en(jm, jd).unwrap_or(""), "")
+    } else {
+        match calendar::feast_on(jm, jd) {
+            Some((name, note)) => (name, note),
+            None => ("", ""),
+        }
     };
     win.set_cal_feast(SharedString::from(feast_name));
     win.set_cal_feast_note(SharedString::from(feast_note));
@@ -500,14 +507,25 @@ fn refresh_day_view(win: &PanganWindow, app: &AppState) {
         date_text
     }));
 
+    // Every part of this line has to follow the language. The weekday already
+    // did, but the feast and the old-calendar day-name were hardcoded to the
+    // Persian tables, so English mode still produced a Persian subline.
     let day_name = calendar::day_name(sm, sd);
-    let feast = calendar::feast_on(sm, sd).map(|f| f.0).unwrap_or("");
+    let feast = if en {
+        calendar::feast_name_en(sm, sd).unwrap_or("")
+    } else {
+        calendar::feast_on(sm, sd).map(|f| f.0).unwrap_or("")
+    };
     let mut bits: Vec<String> = Vec::new();
     bits.push(weekday.to_string());
     if !feast.is_empty() {
         bits.push(feast.to_string());
     }
-    bits.push(day_name.name.to_string());
+    bits.push(if en {
+        day_name.name_en.to_string()
+    } else {
+        day_name.name.to_string()
+    });
     bits.push(if en {
         if open_here == 1 {
             "1 open task".to_string()
@@ -659,14 +677,24 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
 
 /// Recompute the automation summary line and push it to the window.
 fn update_automation_summary(win: &slint::Weak<PanganWindow>, app: &AppState) {
-    let automation = automation::sorted(&app.settings.lock().unwrap());
+    let settings = app.settings.lock().unwrap();
+    let en = settings.lang == "en";
+    let automation = automation::sorted(&settings);
+    drop(settings);
+    // This summary was hardcoded to Persian, so it stayed Persian in English
+    // mode while every label around it switched.
     let summary = if automation.is_empty() {
-        "هنوز آیینی ساخته نشده است.".to_string()
+        if en {
+            "No routines yet.".to_string()
+        } else {
+            "هنوز آیینی ساخته نشده است.".to_string()
+        }
     } else {
-        let mut s = String::from(format!(
-            "{} آیین: ",
-            calendar::fa_num(automation.len() as i64)
-        ));
+        let mut s = if en {
+            format!("{} routines: ", automation.len())
+        } else {
+            format!("{} آیین: ", calendar::fa_num(automation.len() as i64))
+        };
         for a in &automation {
             s.push_str(&format!("[{}] {}, ", a.event, a.command));
         }

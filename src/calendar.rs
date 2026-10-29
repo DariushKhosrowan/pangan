@@ -259,6 +259,52 @@ pub fn feast_on(month: u32, day: u32) -> Option<(&'static str, &'static str)> {
     None
 }
 
+/// The festival's name in Latin script, for the English UI.
+///
+/// `feast_on` returns the Persian name because that is what the Persian UI
+/// shows. The English UI was still printing the Persian string, which is why
+/// the timer screen's day subline stayed Persian in English mode. This maps
+/// the same feast to its transliteration; an unknown name falls back to the
+/// Persian so nothing is ever blank.
+pub fn feast_name_en(month: u32, day: u32) -> Option<&'static str> {
+    let m = (month as usize).clamp(1, 12) - 1;
+
+    if let Some(&(_, _, name, _)) = FIXED_FEASTS
+        .iter()
+        .find(|&&(fm, fd, _, _)| fm == month && fd == day)
+    {
+        return Some(match name {
+            "نوروز" => "Nowruz",
+            "زایش زرتشت" => "Birth of Zoroaster",
+            "سیزده‌به‌در" => "Sizdah Bedar",
+            "سده" => "Sadeh",
+            other => other,
+        });
+    }
+
+    if MONTH_NAME_DAY[m] == day {
+        return Some(MONTH_FEASTS_EN[m]);
+    }
+
+    None
+}
+
+/// Latin transliterations of the name-day feasts, in month order.
+const MONTH_FEASTS_EN: [&str; 12] = [
+    "Farvardinegan",
+    "Ordibeheshtegan",
+    "Khordadegan",
+    "Tirgan",
+    "Amordadegan",
+    "Shahrivaregan",
+    "Mehregan",
+    "Abangan",
+    "Azaregan",
+    "Khorram Rouz",
+    "Bahmanegan",
+    "Sepandarmazegan",
+];
+
 /// The day of the month on which each month's namesake day falls.
 /// (The day-name index that equals the month's own name.)
 const MONTH_NAME_DAY: [u32; 12] = [

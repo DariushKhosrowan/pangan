@@ -21,6 +21,13 @@ export global Strings {
     out property <string> made-by: fa ? "ساختهٔ" : "Made by";
 
     // ── navigation ───────────────────────────────────────────────────────
+    // The calendar grid's weekday header, Saturday-first. Persian uses the
+    // single-letter initials; English uses the conventional two-letter form
+    // because "T" and "S" each appear twice and would be ambiguous.
+    out property <[string]> weekday-initials: fa
+        ? ["ش", "ی", "د", "س", "چ", "پ", "ج"]
+        : ["Sa", "Su", "Mo", "Tu", "We", "Th", "Fr"];
+
     out property <string> nav-timer: fa ? "زمان‌سنج" : "Timer";
     out property <string> nav-today: fa ? "امروز" : "Today";
     out property <string> nav-stats: fa ? "آمار" : "Stats";
