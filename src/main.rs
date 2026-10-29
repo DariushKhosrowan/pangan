@@ -916,6 +916,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ));
         }
     });
+    // Compact mode: swap the layout and resize the window to match.
+    let cm_weak = weak.clone();
+    win.on_set_compact_mode(move |on| {
+        if let Some(w) = cm_weak.upgrade() {
+            w.set_compact_mode(on);
+            let (cw, ch) = if on { (320.0, 300.0) } else { (420.0, 680.0) };
+            let _ = w.window().set_size(slint::WindowSize::Logical(
+                slint::LogicalSize::new(cw, ch),
+            ));
+        }
+    });
+
  // Sync now.
     let sync_app = Arc::clone(&app);
     let sync_weak = weak.clone();

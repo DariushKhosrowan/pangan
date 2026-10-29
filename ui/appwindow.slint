@@ -417,7 +417,7 @@ component Stepper inherits Rectangle {
     callback changed(int);
 
     height: 30px;
-    width: 104px;
+    width: 124px;
     border-radius: 15px;
     background: Palette.surface-2;
 
@@ -462,7 +462,7 @@ component Stepper inherits Rectangle {
             font-weight: 600;
             color: Palette.text;
             horizontal-alignment: center;
-            width: 46px;
+            width: 66px;
             height: parent.height;
         }
 
@@ -738,7 +738,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in property <string> status-line; in property <string> report-text; in property <string> sync-status; in-out property <string> new-task-text; in-out property <string> show-view: "main"; // ---- Settings (edited in the Settings screen) ----
     in-out property <int> work-minutes: 25; in-out property <int> short-break-minutes: 5; in-out property <int> long-break-minutes: 15; in-out property <int> long-break-interval: 4; in-out property <int> daily-goal-minutes: 120; in-out property <bool> auto-start-next: true; in-out property <bool> auto-start-on-launch: false; in-out property <bool> sound-enabled: true; in-out property <string> sound-theme: "santur"; in-out property <bool> hotkey-enabled: true; in-out property <bool> inhibit-enabled: true; in-out property <bool> overlay-enabled: true; in-out property <bool> compact-mode: false; in-out property <int> sound-volume: 80; in property <string> automation-summary; // ---- Rich data (pushed from Rust) ----
     in property <[TaskItem]> tasks: []; in property <[float]> week-bars: [0, 0, 0, 0, 0, 0, 0]; in property <[string]> week-labels: ["ش", "ی", "د", "س", "چ", "پ", "ج"]; in property <int> today-sessions: 0; in property <int> today-minutes: 0; in property <int> today-score: 0; in property <int> today-streak: 0; in property <int> today-consistency: 0; in property <int> today-best: 0; in property <int> session-total: 4; in property <int> session-done: 0; in property <int> goal-minutes: 120; in property <int> goal-done-minutes: 0; // ---- Callbacks to Rust ----
-    callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback refresh-events; callback open-url(string); callback window-drag-start;
+    callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback refresh-events; callback open-url(string); callback window-drag-start; callback set-compact-mode(bool);
     // Resize: the edge/corner grab zones report the pointer's screen position
     // and which edge is being dragged; Rust turns that into a new window size.
 
@@ -1633,19 +1633,19 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             HorizontalLayout {
                                 height: 40px;
                                 Text { text: Strings.lbl-work; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
-                                Stepper { value <=> root.work-minutes; min: 1; max: 180; changed(v) => { root.work-minutes = v; } }
+                                Stepper { value <=> root.work-minutes; min: 1; max: 180; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.work-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
                                 Text { text: Strings.lbl-short; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
-                                Stepper { value <=> root.short-break-minutes; min: 1; max: 60; changed(v) => { root.short-break-minutes = v; } }
+                                Stepper { value <=> root.short-break-minutes; min: 1; max: 60; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.short-break-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
                                 Text { text: Strings.lbl-long; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
-                                Stepper { value <=> root.long-break-minutes; min: 1; max: 90; changed(v) => { root.long-break-minutes = v; } }
+                                Stepper { value <=> root.long-break-minutes; min: 1; max: 90; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.long-break-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
@@ -1664,7 +1664,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             padding: 14px;
                             HorizontalLayout {
                                 Text { text: Strings.lbl-goal; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
-                                Stepper { value <=> root.daily-goal-minutes; min: 15; max: 600; suffix: "د"; changed(v) => { root.daily-goal-minutes = v; } }
+                                Stepper { value <=> root.daily-goal-minutes; min: 15; max: 600; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.daily-goal-minutes = v; } }
                             }
                         }
                     }
@@ -1819,7 +1819,16 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             HorizontalLayout {
                                 height: 44px;
                                 Text { text: Strings.lbl-compact; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
-                                Toggle { checked <=> root.compact-mode; y: (parent.height - self.height) / 2; }
+                                Toggle {
+                                    checked <=> root.compact-mode;
+                                    y: (parent.height - self.height) / 2;
+                                    // The window no longer binds its own size,
+                                    // so switching compact mode has to ask Rust
+                                    // to resize the window as well as swap the
+                                    // layout — otherwise the compact view opens
+                                    // inside a full-size window.
+                                    toggled(v) => { root.set-compact-mode(v); }
+                                }
                             }
                         }
                     }
