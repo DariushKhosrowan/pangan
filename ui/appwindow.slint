@@ -20,6 +20,39 @@ export { Motion } from "motion.slint";
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ───────────────────────────────────────────────────────────────────────────
+// Type — the app's type scale, in one place.
+//
+// The sizes used to be set per element, which had drifted into fifteen
+// different values, several of them 8px and 9px. Text that small is not a
+// hierarchy, it is a legibility problem: at 8px Persian letterforms lose their
+// distinguishing strokes and the whole screen reads as smudged. The scale
+// below has a floor of 10px for anything the user must read, and reserves the
+// small end for true captions.
+//
+// Weights are limited to three: 400 for body, 600 for emphasis, 700 for the
+// small-caps labels that carry a section.
+// ───────────────────────────────────────────────────────────────────────────
+export global Type {
+    // Captions and metadata: the smallest text that still has to be read.
+    out property <length> caption: 10px;
+    // Secondary text: hints, sublines, helper copy.
+    out property <length> small: 11px;
+    // Body: task titles, setting labels, list rows.
+    out property <length> body: 13px;
+    // Emphasis: card headings and the selected item.
+    out property <length> title: 15px;
+    // Screen headings.
+    out property <length> heading: 17px;
+    // The hero clock and the big stat numbers.
+    out property <length> display: 24px;
+
+    // Letter-spacing for the small-caps section labels. Persian is a connected
+    // script: spacing it out breaks the joins and looks broken, so tracking is
+    // only ever applied to the Latin side.
+    out property <length> tracking: 1.1px;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // Palette — one source of truth for both themes.
 // ───────────────────────────────────────────────────────────────────────────
 export global Palette {
@@ -482,7 +515,7 @@ component Segmented inherits Rectangle {
     in property <[string]> options: ["زمان‌سنج", "آمار"];
     in property <int> current: 0;
     in property <length> item-height: 28px;
-    in property <length> font-size: 12px;
+    in property <length> font-size: Type.small;
     callback selected(int);
 
     height: item-height + 8px;
@@ -606,7 +639,7 @@ component Stepper inherits Rectangle {
             ]
             Text {
                 text: "−";
-                font-size: 15px;
+                font-size: Type.title;
                 color: root.value > root.min ? Palette.text : Palette.text-faint;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -617,7 +650,7 @@ component Stepper inherits Rectangle {
 
         Text {
             text: Digits.num(root.value) + root.suffix;
-            font-size: 12px;
+            font-size: Type.small;
             font-weight: 600;
             color: Palette.text;
             horizontal-alignment: center;
@@ -651,7 +684,7 @@ component Stepper inherits Rectangle {
             ]
             Text {
                 text: "+";
-                font-size: 14px;
+                font-size: Type.body;
                 color: root.value < root.max ? Palette.text : Palette.text-faint;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -686,20 +719,20 @@ component StatCard inherits Rectangle {
 
         Text {
             text: root.label;
-            font-size: 10px;
+            font-size: Type.caption;
             font-weight: 700;
             letter-spacing: 1.1px;
             color: Palette.text-faint;
         }
         Text {
             text: root.value;
-            font-size: 24px;
+            font-size: Type.display;
             font-weight: 400;
             color: Palette.text;
         }
         Text {
             text: root.hint;
-            font-size: 10px;
+            font-size: Type.caption;
             color: Palette.text-faint;
             visible: root.hint != "";
         }
@@ -744,7 +777,7 @@ component BarChart {
             for l[i] in root.labels : Text {
                 horizontal-stretch: 1;
                 text: l;
-                font-size: 10px;
+                font-size: Type.caption;
                 font-weight: i == root.highlight ? 700 : 400;
                 color: i == root.highlight ? Palette.text-dim : Palette.text-faint;
                 horizontal-alignment: center;
@@ -814,7 +847,7 @@ component TaskRow inherits Rectangle {
         // text box is what actually lines the two up.
         Text {
             text: item.title;
-            font-size: 13px;
+            font-size: Type.body;
             color: item.done ? Palette.text-faint : Palette.text;
             overflow: elide;
             horizontal-stretch: 1;
@@ -825,7 +858,7 @@ component TaskRow inherits Rectangle {
 
         Text {
             text: item.time;
-            font-size: 11px;
+            font-size: Type.small;
             color: Palette.text-faint;
             visible: item.time != "";
             height: parent.height;
@@ -879,7 +912,7 @@ component MonthGrid inherits Rectangle {
                 if c.day != 0 : Text {
                     text: c.label;
                     font-family: "Vazirmatn";
-                    font-size: 12px;
+                    font-size: Type.small;
                     font-weight: c.is-today || c.selected ? 700 : 400;
                     color: c.selected ? Palette.on-accent : (c.is-today ? Palette.accent : Palette.text);
                     horizontal-alignment: center;
@@ -911,13 +944,16 @@ component MonthGrid inherits Rectangle {
 // ───────────────────────────────────────────────────────────────────────────
 component SectionLabel {
     in property <string> text: "";
-    height: 18px;
+    height: 20px;
     Text {
         text: root.text;
-        font-size: 10px;
+        font-size: Type.caption;
         font-weight: 700;
-        letter-spacing: 1.3px;
+        // Tracking only in Latin. Persian is a connected script: spacing the
+        // letters apart breaks the joins and reads as a rendering fault.
+        letter-spacing: Strings.fa ? 0px : Type.tracking;
         color: Palette.text-faint;
+        vertical-alignment: center;
     }
 }
 
@@ -930,6 +966,12 @@ component Card inherits Rectangle {
     background: Palette.surface;
     border-width: 1px;
     border-color: Palette.hairline;
+    // Size to the content. Every settings card used to carry a hand-measured
+    // pixel height, so adding a row silently clipped the card and the number
+    // went stale the moment a label wrapped. A card that measures itself
+    // cannot be wrong, and it is what lets the whole screen reflow when the
+    // window changes size.
+    height: self.preferred-height;
     @children
 }
 
@@ -966,9 +1008,9 @@ component EraCard inherits Rectangle {
         }
 
         Text {
-            text: root.name; font-size: 11px; font-weight: 600; color: active ? Palette.accent : Palette.text; overflow: elide; }
+            text: root.name; font-size: Type.small; font-weight: 600; color: active ? Palette.accent : Palette.text; overflow: elide; }
         Text {
-            text: root.blurb; font-size: 8px; color: Palette.text-faint; overflow: elide; }
+            text: root.blurb; font-size: Type.caption; color: Palette.text-faint; overflow: elide; }
     }
 }
 
@@ -1063,7 +1105,7 @@ component DynastyRow inherits Rectangle {
             Text {
                 text: root.name;
                 font-family: "Vazirmatn";
-                font-size: 14px;
+                font-size: Type.body;
                 font-weight: 700;
                 color: Palette.text;
                 vertical-alignment: center;
@@ -1072,7 +1114,7 @@ component DynastyRow inherits Rectangle {
             Text {
                 text: root.span;
                 font-family: "Vazirmatn";
-                font-size: 10px;
+                font-size: Type.caption;
                 color: Palette.accent;
                 vertical-alignment: center;
             }
@@ -1084,14 +1126,14 @@ component DynastyRow inherits Rectangle {
             Text {
                 text: root.capital-label + " ";
                 font-family: "Vazirmatn";
-                font-size: 9px;
+                font-size: Type.caption;
                 color: Palette.text-faint;
                 vertical-alignment: center;
             }
             Text {
                 text: root.capital;
                 font-family: "Vazirmatn";
-                font-size: 10px;
+                font-size: Type.caption;
                 color: Palette.text-dim;
                 vertical-alignment: center;
             }
@@ -1099,14 +1141,14 @@ component DynastyRow inherits Rectangle {
             Text {
                 text: root.figure-label + " ";
                 font-family: "Vazirmatn";
-                font-size: 9px;
+                font-size: Type.caption;
                 color: Palette.text-faint;
                 vertical-alignment: center;
             }
             Text {
                 text: root.figure;
                 font-family: "Vazirmatn";
-                font-size: 10px;
+                font-size: Type.caption;
                 color: Palette.text-dim;
                 vertical-alignment: center;
                 overflow: elide;
@@ -1118,9 +1160,10 @@ component DynastyRow inherits Rectangle {
         Text {
             text: root.legacy;
             font-family: "Vazirmatn";
-            font-size: 10px;
+            font-size: Type.caption;
             color: Palette.text-faint;
             wrap: word-wrap;
+            line-height-factor: 1.55;
         }
     }
 }
@@ -1334,16 +1377,16 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     vertical-stretch: 0;
                     Text {
                         text: Strings.app-name;
-                        font-size: 13px;
+                        font-size: Type.body;
                         font-weight: 600;
-                        letter-spacing: 0.3px;
+                        letter-spacing: Strings.fa ? 0px : Type.tracking;
                         color: Palette.text;
                         vertical-alignment: center;
                     }
                     Text {
                         text: Strings.app-tagline;
                         font-family: "Vazirmatn";
-                        font-size: 10px;
+                        font-size: Type.caption;
                         color: Palette.text-faint;
                         vertical-alignment: center;
                     }
@@ -1386,13 +1429,13 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             y: root.view-offset;
             padding: 16px; spacing: 10px; HorizontalLayout {
                 spacing: 8px; alignment: space-between; Text {
-                    text: root.session-name; font-size: 11px; font-weight: 700; color: Palette.text-faint; vertical-alignment: center; }
+                    text: root.session-name; font-size: Type.small; font-weight: 700; color: Palette.text-faint; vertical-alignment: center; }
                 Text {
-                    text: root.session-counter; font-size: 10px; color: Palette.text-faint; vertical-alignment: center; }
+                    text: root.session-counter; font-size: Type.caption; color: Palette.text-faint; vertical-alignment: center; }
             }
 
             Text {
-                text: Digits.pad2(root.time-minutes) + ":" + Digits.pad2(root.time-seconds); font-size: 54px; font-weight: 300; letter-spacing: 1px; color: Palette.text; horizontal-alignment: center; }
+                text: Digits.pad2(root.time-minutes) + ":" + Digits.pad2(root.time-seconds); font-size: 54px; font-weight: 300; letter-spacing: 0.5px; color: Palette.text; horizontal-alignment: center; }
 
             Rectangle {
                 height: 4px; border-radius: 2px; background: Palette.track; Rectangle {
@@ -1477,11 +1520,11 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
                     spacing: 2px; alignment: center; Text {
-                        text: root.session-name; font-size: 11px; font-weight: 700; color: Palette.accent; horizontal-alignment: center; }
+                        text: root.session-name; font-size: Type.small; font-weight: 700; color: Palette.accent; horizontal-alignment: center; }
                     Text {
                         text: Digits.pad2(root.time-minutes) + ":" + Digits.pad2(root.time-seconds); font-size: Math.max(34px, Math.min(62px, hero-ring.width * 0.26)); font-weight: 300; letter-spacing: 0.5px; color: Palette.text; horizontal-alignment: center; }
                     Text {
-                        text: root.phase; font-size: 11px; color: Palette.text-dim; horizontal-alignment: center; }
+                        text: root.phase; font-size: Type.small; color: Palette.text-dim; horizontal-alignment: center; }
                     // The day's goal, inside the ring rather than in a card of
                     // its own. It belongs to the timer — it is the same number
                     // the ring is filling towards — and a separate bar below
@@ -1504,7 +1547,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         }
                     }
                     Text {
-                        text: Digits.num(root.goal-done-minutes) + " / " + Digits.num(root.goal-minutes) + " " + Strings.minutes-short; font-size: 9px; color: Palette.text-faint; horizontal-alignment: center; }
+                        text: Digits.num(root.goal-done-minutes) + " / " + Digits.num(root.goal-minutes) + " " + Strings.minutes-short; font-size: Type.caption; color: Palette.text-faint; horizontal-alignment: center; }
                 }
             }
 
@@ -1578,10 +1621,10 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                         VerticalLayout {
                             alignment: center; spacing: 2px; Text {
-                                text: root.day-headline; font-family: "Vazirmatn"; font-size: 16px; font-weight: 700; color: Palette.text; horizontal-alignment: center; overflow: elide; }
+                                text: root.day-headline; font-family: "Vazirmatn"; font-size: Type.heading; font-weight: 700; color: Palette.text; horizontal-alignment: center; overflow: elide; }
 
                             Text {
-                                text: root.day-subline; font-family: "Vazirmatn"; font-size: 11px; color: Palette.text-dim; horizontal-alignment: center; overflow: elide; }
+                                text: root.day-subline; font-family: "Vazirmatn"; font-size: Type.small; color: Palette.text-dim; horizontal-alignment: center; overflow: elide; }
                         }
                     }
 
@@ -1616,16 +1659,18 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         height: 20px;
                         Text {
                             text: Strings.tasks;
-                            font-size: 10px;
+                            font-size: Type.caption;
                             font-weight: 700;
-                            letter-spacing: 1.1px;
+                            letter-spacing: Strings.fa ? 0px : Type.tracking;
                             color: Palette.text-faint;
+                            vertical-alignment: center;
                         }
                         Rectangle { horizontal-stretch: 1; }
                         Text {
                             text: Digits.num(root.tasks.length);
-                            font-size: 10px;
+                            font-size: Type.caption;
                             color: Palette.text-faint;
+                            vertical-alignment: center;
                         }
                     }
 
@@ -1633,7 +1678,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         height: 46px;
                         Text {
                             text: Strings.tasks-empty;
-                            font-size: 12px;
+                            font-size: Type.small;
                             color: Palette.text-faint;
                             x: 2px;
                         }
@@ -1670,7 +1715,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             LineEdit {
                                 text <=> root.new-task-text;
                                 placeholder-text: Strings.task-placeholder;
-                                font-size: 12px;
+                                font-size: Type.small;
                                 horizontal-stretch: 1;
                                 accepted(t) => {
                                     root.new-task-text = t;
@@ -1714,14 +1759,14 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                 alignment: space-between;
                 Text {
                     text: root.sync-status;
-                    font-size: 10px;
+                    font-size: Type.caption;
                     color: Palette.text-faint;
                     overflow: elide;
                     horizontal-stretch: 1;
                 }
                 Text {
                     text: Strings.sync;
-                    font-size: 10px;
+                    font-size: Type.caption;
                     color: Palette.text-dim;
                     ta7 := TouchArea {
                         clicked => { root.sync-now(); }
@@ -1749,9 +1794,9 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     icon: "back"; size: 30px; icon-size: 15px; clicked => { root.close-today(); }
                 }
                 Text {
-                    text: Strings.today; font-family: "Vazirmatn"; font-size: 15px; font-weight: 600; color: Palette.text; horizontal-stretch: 1; }
+                    text: Strings.today; font-family: "Vazirmatn"; font-size: Type.title; font-weight: 600; color: Palette.text; horizontal-stretch: 1; }
                 if root.refresh-status != "" : Text {
-                    text: root.refresh-status; font-size: 9px; color: Palette.text-faint; vertical-alignment: center; }
+                    text: root.refresh-status; font-size: Type.caption; color: Palette.text-faint; vertical-alignment: center; }
                 Rectangle {
                     width: 30px; height: 30px; border-radius: 15px; background: Palette.surface-2;
                     ta-ref := TouchArea { clicked => { root.refresh-events(); } }
@@ -1797,7 +1842,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 Text {
                                     text: root.month-title;
                                     font-family: "Vazirmatn";
-                                    font-size: 13px;
+                                    font-size: Type.body;
                                     font-weight: 600;
                                     color: Palette.text;
                                     horizontal-alignment: center;
@@ -1827,7 +1872,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     Text {
                                         text: Strings.today;
                                         font-family: "Vazirmatn";
-                                        font-size: 9px;
+                                        font-size: Type.caption;
                                         color: Palette.accent;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
@@ -1841,7 +1886,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 for w in ["ش", "ی", "د", "س", "چ", "پ", "ج"] : Text {
                                     text: w;
                                     font-family: "Vazirmatn";
-                                    font-size: 9px;
+                                    font-size: Type.caption;
                                     color: Palette.text-faint;
                                     horizontal-alignment: center;
                                     horizontal-stretch: 1;
@@ -1864,7 +1909,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         Text {
                             text: root.selected-day-title;
                             font-family: "Vazirmatn";
-                            font-size: 11px;
+                            font-size: Type.small;
                             font-weight: 700;
                             color: Palette.text;
                             vertical-alignment: center;
@@ -1872,14 +1917,14 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         Text {
                             text: root.selected-day-sub;
                             font-family: "Vazirmatn";
-                            font-size: 10px;
+                            font-size: Type.caption;
                             color: Palette.text-faint;
                             vertical-alignment: center;
                             horizontal-stretch: 1;
                         }
                         Text {
                             text: Digits.num(root.day-tasks.length);
-                            font-size: 10px;
+                            font-size: Type.caption;
                             color: Palette.text-faint;
                             vertical-alignment: center;
                         }
@@ -1894,7 +1939,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         Text {
                             text: Strings.tasks-none-day;
                             font-family: "Vazirmatn";
-                            font-size: 11px;
+                            font-size: Type.small;
                             color: Palette.text-faint;
                             horizontal-alignment: center;
                             vertical-alignment: center;
@@ -1945,7 +1990,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 Text {
                                     text: t.title;
                                     font-family: "Vazirmatn";
-                                    font-size: 12px;
+                                    font-size: Type.small;
                                     color: t.done ? Palette.text-faint : Palette.text;
                                     overflow: elide;
                                     horizontal-stretch: 1;
@@ -1956,7 +2001,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                                 if t.time != "" : Text {
                                     text: t.time;
-                                    font-size: 10px;
+                                    font-size: Type.caption;
                                     color: Palette.text-faint;
                                     vertical-alignment: center;
                                 }
@@ -2001,7 +2046,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                                     LineEdit {
                                         text <=> root.edit-text;
-                                        font-size: 12px;
+                                        font-size: Type.small;
                                         horizontal-stretch: 1;
                                         accepted(v) => {
                                             root.rename-task(t.id, v);
@@ -2050,7 +2095,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 placeholder-text: root.selected-is-today
                                     ? Strings.task-placeholder
                                     : Strings.task-placeholder-day;
-                                font-size: 12px;
+                                font-size: Type.small;
                                 horizontal-stretch: 1;
                                 accepted(t) => {
                                     root.new-task-text = t;
@@ -2093,14 +2138,14 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                         VerticalLayout {
                             padding-left: 16px; padding-top: 14px; padding-bottom: 14px; spacing: 4px; Text {
-                                text: root.cal-weekday; font-family: "Vazirmatn"; font-size: 11px; color: Palette.accent; font-weight: 600; }
+                                text: root.cal-weekday; font-family: "Vazirmatn"; font-size: Type.small; color: Palette.accent; font-weight: 600; }
                             Text {
-                                text: root.cal-date; font-family: "Vazirmatn"; font-size: 24px; font-weight: 600; color: Palette.text; }
+                                text: root.cal-date; font-family: "Vazirmatn"; font-size: Type.display; font-weight: 600; color: Palette.text; }
                             Text {
-                                text: root.cal-month-progress; font-family: "Vazirmatn"; font-size: 11px; color: Palette.text-dim; }
+                                text: root.cal-month-progress; font-family: "Vazirmatn"; font-size: Type.small; color: Palette.text-dim; }
                             Text {
                                 text: Strings.heritage-title + " · " + Strings.heritage-sub;
-                                font-family: "Vazirmatn"; font-size: 9px; color: Palette.accent; }
+                                font-family: "Vazirmatn"; font-size: Type.caption; color: Palette.accent; }
                         }
                     }
 
@@ -2108,12 +2153,12 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     Rectangle {
                         height: 74px; border-radius: 14px; background: Palette.accent-soft; border-width: 1px; border-color: Palette.accent; VerticalLayout {
                             padding-left: 16px; padding-right: 16px; padding-top: 12px; padding-bottom: 12px; spacing: 2px; Text {
-                                text: Strings.day-name-label; font-family: "Vazirmatn"; font-size: 11px; font-weight: 700; color: Palette.text-faint; }
+                                text: Strings.day-name-label; font-family: "Vazirmatn"; font-size: Type.small; font-weight: 700; color: Palette.text-faint; }
                             HorizontalLayout {
                                 spacing: 8px; Text {
-                                    text: root.cal-day-name; font-family: "Vazirmatn"; font-size: 20px; font-weight: 600; color: Palette.accent; vertical-alignment: center; }
+                                    text: root.cal-day-name; font-family: "Vazirmatn"; font-size: Type.display; font-weight: 600; color: Palette.accent; vertical-alignment: center; }
                                 Text {
-                                    text: root.cal-day-index; font-family: "Vazirmatn"; font-size: 11px; color: Palette.text-dim; vertical-alignment: center; horizontal-stretch: 1; }
+                                    text: root.cal-day-index; font-family: "Vazirmatn"; font-size: Type.small; color: Palette.text-dim; vertical-alignment: center; horizontal-stretch: 1; }
                             }
                         }
                     }
@@ -2129,9 +2174,9 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 alignment: center;
                                 spacing: 1px;
                                 Text {
-                                    text: Strings.feast-prefix + root.cal-feast; font-family: "Vazirmatn"; font-size: 13px; font-weight: 600; color: Palette.text; vertical-alignment: center; }
+                                    text: Strings.feast-prefix + root.cal-feast; font-family: "Vazirmatn"; font-size: Type.body; font-weight: 600; color: Palette.text; vertical-alignment: center; }
                                 if root.cal-feast-note != "" : Text {
-                                    text: root.cal-feast-note; font-family: "Vazirmatn"; font-size: 11px; color: Palette.text-dim; overflow: elide; }
+                                    text: root.cal-feast-note; font-family: "Vazirmatn"; font-size: Type.small; color: Palette.text-dim; overflow: elide; }
                             }
                         }
                     }
@@ -2139,27 +2184,27 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     // ---- events ----
                     HorizontalLayout {
                         height: 20px; padding-left: 2px; spacing: 6px; alignment: start; Text {
-                            text: Strings.iran-events; font-family: "Vazirmatn"; font-size: 11px; font-weight: 700; color: Palette.text-faint; vertical-alignment: center; }
+                            text: Strings.iran-events; font-family: "Vazirmatn"; font-size: Type.small; font-weight: 700; color: Palette.text-faint; vertical-alignment: center; }
                         Text {
-                            text: root.cal-events.length > 0 ? "(" + root.cal-events.length + ")" : ""; font-size: 10px; color: Palette.text-faint; vertical-alignment: center; }
+                            text: root.cal-events.length > 0 ? "(" + root.cal-events.length + ")" : ""; font-size: Type.caption; color: Palette.text-faint; vertical-alignment: center; }
                     }
 
                     if root.cal-events.length == 0 : Rectangle {
                         height: 56px; border-radius: 12px; background: Palette.surface; border-width: 1px; border-color: Palette.hairline; Text {
-                            text: root.cal-empty; font-family: "Vazirmatn"; font-size: 11px; color: Palette.text-faint; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
+                            text: root.cal-empty; font-family: "Vazirmatn"; font-size: Type.small; color: Palette.text-faint; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; line-height-factor: 1.55; }
                     }
 
                     for ev in root.cal-events : Rectangle {
                         height: ev-row.preferred-height + 22px; border-radius: 12px; background: Palette.surface; border-width: 1px; border-color: Palette.hairline; ev-row := VerticalLayout {
                             x: 14px; y: 11px; width: parent.width - 28px; height: self.preferred-height; spacing: 4px; HorizontalLayout {
                                 spacing: 6px; height: 14px; if ev.year != "" : Text {
-                                    text: ev.year; font-family: "Vazirmatn"; font-size: 10px; font-weight: 700; color: Palette.accent; vertical-alignment: center; }
+                                    text: ev.year; font-family: "Vazirmatn"; font-size: Type.caption; font-weight: 700; color: Palette.accent; vertical-alignment: center; }
                                 if ev.section != "" : Text {
-                                    text: ev.section; font-family: "Vazirmatn"; font-size: 9px; color: Palette.text-faint; vertical-alignment: center; }
+                                    text: ev.section; font-family: "Vazirmatn"; font-size: Type.caption; color: Palette.text-faint; vertical-alignment: center; }
                             }
 
                             Text {
-                                text: ev.text; font-family: "Vazirmatn"; font-size: 11px; color: Palette.text; wrap: word-wrap; line-height-factor: 1.55; }
+                                text: ev.text; font-family: "Vazirmatn"; font-size: Type.small; color: Palette.text; wrap: word-wrap; line-height-factor: 1.55; }
                         }
                     }
 
@@ -2170,13 +2215,13 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         HorizontalLayout {
                             padding-left: 14px; padding-right: 14px; spacing: 8px;
                             Text {
-                                text: Strings.world-events; font-family: "Vazirmatn"; font-size: 11px; font-weight: 600; color: Palette.text-dim; vertical-alignment: center; horizontal-stretch: 1;
+                                text: Strings.world-events; font-family: "Vazirmatn"; font-size: Type.small; font-weight: 600; color: Palette.text-dim; vertical-alignment: center; horizontal-stretch: 1;
                             }
                             Text {
-                                text: "(" + root.cal-world.length + ")"; font-size: 10px; color: Palette.text-faint; vertical-alignment: center;
+                                text: "(" + root.cal-world.length + ")"; font-size: Type.caption; color: Palette.text-faint; vertical-alignment: center;
                             }
                             Text {
-                                text: root.cal-world-open ? Strings.show-less : Strings.show-more; font-size: 10px; color: Palette.accent; vertical-alignment: center;
+                                text: root.cal-world-open ? Strings.show-less : Strings.show-more; font-size: Type.caption; color: Palette.accent; vertical-alignment: center;
                             }
                         }
                     }
@@ -2187,11 +2232,11 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             height: wv-row.preferred-height + 22px; border-radius: 12px; background: Palette.surface; border-width: 1px; border-color: Palette.hairline; wv-row := VerticalLayout {
                                 x: 14px; y: 11px; width: parent.width - 28px; height: self.preferred-height; spacing: 4px; HorizontalLayout {
                                     spacing: 6px; height: 14px; if ev.year != "" : Text {
-                                        text: ev.year; font-family: "Vazirmatn"; font-size: 10px; font-weight: 700; color: Palette.text-dim; vertical-alignment: center; }
+                                        text: ev.year; font-family: "Vazirmatn"; font-size: Type.caption; font-weight: 700; color: Palette.text-dim; vertical-alignment: center; }
                                 }
 
                                 Text {
-                                    text: ev.text; font-family: "Vazirmatn"; font-size: 11px; color: Palette.text-dim; wrap: word-wrap; line-height-factor: 1.55; }
+                                    text: ev.text; font-family: "Vazirmatn"; font-size: Type.small; color: Palette.text-dim; wrap: word-wrap; line-height-factor: 1.55; }
                             }
                         }
                     }
@@ -2226,7 +2271,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                 Text {
                     text: Strings.nav-chronicle;
                     font-family: "Vazirmatn";
-                    font-size: 15px;
+                    font-size: Type.title;
                     font-weight: 600;
                     color: Palette.text;
                     horizontal-stretch: 1;
@@ -2249,7 +2294,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     Text {
                         text: Strings.chron-title;
                         font-family: "Vazirmatn";
-                        font-size: 17px;
+                        font-size: Type.heading;
                         font-weight: 700;
                         color: Palette.text;
                         horizontal-alignment: Strings.fa ? right : left;
@@ -2257,9 +2302,10 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     Text {
                         text: Strings.chron-sub;
                         font-family: "Vazirmatn";
-                        font-size: 10px;
+                        font-size: Type.caption;
                         color: Palette.text-faint;
                         wrap: word-wrap;
+                        line-height-factor: 1.55;
                         horizontal-alignment: Strings.fa ? right : left;
                     }
 
@@ -2300,9 +2346,10 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     Text {
                         text: Strings.chron-foot;
                         font-family: "Vazirmatn";
-                        font-size: 9px;
+                        font-size: Type.caption;
                         color: Palette.text-faint;
                         wrap: word-wrap;
+                        line-height-factor: 1.55;
                         horizontal-alignment: Strings.fa ? right : left;
                     }
                 }
@@ -2331,7 +2378,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                 }
                 Text {
                     text: Strings.nav-stats;
-                    font-size: 15px;
+                    font-size: Type.title;
                     font-weight: 600;
                     color: Palette.text;
                     horizontal-stretch: 1;
@@ -2370,9 +2417,9 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             alignment: center;
                             Text {
                                 text: Strings.score-title;
-                                font-size: 10px;
+                                font-size: Type.caption;
                                 font-weight: 700;
-                                letter-spacing: 1.2px;
+                                letter-spacing: Strings.fa ? 0px : Type.tracking;
                                 color: Palette.text-faint;
                                 horizontal-alignment: center;
                             }
@@ -2399,9 +2446,9 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             spacing: 8px;
                             Text {
                                 text: Strings.this-week;
-                                font-size: 10px;
+                                font-size: Type.caption;
                                 font-weight: 700;
-                                letter-spacing: 1.2px;
+                                letter-spacing: Strings.fa ? 0px : Type.tracking;
                                 color: Palette.text-faint;
                             }
                             BarChart {
@@ -2448,7 +2495,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     }
                     Text {
                         text: root.report-text;
-                        font-size: 11px;
+                        font-size: Type.small;
                         color: Palette.text-faint;
                         wrap: word-wrap;
                         line-height-factor: 1.5;
@@ -2478,7 +2525,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                 }
                 Text {
                     text: Strings.settings;
-                    font-size: 15px;
+                    font-size: Type.title;
                     font-weight: 600;
                     color: Palette.text;
                     horizontal-stretch: 1;
@@ -2497,7 +2544,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     ]
                     Text {
                         text: Strings.done;
-                        font-size: 12px;
+                        font-size: Type.small;
                         font-weight: 600;
                         color: Palette.on-accent;
                         horizontal-alignment: center;
@@ -2524,7 +2571,6 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     // ── timer ──
                     SectionLabel { text: Strings.sec-timer; }
                     Card {
-                        height: 174px;
                         VerticalLayout {
                             padding: 14px;
                             spacing: 0px;
@@ -2532,28 +2578,28 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             HorizontalLayout {
                                 height: 40px;
                                 alignment: center;
-                                Text { text: Strings.lbl-work; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-work; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Stepper { value <=> root.work-minutes; min: 1; max: 180; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.work-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
                                 alignment: center;
-                                Text { text: Strings.lbl-short; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-short; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Stepper { value <=> root.short-break-minutes; min: 1; max: 60; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.short-break-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
                                 alignment: center;
-                                Text { text: Strings.lbl-long; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-long; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Stepper { value <=> root.long-break-minutes; min: 1; max: 90; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.long-break-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
                                 alignment: center;
-                                Text { text: Strings.lbl-long-every; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-long-every; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Stepper { value <=> root.long-break-interval; min: 1; max: 12; suffix: ""; changed(v) => { root.long-break-interval = v; } }
                             }
                         }
@@ -2562,12 +2608,11 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     // ── goal ──
                     SectionLabel { text: Strings.sec-goal; }
                     Card {
-                        height: 58px;
                         VerticalLayout {
                             padding: 14px;
                             HorizontalLayout {
                                 alignment: center;
-                                Text { text: Strings.lbl-goal; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-goal; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Stepper { value <=> root.daily-goal-minutes; min: 15; max: 600; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.daily-goal-minutes = v; } }
                             }
                         }
@@ -2576,19 +2621,18 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     // ── behaviour ──
                     SectionLabel { text: Strings.sec-behaviour; }
                     Card {
-                        height: 118px;
                         VerticalLayout {
                             padding: 14px;
                             spacing: 0px;
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-autostart-next; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-autostart-next; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Toggle { checked <=> root.auto-start-next; y: (parent.height - self.height) / 2; }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-autostart-launch; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-autostart-launch; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Toggle { checked <=> root.auto-start-on-launch; y: (parent.height - self.height) / 2; }
                             }
                         }
@@ -2597,7 +2641,6 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     // ── appearance ──
                     SectionLabel { text: Strings.sec-heritage; }
                     Card {
-                        height: 268px;
                         VerticalLayout {
                             padding: 12px;
                             spacing: 9px;
@@ -2606,16 +2649,16 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 height: 14px;
                                 Text {
                                     text: root.era-label;
-                                    font-size: 11px;
+                                    font-size: Type.small;
                                     font-weight: 700;
-                                    letter-spacing: 0.6px;
+                                    letter-spacing: Strings.fa ? 0px : Type.tracking;
                                     color: Palette.accent;
                                     vertical-alignment: center;
                                     horizontal-stretch: 1;
                                 }
                                 Text {
                                     text: Strings.lbl-eras;
-                                    font-size: 10px;
+                                    font-size: Type.caption;
                                     color: Palette.text-faint;
                                     vertical-alignment: center;
                                 }
@@ -2670,14 +2713,14 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                         : root.era == "parthian" ? Strings.era-parthian-span
                                         : root.era == "sasanid" ? Strings.era-sasanid-span
                                         : Strings.era-cyrus-span;
-                                    font-size: 10px;
+                                    font-size: Type.caption;
                                     font-weight: 600;
                                     color: Palette.accent;
                                     vertical-alignment: center;
                                 }
                                 Text {
                                     text: root.era-blurb;
-                                    font-size: 10px;
+                                    font-size: Type.caption;
                                     color: Palette.text-dim;
                                     vertical-alignment: center;
                                     horizontal-stretch: 1;
@@ -2690,7 +2733,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     : root.era == "parthian" ? Strings.era-parthian-note
                                     : root.era == "sasanid" ? Strings.era-sasanid-note
                                     : Strings.era-cyrus-note;
-                                font-size: 9px;
+                                font-size: Type.caption;
                                 color: Palette.text-faint;
                                 wrap: word-wrap;
                                 line-height-factor: 1.45;
@@ -2701,18 +2744,17 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                     SectionLabel { text: Strings.sec-appearance; }
                     Card {
-                        height: 171px;
                         VerticalLayout {
                             padding: 14px;
                             spacing: 0px;
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-theme; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-theme; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Segmented {
                                     options: [Strings.theme-system, Strings.theme-dark, Strings.theme-light];
                                     current: root.theme-pref == "dark" ? 1 : (root.theme-pref == "light" ? 2 : 0);
                                     item-height: 24px;
-                                    font-size: 11px;
+                                    font-size: Type.small;
                                     y: (parent.height - self.height) / 2;
                                     selected(i) => {
                                         root.set-theme(i == 1 ? "dark" : (i == 2 ? "light" : "system"));
@@ -2722,7 +2764,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-compact; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-compact; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Toggle {
                                     checked <=> root.compact-mode;
                                     y: (parent.height - self.height) / 2;
@@ -2744,8 +2786,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     spacing: 1px;
                                     alignment: center;
                                     vertical-stretch: 0;
-                                    Text { text: Strings.lbl-animations; font-size: 13px; color: Palette.text; horizontal-alignment: Strings.fa ? end : start; }
-                                    Text { text: Strings.hint-animations; font-size: 11px; color: Palette.text-dim; overflow: elide; horizontal-alignment: Strings.fa ? end : start; }
+                                    Text { text: Strings.lbl-animations; font-size: Type.body; color: Palette.text; horizontal-alignment: Strings.fa ? end : start; }
+                                    Text { text: Strings.hint-animations; font-size: Type.small; color: Palette.text-dim; overflow: elide; horizontal-alignment: Strings.fa ? end : start; }
                                 }
                                 Rectangle { horizontal-stretch: 1; }
                                 Toggle {
@@ -2760,17 +2802,16 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     // ── language ──
                     SectionLabel { text: Strings.sec-language; }
                     Card {
-                        height: 62px;
                         VerticalLayout {
                             padding: 14px;
                             HorizontalLayout {
                                 height: 34px;
-                                Text { text: Strings.lbl-language; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-language; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Segmented {
                                     options: [Strings.lang-fa, Strings.lang-en];
                                     current: Strings.lang == "fa" ? 0 : 1;
                                     item-height: 26px;
-                                    font-size: 11px;
+                                    font-size: Type.small;
                                     y: (parent.height - self.height) / 2;
                                     selected(i) => { root.set-lang(i == 0 ? "fa" : "en"); }
                                 }
@@ -2781,18 +2822,17 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     // ── sound ──
                     SectionLabel { text: Strings.sec-sound; }
                     Card {
-                        height: 214px;
                         VerticalLayout {
                             padding: 14px;
                             spacing: 10px;
 
                             HorizontalLayout {
                                 height: 26px;
-                                Text { text: Strings.lbl-sound-on; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-sound-on; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Toggle { checked <=> root.sound-enabled; y: (parent.height - self.height) / 2; }
                             }
 
-                            Text { text: Strings.lbl-chime; font-size: 11px; color: Palette.text-dim; horizontal-alignment: Strings.fa ? end : start; }
+                            Text { text: Strings.lbl-chime; font-size: Type.small; color: Palette.text-dim; horizontal-alignment: Strings.fa ? end : start; }
 
                             HorizontalLayout {
                                 spacing: 6px;
@@ -2810,7 +2850,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     ]
                                     Text {
                                         text: s == "santur" ? Strings.snd-santur : (s == "daf" ? Strings.snd-daf : (s == "tombak" ? Strings.snd-tombak : (s == "karn" ? Strings.snd-karn : (s == "sand" ? Strings.snd-sand : Strings.snd-cyrus))));
-                                        font-size: 11px;
+                                        font-size: Type.small;
                                         font-weight: root.sound-theme == s ? 600 : 400;
                                         color: root.sound-theme == s ? Palette.on-accent : Palette.text-dim;
                                         horizontal-alignment: center;
@@ -2833,7 +2873,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     ]
                                     Text {
                                         text: s == "santur" ? Strings.snd-santur : (s == "daf" ? Strings.snd-daf : (s == "tombak" ? Strings.snd-tombak : (s == "karn" ? Strings.snd-karn : (s == "sand" ? Strings.snd-sand : Strings.snd-cyrus))));
-                                        font-size: 11px;
+                                        font-size: Type.small;
                                         font-weight: root.sound-theme == s ? 600 : 400;
                                         color: root.sound-theme == s ? Palette.on-accent : Palette.text-dim;
                                         horizontal-alignment: center;
@@ -2873,7 +2913,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                                 Text {
                                     text: Digits.num(root.sound-volume) + (Strings.fa ? "٪" : "%");
-                                    font-size: 11px;
+                                    font-size: Type.small;
                                     color: Palette.text-dim;
                                     width: 34px;
                                     horizontal-alignment: end;
@@ -2893,7 +2933,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     ]
                                     Text {
                                         text: Strings.preview;
-                                        font-size: 11px;
+                                        font-size: Type.small;
                                         color: Palette.text;
                                         horizontal-alignment: center;
                                     }
@@ -2905,25 +2945,24 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     // ── system ──
                     SectionLabel { text: Strings.sec-system; }
                     Card {
-                        height: 162px;
                         VerticalLayout {
                             padding: 14px;
                             spacing: 0px;
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-hotkeys; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-hotkeys; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Toggle { checked <=> root.hotkey-enabled; y: (parent.height - self.height) / 2; }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-awake; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-awake; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Toggle { checked <=> root.inhibit-enabled; y: (parent.height - self.height) / 2; }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-overlay; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-overlay; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Toggle { checked <=> root.overlay-enabled; y: (parent.height - self.height) / 2; }
                             }
                         }
@@ -2932,17 +2971,17 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     // ── automation ──
                     SectionLabel { text: Strings.sec-automation; }
                     Card {
-                        height: 132px;
                         VerticalLayout {
                             padding: 14px;
                             spacing: 8px;
 
                             Text {
                                 text: root.automation-summary;
-                                font-size: 11px;
+                                font-size: Type.small;
                                 horizontal-alignment: Strings.fa ? end : start;
                                 color: Palette.text-faint;
                                 wrap: word-wrap;
+                                line-height-factor: 1.55;
                                 max-lines: 2;
                             }
 
@@ -2958,7 +2997,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     LineEdit {
                                         text: root.new-task-text;
                                         placeholder-text: Strings.automation-placeholder;
-                                        font-size: 11px;
+                                        font-size: Type.small;
                                         edited(t) => { root.new-task-text = t; }
                                     }
                                 }
@@ -2979,7 +3018,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     ]
                                     Text {
                                         text: Strings.add;
-                                        font-size: 11px;
+                                        font-size: Type.small;
                                         font-weight: 600;
                                         color: Palette.on-accent;
                                         horizontal-alignment: center;
@@ -2989,10 +3028,11 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                             Text {
                                 text: Strings.automation-hint;
-                                font-size: 11px;
+                                font-size: Type.small;
                                 horizontal-alignment: Strings.fa ? end : start;
                                 color: Palette.text-faint;
                                 wrap: word-wrap;
+                                line-height-factor: 1.55;
                             }
                         }
                     }
@@ -3026,14 +3066,14 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 }
                                 Text {
                                     text: root.sync-signed-in ? Strings.sync-connected : Strings.sync-off;
-                                    font-size: 12px;
+                                    font-size: Type.small;
                                     font-weight: 600;
                                     color: root.sync-signed-in ? Palette.accent : Palette.text-dim;
                                     vertical-alignment: center;
                                 }
                                 Text {
                                     text: root.sync-account;
-                                    font-size: 11px;
+                                    font-size: Type.small;
                                     color: Palette.text-faint;
                                     vertical-alignment: center;
                                     horizontal-stretch: 1;
@@ -3043,9 +3083,10 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                             Text {
                                 text: Strings.sync-blurb;
-                                font-size: 10px;
+                                font-size: Type.caption;
                                 color: Palette.text-faint;
                                 wrap: word-wrap;
+                                line-height-factor: 1.55;
                                 visible: !root.sync-signed-in;
                             }
 
@@ -3055,9 +3096,9 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             Rectangle {
                                 height: 88px; border-radius: 10px; background: Palette.accent-soft; border-width: 1px; border-color: Palette.accent; visible: root.sync-device-code != ""; VerticalLayout {
                                     padding: 10px; spacing: 6px; alignment: center; Text {
-                                        text: Strings.sync-code-hint; font-size: 9px; color: Palette.text-dim; horizontal-alignment: center; }
+                                        text: Strings.sync-code-hint; font-size: Type.caption; color: Palette.text-dim; horizontal-alignment: center; }
                                     Text {
-                                        text: root.sync-device-code; font-size: 24px; font-weight: 700; color: Palette.accent; horizontal-alignment: center; letter-spacing: 4px; }
+                                        text: root.sync-device-code; font-size: Type.display; font-weight: 700; color: Palette.accent; horizontal-alignment: center; letter-spacing: 4px; }
                                     // Copy, and a way back to the page if the
                                     // browser did not come up.
                                     HorizontalLayout {
@@ -3071,7 +3112,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                                 }
                                             ]
                                             copy-lbl := Text {
-                                                text: root.code-copied ? Strings.sync-copied : Strings.sync-copy-code; font-size: 9px; color: root.code-copied ? Palette.accent : Palette.text-dim; horizontal-alignment: center; vertical-alignment: center; x: (parent.width - self.width) / 2; }
+                                                text: root.code-copied ? Strings.sync-copied : Strings.sync-copy-code; font-size: Type.caption; color: root.code-copied ? Palette.accent : Palette.text-dim; horizontal-alignment: center; vertical-alignment: center; x: (parent.width - self.width) / 2; }
                                         }
                                         Rectangle {
                                             height: 22px; width: open-lbl.preferred-width + 20px; border-radius: 11px; background: Palette.surface; ta-open := TouchArea {
@@ -3083,7 +3124,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                                 }
                                             ]
                                             open-lbl := Text {
-                                                text: Strings.sync-open-browser; font-size: 9px; color: Palette.text-dim; horizontal-alignment: center; vertical-alignment: center; x: (parent.width - self.width) / 2; }
+                                                text: Strings.sync-open-browser; font-size: Type.caption; color: Palette.text-dim; horizontal-alignment: center; vertical-alignment: center; x: (parent.width - self.width) / 2; }
                                         }
                                     }
                                 }
@@ -3094,15 +3135,15 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             // card says what will happen rather than leaving
                             // the user to work it out.
                             VerticalLayout {
-                                spacing: 2px; visible: !root.sync-signed-in && root.sync-device-code == "" && root.sync-available; Text { text: Strings.sync-step-1; font-size: 9px; color: Palette.text-faint; }
-                                Text { text: Strings.sync-step-2; font-size: 9px; color: Palette.text-faint; }
-                                Text { text: Strings.sync-step-3; font-size: 9px; color: Palette.text-faint; }
+                                spacing: 2px; visible: !root.sync-signed-in && root.sync-device-code == "" && root.sync-available; Text { text: Strings.sync-step-1; font-size: Type.caption; color: Palette.text-faint; }
+                                Text { text: Strings.sync-step-2; font-size: Type.caption; color: Palette.text-faint; }
+                                Text { text: Strings.sync-step-3; font-size: Type.caption; color: Palette.text-faint; }
                             }
 
                             // Once signed in, say plainly that nothing further
                             // is required of them.
                             Text {
-                                text: Strings.sync-signed-in-hint; font-size: 9px; color: Palette.text-faint; wrap: word-wrap; visible: root.sync-signed-in; }
+                                text: Strings.sync-signed-in-hint; font-size: Type.caption; color: Palette.text-faint; wrap: word-wrap; line-height-factor: 1.55; visible: root.sync-signed-in; }
 
                             // Only shown when the build has no registered
                             // client. Google issues a client id per project, so
@@ -3114,17 +3155,19 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                                 Text {
                                     text: Strings.sync-client-hint;
-                                    font-size: 10px;
+                                    font-size: Type.caption;
                                     color: Palette.text-dim;
                                     horizontal-alignment: Strings.fa ? end : start;
                                     wrap: word-wrap;
+                                    line-height-factor: 1.55;
                                 }
                                 Text {
                                     text: Strings.sync-client-steps;
-                                    font-size: 9px;
+                                    font-size: Type.caption;
                                     color: Palette.text-faint;
                                     horizontal-alignment: Strings.fa ? end : start;
                                     wrap: word-wrap;
+                                    line-height-factor: 1.55;
                                 }
                                 // Straight to the page where the client id is
                                 // made, so the user is not hunting for it.
@@ -3144,7 +3187,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     ]
                                     console-lbl := Text {
                                         text: Strings.sync-console;
-                                        font-size: 9px;
+                                        font-size: Type.caption;
                                         color: Palette.accent;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
@@ -3159,7 +3202,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     LineEdit {
                                         text: root.sync-client-id;
                                         placeholder-text: Strings.sync-client-placeholder;
-                                        font-size: 10px;
+                                        font-size: Type.caption;
                                         edited(t) => { root.sync-client-id = t; }
                                         accepted(t) => { root.set-client-id(t); }
                                     }
@@ -3186,7 +3229,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     ]
                                     Text {
                                         text: root.sync-waiting ? Strings.sync-waiting : (root.sync-available ? Strings.sync-connect : Strings.sync-no-client);
-                                        font-size: 12px;
+                                        font-size: Type.small;
                                         color: root.sync-available ? Palette.text : Palette.text-faint;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
@@ -3210,7 +3253,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     ]
                                     Text {
                                         text: Strings.sync-last;
-                                        font-size: 12px;
+                                        font-size: Type.small;
                                         color: Palette.text;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
@@ -3232,7 +3275,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     ]
                                     Text {
                                         text: Strings.sync-disconnect;
-                                        font-size: 12px;
+                                        font-size: Type.small;
                                         color: Palette.text-dim;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
@@ -3247,7 +3290,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 alignment: center;
                                 Text {
                                     text: Strings.sync-auto;
-                                    font-size: 12px;
+                                    font-size: Type.small;
                                     color: Palette.text;
                                     vertical-alignment: center;
                                     horizontal-stretch: 1;
@@ -3262,7 +3305,6 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     }
 
                     Card {
-                        height: 62px;
                         VerticalLayout {
                             padding: 14px;
                             HorizontalLayout {
@@ -3281,7 +3323,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     ]
                                     Text {
                                         text: Strings.backup;
-                                        font-size: 12px;
+                                        font-size: Type.small;
                                         color: Palette.text;
                                         horizontal-alignment: center;
                                     }
@@ -3300,7 +3342,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     ]
                                     Text {
                                         text: Strings.restore;
-                                        font-size: 12px;
+                                        font-size: Type.small;
                                         color: Palette.text;
                                         horizontal-alignment: center;
                                     }
@@ -3312,7 +3354,6 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     // ── about ──
                     SectionLabel { text: Strings.sec-about; }
                     Card {
-                        height: 132px;
                         VerticalLayout {
                             padding: 14px;
                             spacing: 6px;
@@ -3327,13 +3368,13 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 }
                                 Text {
                                     text: Strings.made-by;
-                                    font-size: 11px;
+                                    font-size: Type.small;
                                     color: Palette.text-faint;
                                     vertical-alignment: center;
                                 }
                                 Text {
                                     text: "Khosrowan";
-                                    font-size: 12px;
+                                    font-size: Type.small;
                                     font-weight: 600;
                                     color: Palette.accent;
                                     vertical-alignment: center;
@@ -3352,7 +3393,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                             Text {
                                 text: "khosrowan.ir";
-                                font-size: 11px;
+                                font-size: Type.small;
                                 color: Palette.text-dim;
                                 ta16 := TouchArea {
                                     clicked => { root.open-url("https://khosrowan.ir"); }
@@ -3370,23 +3411,24 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             // the Parthian emblem (Derafsh Kaviani, by Oneasy).
                             Text {
                                 text: Strings.emblem-credit;
-                                font-size: 9px;
+                                font-size: Type.caption;
                                 color: Palette.text-faint;
                                 wrap: word-wrap;
+                                line-height-factor: 1.55;
                             }
                         }
                     }
 
                     Text {
                         text: root.sync-status;
-                        font-size: 10px;
+                        font-size: Type.caption;
                         color: Palette.text-faint;
                         horizontal-alignment: center;
                     }
 
                     Text {
                         text: Strings.app-credit;
-                        font-size: 10px;
+                        font-size: Type.caption;
                         color: Palette.text-faint;
                         horizontal-alignment: center;
                     }

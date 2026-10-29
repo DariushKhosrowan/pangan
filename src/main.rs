@@ -1060,8 +1060,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start the clock in the past so the first tick syncs at once. Waiting a
     // full interval meant a user who opened the app for a minute saw nothing
     // arrive from their other machine — and then assumed sync was broken.
-    let mut last_auto_sync =
-        chrono::Local::now() - chrono::Duration::seconds(3600);
+    let mut last_auto_sync = chrono::Local::now() - chrono::Duration::seconds(3600);
 
     let timer = Timer::default();
     timer.start(TimerMode::Repeated, Duration::from_millis(300), move || {
@@ -1137,8 +1136,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     (base * (1 << failures.min(4))).min(300)
                 };
-                let due = chrono::Local::now() - last_auto_sync
-                    > chrono::Duration::seconds(interval);
+                let due =
+                    chrono::Local::now() - last_auto_sync > chrono::Duration::seconds(interval);
                 if tick_app.cloud.take_dirty() || due {
                     last_auto_sync = chrono::Local::now();
                     do_sync(&tick_weak, &tick_app);

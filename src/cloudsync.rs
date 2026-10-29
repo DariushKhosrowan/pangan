@@ -275,7 +275,10 @@ mod tests {
 
         // Device A: one session and one task, nothing remote yet.
         let a = Data {
-            sessions: vec![SessionRecord { at: 100, minutes: 25 }],
+            sessions: vec![SessionRecord {
+                at: 100,
+                minutes: 25,
+            }],
             tasks: vec![task(1, "write the report", 10)],
             next_task_id: 2,
         };
@@ -315,5 +318,187 @@ mod tests {
         assert!(out_c.quiet(), "a stable state must not push or pull");
 
         std::env::remove_var("PANGAN_DRIVE_BASE");
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    use crate::store::{SessionRecord, Task};
+    fn task(id: u64, title: &str, updated_at: i64) -> Task {
+        Task {
+            id,
+            title: title.into(),
+            date: "1405-08-07".into(),
+            time: String::new(),
+            done: false,
+            created_at: 0,
+            updated_at,
+            deleted: false,
+        }
+    }
+
+    /// These tests all point `PANGAN_DRIVE_BASE` at their own fake server, so
+    /// they must not run at the same time or they would each see the other's
+    /// Drive. The guard is released on drop.
+    fn fake() -> (std::sync::MutexGuard<'static, ()>, String, Tokens) {
+        let guard = crate::gdrive::drive_roundtrip::DRIVE_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (base, _store) = crate::gdrive::drive_roundtrip::fake_drive_for_tests();
+        std::env::set_var("PANGAN_DRIVE_BASE", &base);
+        let tokens = Tokens {
+            access_token: "tok".into(),
+            refresh_token: "refresh".into(),
+            expires_at: chrono::Utc::now().timestamp() + 3600,
+            email: "a@example.com".into(),
+        };
+        (guard, base, tokens)
+    }
+
+    /// The user's requirement, stated plainly: if the local data is wiped, a
+    /// sync must put it back from the cloud. This is the whole point of having
+    /// a cloud copy, and it is the case that a naive "push local, pull remote"
+    /// implementation gets wrong — an empty local file must not be treated as
+    /// "the user deleted everything".
+    #[test]
+    fn a_wiped_local_store_is_restored_from_the_cloud() {
+        let (_guard, base, mut tokens) = fake();
+
+        // The good state reaches the cloud.
+        let good = Data {
+            sessions: vec![SessionRecord {
+                at: 100,
+                minutes: 25,
+            }],
+            tasks: vec![task(1, "write the report", 10), task(2, "review", 20)],
+            next_task_id: 3,
+        };
+        sync_once(&mut tokens, &good, &mut |_| {}).unwrap();
+
+        // The local file is wiped — a fresh install, a deleted config dir, a
+        // corrupted file that failed to parse.
+        let wiped = Data::default();
+        let mut restored = Data::default();
+        let out = sync_once(&mut tokens, &wiped, &mut |m| restored = m.clone()).unwrap();
+
+        assert!(out.pulled, "an empty local store must pull the cloud copy");
+        assert!(out.changed_locally, "the empty store must be rewritten");
+        assert_eq!(restored.tasks.len(), 2, "tasks were not restored");
+        assert_eq!(restored.sessions.len(), 1, "sessions were not restored");
+        assert_eq!(restored.tasks[0].title, "write the report");
+        // And the id counter must come back too, or the next new task would
+        // collide with a restored one.
+        assert!(restored.next_task_id >= 3);
+
+        std::env::remove_var("PANGAN_DRIVE_BASE");
+        let _ = base;
+    }
+
+    /// Restoring must not be a one-way door: after the pull, the next sync is
+    /// quiet, so a wiped-and-restored device does not then push its emptiness
+    /// back over the good copy.
+    #[test]
+    fn restoring_does_not_then_overwrite_the_cloud_with_emptiness() {
+        let (_guard, base, mut tokens) = fake();
+
+        let good = Data {
+            tasks: vec![task(1, "keep me", 10)],
+            next_task_id: 2,
+            ..Default::default()
+        };
+        sync_once(&mut tokens, &good, &mut |_| {}).unwrap();
+
+        let mut restored = Data::default();
+        sync_once(&mut tokens, &Data::default(), &mut |m| restored = m.clone()).unwrap();
+        assert_eq!(restored.tasks.len(), 1);
+
+        // Now sync the restored copy. Nothing should move.
+        let out = sync_once(&mut tokens, &restored, &mut |_| {}).unwrap();
+        assert!(
+            out.quiet(),
+            "a restored device must not push again: {out:?}"
+        );
+
+        // And the cloud still holds the task.
+        let mut check = Data::default();
+        sync_once(&mut tokens, &Data::default(), &mut |m| check = m.clone()).unwrap();
+        assert_eq!(check.tasks.len(), 1, "the cloud copy was lost");
+
+        std::env::remove_var("PANGAN_DRIVE_BASE");
+        let _ = base;
+    }
+
+    /// A local edit made while offline must survive a later pull: the merge is
+    /// per record, so the cloud copy cannot clobber work the device did.
+    #[test]
+    fn an_offline_edit_survives_a_later_sync() {
+        let (_guard, base, mut tokens) = fake();
+
+        let cloud = Data {
+            tasks: vec![task(1, "from cloud", 10)],
+            next_task_id: 2,
+            ..Default::default()
+        };
+        sync_once(&mut tokens, &cloud, &mut |_| {}).unwrap();
+
+        // The device goes offline and adds its own task.
+        let offline = Data {
+            tasks: vec![task(1, "from cloud", 10), task(2, "made offline", 30)],
+            next_task_id: 3,
+            ..Default::default()
+        };
+
+        // `save` is only called when the merge changed the local copy, and
+        // here the local copy is already the merged result — so the thing to
+        // check is the cloud, which must now hold both tasks.
+        let out = sync_once(&mut tokens, &offline, &mut |_| {}).unwrap();
+        assert!(out.pushed, "the offline task must reach the cloud");
+
+        let mut cloud_after = Data::default();
+        sync_once(&mut tokens, &Data::default(), &mut |m| {
+            cloud_after = m.clone()
+        })
+        .unwrap();
+        assert_eq!(cloud_after.tasks.len(), 2, "the offline task must survive");
+        let titles: Vec<&str> = cloud_after.tasks.iter().map(|t| t.title.as_str()).collect();
+        assert!(titles.contains(&"made offline"));
+        assert!(titles.contains(&"from cloud"));
+
+        std::env::remove_var("PANGAN_DRIVE_BASE");
+        let _ = base;
+    }
+
+    /// A deletion made on one device must not come back from the cloud.
+    #[test]
+    fn a_deletion_is_not_resurrected_by_a_sync() {
+        let (_guard, base, mut tokens) = fake();
+
+        let before = Data {
+            tasks: vec![task(1, "delete me", 10)],
+            next_task_id: 2,
+            ..Default::default()
+        };
+        sync_once(&mut tokens, &before, &mut |_| {}).unwrap();
+
+        // Delete it locally: the tombstone carries a newer stamp.
+        let mut deleted = before.clone();
+        deleted.tasks[0].deleted = true;
+        deleted.tasks[0].updated_at = 50;
+        sync_once(&mut tokens, &deleted, &mut |_| {}).unwrap();
+
+        // A device that still has the old copy syncs; it must not bring the
+        // task back for everyone.
+        let mut after = Data::default();
+        sync_once(&mut tokens, &before, &mut |m| after = m.clone()).unwrap();
+        let live: Vec<&Task> = after.tasks.iter().filter(|t| !t.deleted).collect();
+        assert!(
+            live.is_empty(),
+            "a deleted task was resurrected: {:?}",
+            live.iter().map(|t| &t.title).collect::<Vec<_>>()
+        );
+
+        std::env::remove_var("PANGAN_DRIVE_BASE");
+        let _ = base;
     }
 }

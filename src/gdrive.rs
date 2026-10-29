@@ -68,7 +68,8 @@ fn drive_base() -> String {
 /// looks like it is syncing and never is. A global budget turns that into a
 /// plain error the caller can report and retry.
 fn agent() -> ureq::Agent {
-    static ONCE: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new(); ONCE.get_or_init( || {
+    static ONCE: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+    ONCE.get_or_init(|| {
         ureq::Agent::new_with_config(
             ureq::Agent::config_builder()
                 .timeout_global(Some(Duration::from_secs(20)))
@@ -85,7 +86,13 @@ fn agent() -> ureq::Agent {
 /// must stop and ask the user to sign in again instead of looping on failures
 /// forever. Everything else — a timeout, a 500, no route — is worth retrying.
 pub fn is_auth_error(msg: &str) -> bool {
-    let m = msg.to_ascii_lowercase(); m.contains("invalid_grant") || m.contains("invalid_client") || m.contains("unauthorized") || m.contains("401") || m.contains("no refresh token") || m.contains("sign in again")
+    let m = msg.to_ascii_lowercase();
+    m.contains("invalid_grant")
+        || m.contains("invalid_client")
+        || m.contains("unauthorized")
+        || m.contains("401")
+        || m.contains("no refresh token")
+        || m.contains("sign in again")
 }
 
 /// The file name inside `appDataFolder`.
@@ -143,7 +150,8 @@ pub fn request_device_code() -> Result<DeviceCode, String> {
         "client_id": client_id(),
         "scope": SCOPE,
     });
-    let resp = agent().post(DEVICE_CODE_URL)
+    let resp = agent()
+        .post(DEVICE_CODE_URL)
         .header("Content-Type", "application/json")
         .send_json(body);
     let text = match resp {
@@ -190,7 +198,8 @@ pub fn poll_token(device_code: &str) -> PollOutcome {
         "device_code": device_code,
         "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
     });
-    let resp = agent().post(TOKEN_URL)
+    let resp = agent()
+        .post(TOKEN_URL)
         .header("Content-Type", "application/json")
         .send_json(body);
     let text = match resp {
@@ -270,7 +279,8 @@ pub fn refresh(tokens: &Tokens) -> Result<Tokens, String> {
         "refresh_token": tokens.refresh_token,
         "grant_type": "refresh_token",
     });
-    let resp = agent().post(TOKEN_URL)
+    let resp = agent()
+        .post(TOKEN_URL)
         .header("Content-Type", "application/json")
         .send_json(body);
     let text = match resp {
@@ -329,7 +339,8 @@ fn find_file(token: &str, name: &str) -> Result<Option<String>, String> {
         drive_base(),
         name
     );
-    let resp = agent().get(&url)
+    let resp = agent()
+        .get(&url)
         .header("Authorization", &format!("Bearer {token}"))
         .call();
     let text = match resp {
@@ -356,7 +367,8 @@ pub fn download_named(token: &str, name: &str) -> Result<Option<String>, String>
         return Ok(None);
     };
     let url = format!("{}/drive/v3/files/{id}?alt=media", drive_base());
-    let resp = agent().get(&url)
+    let resp = agent()
+        .get(&url)
         .header("Authorization", &format!("Bearer {token}"))
         .call();
     match resp {
@@ -375,9 +387,12 @@ pub fn upload_named(token: &str, name: &str, body: &str) -> Result<(), String> {
     match find_file(token, name)? {
         Some(id) => {
             // Content-only update: PATCH the media, leave metadata alone.
-            let url =
-                format!("{}/upload/drive/v3/files/{id}?uploadType=media", drive_base());
-            let resp = agent().patch(&url)
+            let url = format!(
+                "{}/upload/drive/v3/files/{id}?uploadType=media",
+                drive_base()
+            );
+            let resp = agent()
+                .patch(&url)
                 .header("Authorization", &format!("Bearer {token}"))
                 .header("Content-Type", "application/json")
                 .send(body);
@@ -400,7 +415,10 @@ pub fn upload_named(token: &str, name: &str, body: &str) -> Result<(), String> {
                 m = meta,
                 body = body
             );
-            let url = format!("{}/upload/drive/v3/files?uploadType=multipart", drive_base());
+            let url = format!(
+                "{}/upload/drive/v3/files?uploadType=multipart",
+                drive_base()
+            );
             let resp = agent()
                 .post(&url)
                 .header("Authorization", &format!("Bearer {token}"))
@@ -537,7 +555,8 @@ pub(crate) mod drive_roundtrip {
     /// `PANGAN_DRIVE_BASE` is process-wide, so two such tests running in
     /// parallel would each see the other's server and fail confusingly. The
     /// guard makes them run one at a time.
-    pub(crate) static DRIVE_ENV_LOCK: Mutex<()> = Mutex::new(()); pub(crate) fn fake_drive_for_tests() -> (String, Arc<Mutex<Option<String>>>) {
+    pub(crate) static DRIVE_ENV_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) fn fake_drive_for_tests() -> (String, Arc<Mutex<Option<String>>>) {
         fake_drive()
     }
 
