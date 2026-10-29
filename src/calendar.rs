@@ -21,6 +21,22 @@ pub const MONTHS: [&str; 12] = [
     "اسفند",
 ];
 
+/// English transliterations of the month names, same order.
+pub const MONTHS_EN: [&str; 12] = [
+    "Farvardin",
+    "Ordibehesht",
+    "Khordad",
+    "Tir",
+    "Mordad",
+    "Shahrivar",
+    "Mehr",
+    "Aban",
+    "Azar",
+    "Dey",
+    "Bahman",
+    "Esfand",
+];
+
 /// Persian weekday names, indexed by `chrono::Weekday::num_days_from_saturday`.
 pub const WEEKDAYS: [&str; 7] = [
     "شنبه",
@@ -30,6 +46,17 @@ pub const WEEKDAYS: [&str; 7] = [
     "چهارشنبه",
     "پنج‌شنبه",
     "جمعه",
+];
+
+/// English weekday names, same order (Saturday first).
+pub const WEEKDAYS_EN: [&str; 7] = [
+    "Saturday",
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
 ];
 
 /// The thirty day-names of the Zoroastrian month, in the order used by the
@@ -75,10 +102,46 @@ pub const DAY_NAMES: [&str; 30] = [
 pub const GATHA_DAYS: [&str; 5] = ["اهنود", "اشتود", "سپنتمد", "وهوخشتر", "وهشتواش"];
 pub const LEAP_DAY_NAME: &str = "اورداد";
 
+/// English transliterations of the thirty day-names, same order.
+pub const DAY_NAMES_EN: [&str; 30] = [
+    "Ohrmazd",
+    "Vohuman",
+    "Ardibehesht",
+    "Shahrivar",
+    "Spandarmad",
+    "Khordad",
+    "Amordad",
+    "Dey-be-Azar",
+    "Azar",
+    "Aban",
+    "Khor",
+    "Mah",
+    "Tir",
+    "Gosh",
+    "Dey-be-Mehr",
+    "Mehr",
+    "Soroush",
+    "Rashn",
+    "Farvardin",
+    "Bahram",
+    "Ram",
+    "Bad",
+    "Dey-be-Din",
+    "Din",
+    "Ard",
+    "Ashtad",
+    "Aseman",
+    "Zamyad",
+    "Mehraspand",
+    "Anaram",
+];
+
 /// What the day is called in the old calendar.
 pub struct DayName {
     /// The day-name itself, e.g. "مهر".
     pub name: &'static str,
+    /// Latin transliteration of the day-name, e.g. "Mehr".
+    pub name_en: &'static str,
     /// The month-name, for the feast test.
     pub month: &'static str,
     /// True when day-name and month-name coincide — a feast day.
@@ -241,12 +304,14 @@ pub fn day_name(month: u32, day: u32) -> DayName {
     // months, which has no name of its own.
     if day >= 1 && day <= 30 {
         let name = DAY_NAMES[(day - 1) as usize];
+        let name_en = DAY_NAMES_EN[(day - 1) as usize];
         let is_feast = MONTH_NAME_DAY
             .get((month as usize).clamp(1, 12) - 1)
             .map(|&d| d == day)
             .unwrap_or(false);
         DayName {
             name,
+            name_en,
             month: month_name,
             is_feast,
             feast: if is_feast {
@@ -260,6 +325,7 @@ pub fn day_name(month: u32, day: u32) -> DayName {
         // days, so the extra day carries no name of its own.
         DayName {
             name: "روز افزوده",
+            name_en: "Extra day",
             month: month_name,
             is_feast: false,
             feast: None,
@@ -337,6 +403,13 @@ pub fn weekday_name(jy: i32, jm: u32, jd: u32) -> &'static str {
     // so (jdn + 2) % 7 == 0 lands on Saturday.
     let idx = ((jdn + 2) % 7) as usize; // 0 = Saturday
     WEEKDAYS[idx]
+}
+
+/// English weekday name for a Jalali date.
+pub fn weekday_name_en(jy: i32, jm: u32, jd: u32) -> &'static str {
+    let jdn = jalali_to_jdn(jy, jm, jd);
+    let idx = ((jdn + 2) % 7) as usize;
+    WEEKDAYS_EN[idx]
 }
 
 #[cfg(test)]

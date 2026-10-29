@@ -1,0 +1,158 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// strings.slint — every user-facing string, in both languages.
+//
+// `fa` is the default and the app's native voice. `en` exists so the app is
+// usable by anyone who does not read Persian; it is a full translation, not a
+// fallback. Adding a string means adding it to both branches.
+//
+// Persian here deliberately prefers Persian roots over Arabic loans where a
+// natural word exists (کار ژرف not تمرکز, آسایش not استراحت, سنجه not نمره).
+// ═══════════════════════════════════════════════════════════════════════════
+
+export global Strings {
+    // "fa" | "en"
+    in-out property <string> lang: "fa";
+    out property <bool> fa: lang == "fa";
+
+    // ── app ──────────────────────────────────────────────────────────────
+    out property <string> app-name: fa ? "پنگان" : "Pangan";
+    out property <string> app-tagline: fa ? "زمان‌سنج کار ژرف" : "Deep work timer";
+    out property <string> app-credit: fa ? "پنگان · ساختهٔ خسروان" : "Pangan · by Khosrowan";
+    out property <string> made-by: fa ? "ساختهٔ" : "Made by";
+
+    // ── navigation ───────────────────────────────────────────────────────
+    out property <string> nav-timer: fa ? "زمان‌سنج" : "Timer";
+    out property <string> nav-today: fa ? "امروز" : "Today";
+    out property <string> nav-stats: fa ? "آمار" : "Stats";
+
+    // ── timer phases ─────────────────────────────────────────────────────
+    out property <string> phase-work: fa ? "کار ژرف" : "Deep Work";
+    out property <string> phase-short: fa ? "آسایش کوتاه" : "Short Break";
+    out property <string> phase-long: fa ? "آسایش دراز" : "Long Break";
+    out property <string> state-running: fa ? "روان" : "Running";
+    out property <string> state-paused: fa ? "درنگ" : "Paused";
+
+    // ── main screen ──────────────────────────────────────────────────────
+    out property <string> today: fa ? "امروز" : "Today";
+    out property <string> tasks: fa ? "کارها" : "Tasks";
+    out property <string> tasks-empty: fa ? "چیزی در صف نیست. یکی بیفزایید." : "Nothing queued. Add one below.";
+    out property <string> task-placeholder: fa ? "کار تازه…" : "Add a task…";
+    out property <string> sync: fa ? "همگام‌سازی" : "Sync";
+    out property <string> minutes-short: fa ? "دقیقه" : "min";
+
+    // ── calendar ─────────────────────────────────────────────────────────
+    out property <string> day-name-label: fa ? "نام روز به گاهشمار ساسانی" : "Sasanian day-name";
+    out property <string> feast-prefix: fa ? "جشن " : "Feast of ";
+    out property <string> iran-events: fa ? "رخدادهای ایران" : "Iranian history";
+    out property <string> world-events: fa ? "رخدادهای جهان" : "World history";
+    out property <string> births: fa ? "زادروزها" : "Born";
+    out property <string> deaths: fa ? "درگذشت‌ها" : "Died";
+    out property <string> occasions: fa ? "مناسبت‌ها" : "Occasions";
+    out property <string> no-events: fa ? "برای این روز رویدادی ثبت نشده است." : "No events recorded for this day.";
+    out property <string> show-more: fa ? "بیشتر" : "More";
+    out property <string> show-less: fa ? "کمتر" : "Less";
+    out property <string> refresh-events: fa ? "تازه‌سازی از ویکی‌پدیا" : "Refresh from Wikipedia";
+    out property <string> refreshing: fa ? "در حال برداشت…" : "Fetching…";
+
+    // ── stats ────────────────────────────────────────────────────────────
+    out property <string> score-title: fa ? "سنجهٔ کار ژرف" : "Deep work score";
+    out property <string> this-week: fa ? "این هفته" : "This week";
+    out property <string> sessions: fa ? "نشست‌ها" : "Sessions";
+    out property <string> focus: fa ? "کار ژرف" : "Focus";
+    out property <string> streak: fa ? "زنجیره" : "Streak";
+    out property <string> consistency: fa ? "پیوستگی" : "Consistency";
+
+    // ── settings ─────────────────────────────────────────────────────────
+    out property <string> settings: fa ? "تنظیمات" : "Settings";
+    out property <string> done: fa ? "تمام" : "Done";
+
+    out property <string> sec-timer: fa ? "زمان‌سنج" : "TIMER";
+    out property <string> lbl-work: fa ? "کار ژرف" : "Deep work";
+    out property <string> lbl-short: fa ? "آسایش کوتاه" : "Short break";
+    out property <string> lbl-long: fa ? "آسایش دراز" : "Long break";
+    out property <string> lbl-long-every: fa ? "آسایش دراز پس از هر" : "Long break every";
+
+    out property <string> sec-goal: fa ? "هدف روزانه" : "DAILY GOAL";
+    out property <string> lbl-goal: fa ? "دقیقهٔ کار ژرف در روز" : "Deep work minutes per day";
+
+    out property <string> sec-behaviour: fa ? "کنش" : "BEHAVIOUR";
+    out property <string> lbl-autostart-next: fa ? "آغاز خودکار نشست بعدی" : "Auto-start next session";
+    out property <string> lbl-autostart-launch: fa ? "آغاز خودکار هنگام راه‌اندازی" : "Auto-start on launch";
+
+    out property <string> sec-heritage: fa ? "گنجینهٔ نیاکان" : "HERITAGE";
+    out property <string> lbl-eras: fa ? "دودمان‌های ایران" : "Iranian dynasties";
+    out property <string> era-cyrus: fa ? "کوروش" : "Cyrus";
+    out property <string> era-darius: fa ? "داریوش" : "Darius";
+    out property <string> era-parthian: fa ? "اشکانی" : "Parthian";
+    out property <string> era-sasanid: fa ? "ساسانی" : "Sasanid";
+    out property <string> era-cyrus-blurb: fa ? "آخامنشی" : "Achaemenid";
+    out property <string> era-darius-blurb: fa ? "پارسه" : "Persepolis";
+    out property <string> era-parthian-blurb: fa ? "لاجورد" : "Lapis";
+    out property <string> era-sasanid-blurb: fa ? "زنگار" : "Verdigris";
+
+    out property <string> sec-appearance: fa ? "آرایه" : "APPEARANCE";
+    out property <string> lbl-theme: fa ? "پوسته" : "Theme";
+    out property <string> theme-system: fa ? "سامانه" : "System";
+    out property <string> theme-dark: fa ? "تاریک" : "Dark";
+    out property <string> theme-light: fa ? "روشن" : "Light";
+    out property <string> lbl-compact: fa ? "پنجرهٔ کوچک" : "Compact window";
+
+    out property <string> sec-language: fa ? "زبان" : "LANGUAGE";
+    out property <string> lbl-language: fa ? "زبان برنامه" : "App language";
+    out property <string> lang-fa: "فارسی";
+    out property <string> lang-en: "English";
+
+    out property <string> sec-sound: fa ? "آوا" : "SOUND";
+    out property <string> lbl-sound-on: fa ? "آواها روشن" : "Enable sounds";
+    out property <string> lbl-chime: fa ? "آهنگ پایان" : "Chime";
+    out property <string> preview: fa ? "شنیدن" : "Preview";
+    out property <string> snd-santur: fa ? "سنتور" : "Santur";
+    out property <string> snd-daf: fa ? "دف" : "Daf";
+    out property <string> snd-tombak: fa ? "تنبک" : "Tombak";
+    out property <string> snd-karn: fa ? "کرنای" : "Karnay";
+    out property <string> snd-sand: fa ? "سنج" : "Cymbal";
+    out property <string> snd-cyrus: fa ? "کوروش" : "Cyrus";
+
+    out property <string> sec-system: fa ? "سامانه" : "SYSTEM";
+    out property <string> lbl-hotkeys: fa ? "کلیدهای میان‌بر همگانی" : "Global hotkeys";
+    out property <string> lbl-awake: fa ? "نمایش روشن بماند" : "Keep screen awake";
+    out property <string> lbl-overlay: fa ? "پوشش هنگام آسایش" : "Break overlay";
+
+    out property <string> sec-automation: fa ? "خودکاری" : "AUTOMATION";
+    out property <string> automation-placeholder: fa ? "دستور، مانند playerctl pause" : "command, e.g. playerctl pause";
+    out property <string> add: fa ? "افزودن" : "Add";
+    out property <string> automation-hint: fa ? "هنگام آغاز کار ژرف اجرا می‌شود. متغیرها: %event%، %session%." : "Runs on focus_start. Variables: %event%, %session%.";
+
+    out property <string> sec-cloud: fa ? "ابر" : "CLOUD";
+    out property <string> backup: fa ? "پشتیبان‌گیری" : "Back up";
+    out property <string> restore: fa ? "بازگردانی" : "Restore";
+
+    out property <string> sec-about: fa ? "شناسنامه" : "ABOUT";
+    out property <string> emblem-credit: fa ? "نماد اشکانی از Oneasy، پروانهٔ هنر آزاد ۱٫۳" : "Parthian emblem by Oneasy, Free Art License 1.3";
+
+    // ── imperial identity ────────────────────────────────────────────────
+    // Each dynasty carries its span and one line of history, so the heritage
+    // section teaches something instead of only recolouring the app.
+    out property <string> era-cyrus-span: fa ? "۵۵۹ – ۵۳۰ پ.م." : "559 – 530 BC";
+    out property <string> era-darius-span: fa ? "۵۲۲ – ۴۸۶ پ.م." : "522 – 486 BC";
+    out property <string> era-parthian-span: fa ? "۲۴۷ پ.م. – ۲۲۴ م." : "247 BC – 224 AD";
+    out property <string> era-sasanid-span: fa ? "۲۲۴ – ۶۵۱ م." : "224 – 651 AD";
+
+    out property <string> era-cyrus-note: fa
+        ? "بنیان‌گذار شاهنشاهی هخامنشی؛ منشور کوروش نخستین اعلام آزادی دین و بردگان."
+        : "Founder of the Achaemenid Empire; the Cyrus Cylinder is the first decree of religious and slave emancipation.";
+    out property <string> era-darius-note: fa
+        ? "سازندهٔ پارسه و راه شاهی؛ نخستین شبکهٔ پول و پیک سراسری در جهان باستان."
+        : "Builder of Persepolis and the Royal Road; the first empire-wide coinage and courier network.";
+    out property <string> era-parthian-note: fa
+        ? "درفش کاویانی و نبردهای اشکانی؛ بازدارندهٔ روم در شرق برای چهار سده."
+        : "The Derafsh Kaviani and Parthian cavalry; four centuries holding Rome at the Euphrates.";
+    out property <string> era-sasanid-note: fa
+        ? "شاهنشاهی ساسانی؛ سیم‌رغ و زنگار، اوج هنر و دیوان‌سالاری ایرانی."
+        : "The Sasanian Empire; simurgh roundels and verdigris, the height of Iranian art and administration.";
+
+    out property <string> heritage-title: fa ? "شاهنشاهی ایران" : "Iranian Empire";
+    out property <string> heritage-sub: fa
+        ? "هزار سال فرمانروایی پیش از اسلام"
+        : "A thousand years of pre-Islamic rule";
+}

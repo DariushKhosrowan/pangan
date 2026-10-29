@@ -20,6 +20,15 @@ impl Period {
         }
     }
 
+    /// English label, used when the UI language is English.
+    pub fn label_en(&self) -> &'static str {
+        match self {
+            Period::Today => "Today",
+            Period::Week => "This Week",
+            Period::Month => "This Month",
+        }
+    }
+
     /// (start_date, end_date) inclusive for the period containing `today`.
     pub fn bounds(&self, today: NaiveDate) -> (NaiveDate, NaiveDate) {
         match self {
@@ -40,6 +49,8 @@ impl Period {
 #[derive(Clone, Debug, Default)]
 pub struct ReportStats {
     pub period_label: String,
+    /// The same label in English, for the English UI.
+    pub period_label_en: String,
     /// Number of completed focus sessions in the period.
     pub sessions: u64,
     /// Total focus minutes in the period.
@@ -135,6 +146,7 @@ pub fn report(sessions: &[SessionRecord], period: Period) -> ReportStats {
 
     ReportStats {
         period_label: period.label().to_string(),
+        period_label_en: period.label_en().to_string(),
         sessions: count,
         minutes: total,
         avg: if count > 0 {
@@ -153,25 +165,46 @@ pub fn report(sessions: &[SessionRecord], period: Period) -> ReportStats {
 }
 
 /// A short human-readable scientific summary of a period.
-pub fn narrative(s: &ReportStats) -> String {
-    let mut out = format!(
-        "{}\n  نشست‌ها: {}   کار ژرف: {} دقیقه\n  میانگین نشست: {} دقیقه   روزهای فعال: {}/{}\n  پیوستگی: {:.0}%   بهترین روز: {} دقیقه\n  زنجیرهٔ کنونی: {} روز\n  سنجهٔ کار ژرف: {}/۱۰۰",
-        s.period_label,
-        s.sessions,
-        s.minutes,
-        s.avg,
-        s.active_days,
-        s.days_in_period,
-        s.consistency * 100.0,
-        s.best_day_minutes,
-        s.streak,
-        s.score
-    );
+pub fn narrative(s: &ReportStats, en: bool) -> String {
+    let mut out = if en {
+        format!(
+            "{}\n  Sessions: {}   Focus: {} min\n  Avg session: {} min   Active days: {}/{}\n  Consistency: {:.0}%   Best day: {} min\n  Current streak: {} day(s)\n  Deep-work score: {}/100",
+            s.period_label_en,
+            s.sessions,
+            s.minutes,
+            s.avg,
+            s.active_days,
+            s.days_in_period,
+            s.consistency * 100.0,
+            s.best_day_minutes,
+            s.streak,
+            s.score
+        )
+    } else {
+        format!(
+            "{}\n  نشست‌ها: {}   کار ژرف: {} دقیقه\n  میانگین نشست: {} دقیقه   روزهای فعال: {}/{}\n  پیوستگی: {:.0}%   بهترین روز: {} دقیقه\n  زنجیرهٔ کنونی: {} روز\n  سنجهٔ کار ژرف: {}/۱۰۰",
+            s.period_label,
+            s.sessions,
+            s.minutes,
+            s.avg,
+            s.active_days,
+            s.days_in_period,
+            s.consistency * 100.0,
+            s.best_day_minutes,
+            s.streak,
+            s.score
+        )
+    };
     // daily rhythm (last up to 7 active days)
     if !s.daily.is_empty() {
-        out.push_str("\n  روزانه: ");
+        out.push_str(if en { "\n  Daily: " } else { "\n  روزانه: " });
         for (d, m) in s.daily.iter().rev().take(7) {
-            out.push_str(&format!("{} {}د ", d.format("%m/%d"), m));
+            out.push_str(&format!(
+                "{} {}{} ",
+                d.format("%m/%d"),
+                m,
+                if en { "m" } else { "د" }
+            ));
         }
     }
     out
@@ -206,7 +239,7 @@ mod tests {
         assert_eq!(r.sessions, 0);
         assert_eq!(r.minutes, 0);
         assert_eq!(r.score, 0);
-        let s = narrative(&r);
+        let s = narrative(&r, false);
         assert!(!s.is_empty());
     }
 

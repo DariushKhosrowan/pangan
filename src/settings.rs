@@ -8,7 +8,11 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub const THEME_SYSTEM: &str = "system";
-pub const THEME_DARK: &str = "dark";
+
+// --- UI language -------------------------------------------------------------
+pub const LANG_FA: &str = "fa";
+pub const LANG_EN: &str = "en";
+pub const LANGS: [&str; 2] = [LANG_FA, LANG_EN];pub const THEME_DARK: &str = "dark";
 pub const THEME_LIGHT: &str = "light";
 
 // --- Heritage eras (visual identity) -----------------------------------------
@@ -95,6 +99,10 @@ pub struct Settings {
     pub era: String,
     pub compact_mode: bool,
 
+    // --- Language ---
+    /// UI language: "fa" (default) or "en".
+    pub lang: String,
+
     // --- Sound ---
     pub sound_enabled: bool,
     pub sound_theme: String,
@@ -129,6 +137,7 @@ impl Default for Settings {
             daily_goal_minutes: 120,
             theme: THEME_SYSTEM.into(),
             era: ERA_CYRUS.into(),
+            lang: LANG_FA.into(),
             compact_mode: false,
             sound_enabled: true,
             sound_theme: SOUND_SANTUR.into(),
@@ -182,6 +191,9 @@ impl Settings {
         if self.theme != THEME_DARK && self.theme != THEME_LIGHT && self.theme != THEME_SYSTEM {
             self.theme = THEME_SYSTEM.into();
         }
+        if !LANGS.contains(&self.lang.as_str()) {
+            self.lang = LANG_FA.into();
+        }
         // Merge in default shortcuts for any action missing an accelerator.
         for (action, accel) in DEFAULT_SHORTCUTS {
             self.shortcuts
@@ -194,31 +206,54 @@ impl Settings {
         });
     }
 
-    /// Human-readable era name, shown in Settings.
+    /// Human-readable era name, shown in Settings. Follows the UI language.
     pub fn era_label(&self) -> String {
+        let en = self.lang == LANG_EN;
         match self.era.as_str() {
-            ERA_DARIUS => "داریوش".into(),
-            ERA_SASANID => "ساسانی".into(),
-            ERA_PARTHIAN => "اشکانی".into(),
-            _ => "کوروش".into(),
+            ERA_DARIUS => if en { "Darius" } else { "داریوش" }.into(),
+            ERA_SASANID => if en { "Sasanid" } else { "ساسانی" }.into(),
+            ERA_PARTHIAN => if en { "Parthian" } else { "اشکانی" }.into(),
+            _ => if en { "Cyrus" } else { "کوروش" }.into(),
         }
     }
 
     /// One-line description of the era, for the settings card.
     pub fn era_blurb(&self) -> String {
+        let en = self.lang == LANG_EN;
         match self.era.as_str() {
-            ERA_DARIUS => "مفرغ پارسه بر سنگ خاره".into(),
-            ERA_SASANID => "سیم زنگارگرفته و ترنج سیم‌رغ".into(),
-            ERA_PARTHIAN => "لاجورد و سیم اشکانی".into(),
-            _ => "زر آخامنشی بر لاجورد".into(),
+            ERA_DARIUS => if en {
+                "Persepolis bronze on basalt"
+            } else {
+                "مفرغ پارسه بر سنگ خاره"
+            }
+            .into(),
+            ERA_SASANID => if en {
+                "Verdigris silver and simurgh roundels"
+            } else {
+                "سیم زنگارگرفته و ترنج سیم‌رغ"
+            }
+            .into(),
+            ERA_PARTHIAN => if en {
+                "Parthian lapis and silver"
+            } else {
+                "لاجورد و سیم اشکانی"
+            }
+            .into(),
+            _ => if en {
+                "Achaemenid gold on lapis"
+            } else {
+                "زر آخامنشی بر لاجورد"
+            }
+            .into(),
         }
     }
 
     pub fn theme_label(&self) -> String {
+        let en = self.lang == LANG_EN;
         match self.theme.as_str() {
-            THEME_DARK => "تاریک".into(),
-            THEME_LIGHT => "روشن".into(),
-            _ => "سامانه".into(),
+            THEME_DARK => if en { "Dark" } else { "تاریک" }.into(),
+            THEME_LIGHT => if en { "Light" } else { "روشن" }.into(),
+            _ => if en { "System" } else { "سامانه" }.into(),
         }
     }
 }

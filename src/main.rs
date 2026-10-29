@@ -12,6 +12,7 @@ use slint::{
 
 mod events;
 mod calendar;
+mod refresh;
 mod automation;
 mod clock;
 mod platform;
@@ -48,7 +49,7 @@ struct AppState {
     sound_theme: Mutex<String>,
     last_sync: Mutex<String>,
     /// "On this day" table, parsed once at startup (287 KB of JSON).
-    events: events::Events,
+    events: Mutex<events::Events>,
     /// The Jalali date the calendar card was last built for, so the card is
     /// rebuilt when the day rolls over and not on every 300 ms tick.
     calendar_day: Mutex<(i32, u32, u32)>,
@@ -64,7 +65,10 @@ impl AppState {
             settings: Mutex::new(settings),
             sound_theme: Mutex::new(sound_theme),
             last_sync: Mutex::new("همگام‌سازی ابری آماده است".into()),
-            events: events::Events::load(),
+            events: Mutex::new(match refresh::load_cached() {
+                Some(raw) => events::Events::from_str(&raw),
+                None => events::Events::load(),
+            }),
             calendar_day: Mutex::new((0, 0, 0)),
         }
     }
@@ -187,6 +191,8 @@ fn run_action(
 /// re-serialise a few hundred event rows twice a second.
 fn refresh_calendar(win: &PanganWindow, app: &AppState) {
     let (jy, jm, jd) = calendar::today();
+    let lang = app.settings.lock().unwrap().lang.clone();
+    let en = lang == "en";
     {
         let mut last = app.calendar_day.lock().unwrap();
         if *last == (jy, jm, jd) {
@@ -195,43 +201,78 @@ fn refresh_calendar(win: &PanganWindow, app: &AppState) {
         *last = (jy, jm, jd);
     }
 
-    let month_name = calendar::MONTHS[(jm as usize).clamp(1, 12) - 1];
-    let weekday = calendar::weekday_name(jy, jm, jd);
+    let month_name = if en {
+        calendar::MONTHS_EN[(jm as usize).clamp(1, 12) - 1]
+    } else {
+        calendar::MONTHS[(jm as usize).clamp(1, 12) - 1]
+    };
+    let weekday = if en {
+        calendar::weekday_name_en(jy, jm, jd)
+    } else {
+        calendar::weekday_name(jy, jm, jd)
+    };
     let day = calendar::day_name(jm, jd);
 
-    win.set_cal_date(SharedString::from(format!(
-        "{} {} {}",
-        calendar::fa_num(jd as i64),
-        month_name,
-        calendar::fa_num(jy as i64)
-    )));
+    // The date line: Persian digits for Persian, plain digits for English.
+    let date_line = if en {
+        format!("{jd} {month_name} {jy}")
+    } else {
+        format!(
+            "{} {} {}",
+            calendar::fa_num(jd as i64),
+            month_name,
+            calendar::fa_num(jy as i64)
+        )
+    };
+    win.set_cal_date(SharedString::from(date_line));
     win.set_cal_weekday(SharedString::from(weekday));
-    win.set_cal_day_name(SharedString::from(day.name));
-    win.set_cal_day_index(SharedString::from(format!(
-        "روز {} ماه",
-        calendar::ordinal_fa(jd)
-    )));
+
+    // The Sasanian day-name. In English we keep the Persian name and gloss it,
+    // because the name *is* the heritage; transliterating it would lose it.
+    let day_name = if en {
+        format!("{} ({})", day.name_en, day.name)
+    } else {
+        day.name.to_string()
+    };
+    win.set_cal_day_name(SharedString::from(day_name));
+
+    win.set_cal_day_index(SharedString::from(if en {
+        format!("day {} of the month", jd)
+    } else {
+        format!("روز {} ماه", calendar::ordinal_fa(jd))
+    }));
     win.set_cal_feast(SharedString::from(day.feast.unwrap_or("")));
 
-    // "روز ۷ از ۳۰" — the month's length is the Zoroastrian thirty days, with
-    // the extra day of a 31-day month called out separately.
     let month_len = calendar::month_len(jy, jm);
-    win.set_cal_month_progress(SharedString::from(format!(
-        "روز {} از {}",
-        calendar::fa_num(jd as i64),
-        calendar::fa_num(month_len as i64)
-    )));
+    win.set_cal_month_progress(SharedString::from(if en {
+        format!("day {jd} of {month_len}")
+    } else {
+        format!(
+            "روز {} از {}",
+            calendar::fa_num(jd as i64),
+            calendar::fa_num(month_len as i64)
+        )
+    }));
 
-    let evs = app.events.for_day(jm, jd);
-    let rows: Vec<ui::CalEvent> = events::rows(evs)
-        .into_iter()
-        .map(|(section, year, text)| ui::CalEvent {
-            section: SharedString::from(section),
-            year: SharedString::from(year),
-            text: SharedString::from(text),
-        })
-        .collect();
-    win.set_cal_events(ModelRc::new(VecModel::from(rows)));
+    // ── Iranian heritage stream: leads the screen ──
+    let (evs, births, deaths, occasions) = app.events.lock().unwrap().iran(jm, jd);
+    let to_ui = |rows: Vec<events::Row>, label: &'static str| -> Vec<ui::CalEvent> {
+        rows.into_iter()
+            .map(|r| ui::CalEvent {
+                section: SharedString::from(label),
+                year: SharedString::from(r.year),
+                text: SharedString::from(r.text),
+            })
+            .collect()
+    }; let (l_ev, l_birth, l_death, l_occ) = if en {
+        ("Events", "Born", "Died", "Occasions")
+    } else {
+        ("رخداد", "زادروز", "درگذشت", "مناسبت")
+    }; let mut iran_rows = to_ui(evs, l_ev); iran_rows.extend(to_ui(occasions, l_occ)); iran_rows.extend(to_ui(births, l_birth)); iran_rows.extend(to_ui(deaths, l_death)); win.set_cal_events(ModelRc::new(VecModel::from(iran_rows))); // ── World stream: keyed by the Gregorian day, shown after Iran's ──
+    let (_, gm, gd) = calendar::to_gregorian(jy, jm, jd);
+    let world = app.events.lock().unwrap().world(&lang, gm, gd);
+    let world_label = if en { "World" } else { "جهان" };
+    win.set_cal_world(ModelRc::new(VecModel::from(to_ui(world, world_label))));
 }
 
 /// Recompute and set report + task text on the window.
@@ -240,12 +281,13 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
     let t = stats::report(&st.data.sessions, stats::Period::Today);
     let w = stats::report(&st.data.sessions, stats::Period::Week);
     let m = stats::report(&st.data.sessions, stats::Period::Month);
-    let mut report = String::from("── امروز ──\n");
-    report.push_str(&stats::narrative(&t));
-    report.push_str("\n\n── این هفته ──\n");
-    report.push_str(&stats::narrative(&w));
-    report.push_str("\n\n── این ماه ──\n");
-    report.push_str(&stats::narrative(&m));
+    let en = app.settings.lock().unwrap().lang == "en";
+    let mut report = String::from(if en { "── TODAY ──\n" } else { "── امروز ──\n" });
+    report.push_str(&stats::narrative(&t, en));
+    report.push_str(if en { "\n\n── THIS WEEK ──\n" } else { "\n\n── این هفته ──\n" });
+    report.push_str(&stats::narrative(&w, en));
+    report.push_str(if en { "\n\n── THIS MONTH ──\n" } else { "\n\n── این ماه ──\n" });
+    report.push_str(&stats::narrative(&m, en));
     win.set_report_text(SharedString::from(report));
 
     let today = chrono::Local::now().date_naive();
@@ -257,7 +299,11 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
         .iter()
         .filter(|t| !t.done && t.date == today.format("%Y-%m-%d").to_string())
         .count();
-    tasks_line.push_str(&format!("کارها: {} باز ({} امروز) ", open, today_open));
+    if en {
+        tasks_line.push_str(&format!("Tasks: {} open ({} today) ", open, today_open));
+    } else {
+        tasks_line.push_str(&format!("کارها: {} باز ({} امروز) ", open, today_open));
+    }
     for task in st
         .data
         .tasks
@@ -274,11 +320,15 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
 
     // Session counter: current session index vs daily goal.
     let goal = app.settings.lock().unwrap().daily_goal_minutes;
-    win.set_session_counter(SharedString::from(format!(
-        "نشست {} · هدف {} دقیقه",
-        st.data.sessions.len() + 1,
-        goal
-    )));
+    win.set_session_counter(SharedString::from(if en {
+        format!("Session {} · goal {} min", st.data.sessions.len() + 1, goal)
+    } else {
+        format!(
+            "نشست {} · هدف {} دقیقه",
+            st.data.sessions.len() + 1,
+            goal
+        )
+    }));
 
     // ---- Rich data for the redesigned UI ----
     win.set_today_sessions(t.sessions as i32);
@@ -468,6 +518,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         win.set_era(SharedString::from(settings.era.clone()));
         win.set_era_label(SharedString::from(settings.era_label()));
         win.set_era_blurb(SharedString::from(settings.era_blurb()));
+        // Language lives in the Strings global; set it once at startup.
+        ui::Strings::get(&win).set_lang(SharedString::from(settings.lang.clone()));
     }
 
     // UI tick: countdown + inhibit + session persistence + auto-sync.
@@ -765,6 +817,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             w.set_era_label(SharedString::from(label));
             w.set_era_blurb(SharedString::from(blurb));
             apply_palette(&w, resolved, &era);
+        }
+    });
+
+    // Refresh the day's events from Wikipedia, off the UI thread.
+    let ref_weak = weak.clone(); let ref_app = Arc::clone(&app); win.on_refresh_events(move || {
+        let Some(w) = ref_weak.upgrade() else { return }; let g = ui::Strings::get(&w); w.set_refresh_status(SharedString::from(g.get_refreshing())); let app2 = Arc::clone(&ref_app); let weak2 = ref_weak.clone(); std::thread::spawn(move || {
+            let (jy, jm, jd) = calendar::today(); let (_, gm, gd) = calendar::to_gregorian(jy, jm, jd); // Start from the embedded table so a partial refresh never loses
+            // days it did not touch.
+            let mut table: serde_json::Value =
+                serde_json::from_str(include_str!("../data/day_events.json"))
+                    .unwrap_or_else(|_| serde_json::json!({"iran":{},"world_fa":{},"world_en":{}})); let result = refresh::refresh_today(&mut table, jm, jd, gm, gd); let status = match result {
+                Ok(r) => {
+                    let text = serde_json::to_string(&table).unwrap_or_default(); // Cache it, then swap the live table.
+                    let _ = std::fs::write(refresh::cache_path(), &text); *app2.events.lock().unwrap() = events::Events::from_str(&text); *app2.calendar_day.lock().unwrap() = (0, 0, 0); format!("{} / {}", r.iran_events, r.world_events)
+                }
+                Err(e) => format!("— {e}"),
+            }; let _ = slint::invoke_from_event_loop(move || {
+                if let Some(w) = weak2.upgrade() {
+                    w.set_refresh_status(SharedString::from(status.clone())); refresh_calendar(&w, &app2); }
+            }); }); }); // Language switch. Every visible string lives in the Strings global, so
+    // this only has to flip that and refresh the strings Rust owns.
+    let lang_weak = weak.clone();
+    let lang_app = Arc::clone(&app);
+    win.on_set_lang(move |lang| {
+        let lang = lang.to_string();
+        let (label, blurb, theme_label) = {
+            let mut s = lang_app.settings.lock().unwrap();
+            s.lang = lang.clone();
+            s.sanitize_mut();
+            s.save();
+            (s.era_label(), s.era_blurb(), s.theme_label())
+        };
+        if let Some(w) = lang_weak.upgrade() {
+            let g = ui::Strings::get(&w);
+            g.set_lang(SharedString::from(lang.clone()));
+            w.set_era_label(SharedString::from(label));
+            w.set_era_blurb(SharedString::from(blurb));
+            w.set_theme_label(SharedString::from(theme_label));
+            // The calendar card is language-dependent; force a rebuild.
+            *lang_app.calendar_day.lock().unwrap() = (0, 0, 0);
+            refresh_calendar(&w, &lang_app);
+            refresh_screens(&w, &lang_app);
         }
     });
 

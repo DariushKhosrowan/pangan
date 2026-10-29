@@ -1,5 +1,7 @@
 import { LineEdit } from "std-widgets.slint";
 import { Shahbaz, Faravahar, Derafsh, Senmurv, Boteh, BotehDivider, EmblemField } from "heritage.slint";
+import { Strings } from "strings.slint";
+export { Strings } from "strings.slint";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Pangan — پنگان
@@ -94,7 +96,7 @@ export struct TaskItem {
 
 // One "on this day" row.
 export struct CalEvent {
-    section: string,   // سیاسی / هنری / ورزشی
+    section: string,   // گروه: رخداد / زادروز / درگذشت / مناسبت
     year: string,      // "۱۱۹۲" or ""
     text: string,
 }
@@ -726,11 +728,14 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in property <string> cal-feast: "";       // "مهرگان" or empty
     in property <string> cal-month-progress: ""; // "روز ۱۲ از ۳۰"
     in property <[CalEvent]> cal-events: [];
+    in property <[CalEvent]> cal-world: [];
+    in-out property <bool> cal-world-open: false;
+    in-out property <string> refresh-status: "";
     in property <string> cal-empty: "برای این روز رویدادی ثبت نشده است."; // ---- Reports / status / sync / task input ----
     in property <string> status-line; in property <string> report-text; in property <string> sync-status; in-out property <string> new-task-text; in-out property <string> show-view: "main"; // ---- Settings (edited in the Settings screen) ----
     in-out property <int> work-minutes: 25; in-out property <int> short-break-minutes: 5; in-out property <int> long-break-minutes: 15; in-out property <int> long-break-interval: 4; in-out property <int> daily-goal-minutes: 120; in-out property <bool> auto-start-next: true; in-out property <bool> auto-start-on-launch: false; in-out property <bool> sound-enabled: true; in-out property <string> sound-theme: "santur"; in-out property <bool> hotkey-enabled: true; in-out property <bool> inhibit-enabled: true; in-out property <bool> overlay-enabled: true; in-out property <bool> compact-mode: false; in-out property <int> sound-volume: 80; in property <string> automation-summary; // ---- Rich data (pushed from Rust) ----
     in property <[TaskItem]> tasks: []; in property <[float]> week-bars: [0, 0, 0, 0, 0, 0, 0]; in property <[string]> week-labels: ["ش", "ی", "د", "س", "چ", "پ", "ج"]; in property <int> today-sessions: 0; in property <int> today-minutes: 0; in property <int> today-score: 0; in property <int> today-streak: 0; in property <int> today-consistency: 0; in property <int> today-best: 0; in property <int> session-total: 4; in property <int> session-done: 0; in property <int> goal-minutes: 120; in property <int> goal-done-minutes: 0; // ---- Callbacks to Rust ----
-    callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback open-url(string); callback window-drag-start;
+    callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback refresh-events; callback open-url(string); callback window-drag-start;
 
     // Frameless drag: window position that keeps the pointer over the grab point.
     out property <length> drag-origin-x: self.absolute-position.x - root.drag-start-x;
@@ -806,7 +811,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     alignment: center;
                     vertical-stretch: 0;
                     Text {
-                        text: "پنگان";
+                        text: Strings.app-name;
                         font-size: 13px;
                         font-weight: 600;
                         letter-spacing: 0.3px;
@@ -814,7 +819,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         vertical-alignment: center;
                     }
                     Text {
-                        text: "زمان‌سنج کار ژرف";
+                        text: Strings.app-tagline;
                         font-family: "Vazirmatn";
                         font-size: 10px;
                         color: Palette.text-faint;
@@ -882,7 +887,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             padding-bottom: 14px; spacing: 0px; // view switcher
             HorizontalLayout {
                 height: 40px; alignment: center; Segmented {
-                    options: ["زمان‌سنج", "امروز", "آمار"]; current: 0; selected(i) => {
+                    options: [Strings.nav-timer, Strings.nav-today, Strings.nav-stats]; current: 0; selected(i) => {
                         if (i == 1) { root.open-today(); }
                         if (i == 2) { root.open-report(); }
                     }
@@ -977,7 +982,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             horizontal-stretch: 1;
                         }
                         if root.cal-feast != "" : Text {
-                            text: "جشن " + root.cal-feast;
+                            text: Strings.feast-prefix + root.cal-feast;
                             font-family: "Vazirmatn";
                             font-size: 9px;
                             color: Palette.accent;
@@ -986,7 +991,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     }
 
                     Text {
-                        text: "روز " + root.cal-day-name + " · " + root.cal-day-index;
+                        text: root.cal-day-name + " · " + root.cal-day-index;
                         font-family: "Vazirmatn";
                         font-size: 10px;
                         color: Palette.text-faint;
@@ -1016,7 +1021,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                     HorizontalLayout {
                         Text {
-                            text: "امروز";
+                            text: Strings.today;
                             font-size: 10px;
                             font-weight: 700;
                             letter-spacing: 1.1px;
@@ -1024,7 +1029,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         }
                         Rectangle { horizontal-stretch: 1; }
                         Text {
-                            text: root.today-minutes + " / " + root.goal-minutes + " دقیقه";
+                            text: root.today-minutes + " / " + root.goal-minutes + " " + Strings.minutes-short;
                             font-size: 11px;
                             color: Palette.text-dim;
                         }
@@ -1067,7 +1072,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     HorizontalLayout {
                         height: 20px;
                         Text {
-                            text: "کارها";
+                            text: Strings.tasks;
                             font-size: 10px;
                             font-weight: 700;
                             letter-spacing: 1.1px;
@@ -1084,7 +1089,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     if root.tasks.length == 0 : Rectangle {
                         height: 46px;
                         Text {
-                            text: "چیزی در صف نیست. یکی بیفزایید.";
+                            text: Strings.tasks-empty;
                             font-size: 12px;
                             color: Palette.text-faint;
                             x: 2px;
@@ -1117,7 +1122,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                             LineEdit {
                                 text: root.new-task-text;
-                                placeholder-text: "کار تازه…";
+                                placeholder-text: Strings.task-placeholder;
                                 font-size: 12px;
                                 horizontal-stretch: 1;
                                 edited(t) => { root.new-task-text = t; }
@@ -1169,7 +1174,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     horizontal-stretch: 1;
                 }
                 Text {
-                    text: "همگام‌سازی";
+                    text: Strings.sync;
                     font-size: 10px;
                     color: Palette.text-dim;
                     ta7 := TouchArea {
@@ -1195,14 +1200,24 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     icon: "back"; size: 30px; icon-size: 15px; clicked => { root.close-today(); }
                 }
                 Text {
-                    text: "امروز"; font-family: "Vazirmatn"; font-size: 15px; font-weight: 600; color: Palette.text; horizontal-stretch: 1; }
+                    text: Strings.today; font-family: "Vazirmatn"; font-size: 15px; font-weight: 600; color: Palette.text; horizontal-stretch: 1; }
+                if root.refresh-status != "" : Text {
+                    text: root.refresh-status; font-size: 9px; color: Palette.text-faint; vertical-alignment: center; }
+                Rectangle {
+                    width: 30px; height: 30px; border-radius: 15px; background: Palette.surface-2;
+                    ta-ref := TouchArea { clicked => { root.refresh-events(); } }
+                    states [
+                        h when ta-ref.has-hover : { background: Palette.surface-3; in { animate background { duration: 120ms; } } }
+                    ]
+                    Icon { kind: "reset"; size: 14px; color: Palette.text-dim; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                }
             }
 
             Flickable {
                 vertical-stretch: 1; content-height: today-content.preferred-height; interactive: true; today-content := VerticalLayout {
                     width: parent.width; height: self.preferred-height; padding-left: 18px; padding-right: 18px; padding-bottom: 20px; spacing: 10px; // ---- the date card ----
                     Rectangle {
-                        height: 132px; border-radius: 14px; background: Palette.surface; border-width: 1px; border-color: Palette.hairline; // era emblem, faint, on the right
+                        height: 146px; border-radius: 14px; background: Palette.surface; border-width: 1px; border-color: Palette.hairline; // era emblem, faint, on the right
                         Rectangle {
                             width: 84px; height: 84px; x: parent.width - self.width - 12px; y: (parent.height - self.height) / 2; background: transparent; if root.era == "cyrus" : Shahbaz { width: 84px; height: 84px; color: Palette.accent; fade: 0.10; }
                             if root.era == "darius" : Faravahar { width: 84px; height: 84px; color: Palette.accent; fade: 0.10; }
@@ -1217,6 +1232,9 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 text: root.cal-date; font-family: "Vazirmatn"; font-size: 24px; font-weight: 600; color: Palette.text; }
                             Text {
                                 text: root.cal-month-progress; font-family: "Vazirmatn"; font-size: 10px; color: Palette.text-faint; }
+                            Text {
+                                text: Strings.heritage-title + " · " + Strings.heritage-sub;
+                                font-family: "Vazirmatn"; font-size: 9px; color: Palette.accent; }
                         }
                     }
 
@@ -1224,7 +1242,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     Rectangle {
                         height: 74px; border-radius: 14px; background: Palette.accent-soft; border-width: 1px; border-color: Palette.accent; VerticalLayout {
                             padding-left: 16px; padding-right: 16px; padding-top: 12px; padding-bottom: 12px; spacing: 2px; Text {
-                                text: "نام روز به گاهشمار ساسانی"; font-family: "Vazirmatn"; font-size: 9px; font-weight: 700; letter-spacing: 0.6px; color: Palette.text-faint; }
+                                text: Strings.day-name-label; font-family: "Vazirmatn"; font-size: 9px; font-weight: 700; letter-spacing: 0.6px; color: Palette.text-faint; }
                             HorizontalLayout {
                                 spacing: 8px; Text {
                                     text: root.cal-day-name; font-family: "Vazirmatn"; font-size: 20px; font-weight: 600; color: Palette.accent; vertical-alignment: center; }
@@ -1240,14 +1258,14 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             padding-left: 14px; padding-right: 14px; spacing: 8px; alignment: start; Boteh {
                                 size: 20px; y: (parent.height - self.height) / 2; color: Palette.accent; fade: 0.9; }
                             Text {
-                                text: "جشن " + root.cal-feast; font-family: "Vazirmatn"; font-size: 13px; font-weight: 600; color: Palette.text; vertical-alignment: center; }
+                                text: Strings.feast-prefix + root.cal-feast; font-family: "Vazirmatn"; font-size: 13px; font-weight: 600; color: Palette.text; vertical-alignment: center; }
                         }
                     }
 
                     // ---- events ----
                     HorizontalLayout {
                         height: 20px; padding-left: 2px; spacing: 6px; alignment: start; Text {
-                            text: "رخدادهای این روز"; font-family: "Vazirmatn"; font-size: 10px; font-weight: 700; letter-spacing: 0.6px; color: Palette.text-faint; vertical-alignment: center; }
+                            text: Strings.iran-events; font-family: "Vazirmatn"; font-size: 10px; font-weight: 700; letter-spacing: 0.6px; color: Palette.text-faint; vertical-alignment: center; }
                         Text {
                             text: root.cal-events.length > 0 ? "(" + root.cal-events.length + ")" : ""; font-size: 10px; color: Palette.text-faint; vertical-alignment: center; }
                     }
@@ -1268,6 +1286,39 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                             Text {
                                 text: ev.text; font-family: "Vazirmatn"; font-size: 11px; color: Palette.text; wrap: word-wrap; line-height-factor: 1.55; }
+                        }
+                    }
+
+                    // ---- world history, folded away by default ----
+                    if root.cal-world.length > 0 : Rectangle {
+                        height: 40px; border-radius: 12px; background: Palette.surface; border-width: 1px; border-color: Palette.hairline;
+                        ta-world := TouchArea { clicked => { root.cal-world-open = !root.cal-world-open; } }
+                        HorizontalLayout {
+                            padding-left: 14px; padding-right: 14px; spacing: 8px;
+                            Text {
+                                text: Strings.world-events; font-family: "Vazirmatn"; font-size: 11px; font-weight: 600; color: Palette.text-dim; vertical-alignment: center; horizontal-stretch: 1;
+                            }
+                            Text {
+                                text: "(" + root.cal-world.length + ")"; font-size: 10px; color: Palette.text-faint; vertical-alignment: center;
+                            }
+                            Text {
+                                text: root.cal-world-open ? Strings.show-less : Strings.show-more; font-size: 10px; color: Palette.accent; vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    if root.cal-world-open : VerticalLayout {
+                        spacing: 10px;
+                        for ev in root.cal-world : Rectangle {
+                            height: wv-row.preferred-height + 22px; border-radius: 12px; background: Palette.surface; border-width: 1px; border-color: Palette.hairline; wv-row := VerticalLayout {
+                                x: 14px; y: 11px; width: parent.width - 28px; height: self.preferred-height; spacing: 4px; HorizontalLayout {
+                                    spacing: 6px; height: 14px; if ev.year != "" : Text {
+                                        text: ev.year; font-family: "Vazirmatn"; font-size: 10px; font-weight: 700; color: Palette.text-dim; vertical-alignment: center; }
+                                }
+
+                                Text {
+                                    text: ev.text; font-family: "Vazirmatn"; font-size: 11px; color: Palette.text-dim; wrap: word-wrap; line-height-factor: 1.55; }
+                            }
                         }
                     }
                 }
@@ -1293,7 +1344,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     clicked => { root.close-report(); }
                 }
                 Text {
-                    text: "آمار";
+                    text: Strings.nav-stats;
                     font-size: 15px;
                     font-weight: 600;
                     color: Palette.text;
@@ -1332,7 +1383,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             spacing: 4px;
                             alignment: center;
                             Text {
-                                text: "نمرهٔ کار ژرف";
+                                text: Strings.score-title;
                                 font-size: 10px;
                                 font-weight: 700;
                                 letter-spacing: 1.2px;
@@ -1361,7 +1412,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             padding: 14px;
                             spacing: 8px;
                             Text {
-                                text: "این هفته";
+                                text: Strings.this-week;
                                 font-size: 10px;
                                 font-weight: 700;
                                 letter-spacing: 1.2px;
@@ -1380,12 +1431,12 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     HorizontalLayout {
                         spacing: 10px;
                         StatCard {
-                            label: "نشست‌ها";
+                            label: Strings.sessions;
                             value: root.today-sessions + "";
                             horizontal-stretch: 1;
                         }
                         StatCard {
-                            label: "کار ژرف";
+                            label: Strings.focus;
                             value: root.today-minutes + "د";
                             horizontal-stretch: 1;
                         }
@@ -1393,12 +1444,12 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     HorizontalLayout {
                         spacing: 10px;
                         StatCard {
-                            label: "زنجیره";
+                            label: Strings.streak;
                             value: root.today-streak + "ر";
                             horizontal-stretch: 1;
                         }
                         StatCard {
-                            label: "پیوستگی";
+                            label: Strings.consistency;
                             value: root.today-consistency + "%";
                             horizontal-stretch: 1;
                         }
@@ -1438,7 +1489,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     clicked => { root.close-settings(); }
                 }
                 Text {
-                    text: "تنظیمات";
+                    text: Strings.settings;
                     font-size: 15px;
                     font-weight: 600;
                     color: Palette.text;
@@ -1457,7 +1508,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         }
                     ]
                     Text {
-                        text: "تمام";
+                        text: Strings.done;
                         font-size: 12px;
                         font-weight: 600;
                         color: Palette.on-accent;
@@ -1483,7 +1534,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     spacing: 8px;
 
                     // ── timer ──
-                    SectionLabel { text: "زمان‌سنج"; }
+                    SectionLabel { text: Strings.sec-timer; }
                     Card {
                         height: 174px;
                         VerticalLayout {
@@ -1492,45 +1543,45 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                             HorizontalLayout {
                                 height: 40px;
-                                Text { text: "کار ژرف"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-work; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Stepper { value <=> root.work-minutes; min: 1; max: 180; changed(v) => { root.work-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
-                                Text { text: "آسایش کوتاه"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-short; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Stepper { value <=> root.short-break-minutes; min: 1; max: 60; changed(v) => { root.short-break-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
-                                Text { text: "آسایش دراز"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-long; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Stepper { value <=> root.long-break-minutes; min: 1; max: 90; changed(v) => { root.long-break-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
-                                Text { text: "آسایش دراز پس از هر"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-long-every; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Stepper { value <=> root.long-break-interval; min: 1; max: 12; suffix: "×"; changed(v) => { root.long-break-interval = v; } }
                             }
                         }
                     }
 
                     // ── goal ──
-                    SectionLabel { text: "هدف روزانه"; }
+                    SectionLabel { text: Strings.sec-goal; }
                     Card {
                         height: 58px;
                         VerticalLayout {
                             padding: 14px;
                             HorizontalLayout {
-                                Text { text: "دقیقهٔ کار ژرف در روز"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-goal; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Stepper { value <=> root.daily-goal-minutes; min: 15; max: 600; suffix: "د"; changed(v) => { root.daily-goal-minutes = v; } }
                             }
                         }
                     }
 
                     // ── behaviour ──
-                    SectionLabel { text: "کنش"; }
+                    SectionLabel { text: Strings.sec-behaviour; }
                     Card {
                         height: 118px;
                         VerticalLayout {
@@ -1538,22 +1589,22 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             spacing: 0px;
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: "آغاز خودکار نشست بعدی"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-autostart-next; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Toggle { checked <=> root.auto-start-next; y: (parent.height - self.height) / 2; }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: "آغاز خودکار هنگام راه‌اندازی"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-autostart-launch; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Toggle { checked <=> root.auto-start-on-launch; y: (parent.height - self.height) / 2; }
                             }
                         }
                     }
 
                     // ── appearance ──
-                    SectionLabel { text: "گنجینهٔ نیاکان"; }
+                    SectionLabel { text: Strings.sec-heritage; }
                     Card {
-                        height: 212px;
+                        height: 268px;
                         VerticalLayout {
                             padding: 12px;
                             spacing: 9px;
@@ -1570,7 +1621,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     horizontal-stretch: 1;
                                 }
                                 Text {
-                                    text: "دودمان‌های ایران";
+                                    text: Strings.lbl-eras;
                                     font-size: 10px;
                                     color: Palette.text-faint;
                                     vertical-alignment: center;
@@ -1581,8 +1632,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 spacing: 7px;
                                 EraCard {
                                     era-id: "cyrus";
-                                    name: "کوروش";
-                                    blurb: "آخامنشی";
+                                    name: Strings.era-cyrus;
+                                    blurb: Strings.era-cyrus-blurb;
                                     swatch: #D6A84E;
                                     active: root.era == "cyrus";
                                     horizontal-stretch: 1;
@@ -1590,8 +1641,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 }
                                 EraCard {
                                     era-id: "darius";
-                                    name: "داریوش";
-                                    blurb: "پارسه";
+                                    name: Strings.era-darius;
+                                    blurb: Strings.era-darius-blurb;
                                     swatch: #C87941;
                                     active: root.era == "darius";
                                     horizontal-stretch: 1;
@@ -1599,8 +1650,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 }
                                 EraCard {
                                     era-id: "parthian";
-                                    name: "اشکانی";
-                                    blurb: "لاجورد";
+                                    name: Strings.era-parthian;
+                                    blurb: Strings.era-parthian-blurb;
                                     swatch: #5B8FD6;
                                     active: root.era == "parthian";
                                     horizontal-stretch: 1;
@@ -1608,8 +1659,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 }
                                 EraCard {
                                     era-id: "sasanid";
-                                    name: "ساسانی";
-                                    blurb: "زنگار";
+                                    name: Strings.era-sasanid;
+                                    blurb: Strings.era-sasanid-blurb;
                                     swatch: #4FA89B;
                                     active: root.era == "sasanid";
                                     horizontal-stretch: 1;
@@ -1617,16 +1668,45 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 }
                             }
 
+                            // The selected dynasty's span and its place in history.
+                            HorizontalLayout {
+                                height: 14px;
+                                spacing: 6px;
+                                Text {
+                                    text: root.era == "darius" ? Strings.era-darius-span
+                                        : root.era == "parthian" ? Strings.era-parthian-span
+                                        : root.era == "sasanid" ? Strings.era-sasanid-span
+                                        : Strings.era-cyrus-span;
+                                    font-size: 10px;
+                                    font-weight: 600;
+                                    color: Palette.accent;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: root.era-blurb;
+                                    font-size: 10px;
+                                    color: Palette.text-dim;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
+                                }
+                            }
+
                             Text {
-                                text: root.era-blurb;
-                                font-size: 10px;
-                                color: Palette.text-dim;
-                                overflow: elide;
+                                text: root.era == "darius" ? Strings.era-darius-note
+                                    : root.era == "parthian" ? Strings.era-parthian-note
+                                    : root.era == "sasanid" ? Strings.era-sasanid-note
+                                    : Strings.era-cyrus-note;
+                                font-size: 9px;
+                                color: Palette.text-faint;
+                                wrap: word-wrap;
+                                line-height-factor: 1.45;
+                                max-lines: 3;
                             }
                         }
                     }
 
-                    SectionLabel { text: "آرایه"; }
+                    SectionLabel { text: Strings.sec-appearance; }
                     Card {
                         height: 118px;
                         VerticalLayout {
@@ -1634,9 +1714,9 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             spacing: 0px;
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: "پوسته"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-theme; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Segmented {
-                                    options: ["سامانه", "تاریک", "روشن"];
+                                    options: [Strings.theme-system, Strings.theme-dark, Strings.theme-light];
                                     current: root.theme-pref == "dark" ? 1 : (root.theme-pref == "light" ? 2 : 0);
                                     item-height: 24px;
                                     font-size: 11px;
@@ -1649,14 +1729,35 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: "پنجرهٔ کوچک"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-compact; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Toggle { checked <=> root.compact-mode; y: (parent.height - self.height) / 2; }
                             }
                         }
                     }
 
+                    // ── language ──
+                    SectionLabel { text: Strings.sec-language; }
+                    Card {
+                        height: 62px;
+                        VerticalLayout {
+                            padding: 14px;
+                            HorizontalLayout {
+                                height: 34px;
+                                Text { text: Strings.lbl-language; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Segmented {
+                                    options: [Strings.lang-fa, Strings.lang-en];
+                                    current: Strings.lang == "fa" ? 0 : 1;
+                                    item-height: 26px;
+                                    font-size: 11px;
+                                    y: (parent.height - self.height) / 2;
+                                    selected(i) => { root.set-lang(i == 0 ? "fa" : "en"); }
+                                }
+                            }
+                        }
+                    }
+
                     // ── sound ──
-                    SectionLabel { text: "آوا"; }
+                    SectionLabel { text: Strings.sec-sound; }
                     Card {
                         height: 214px;
                         VerticalLayout {
@@ -1665,11 +1766,11 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                             HorizontalLayout {
                                 height: 26px;
-                                Text { text: "آواها روشن"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-sound-on; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Toggle { checked <=> root.sound-enabled; y: (parent.height - self.height) / 2; }
                             }
 
-                            Text { text: "آهنگ پایان"; font-size: 11px; color: Palette.text-faint; }
+                            Text { text: Strings.lbl-chime; font-size: 11px; color: Palette.text-faint; }
 
                             HorizontalLayout {
                                 spacing: 6px;
@@ -1686,7 +1787,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                         }
                                     ]
                                     Text {
-                                        text: s == "santur" ? "سنتور" : (s == "daf" ? "دف" : (s == "tombak" ? "تنبک" : (s == "karn" ? "کرنای" : (s == "sand" ? "سنج" : "کوروش"))));
+                                        text: s == "santur" ? Strings.snd-santur : (s == "daf" ? Strings.snd-daf : (s == "tombak" ? Strings.snd-tombak : (s == "karn" ? Strings.snd-karn : (s == "sand" ? Strings.snd-sand : Strings.snd-cyrus))));
                                         font-size: 11px;
                                         font-weight: root.sound-theme == s ? 600 : 400;
                                         color: root.sound-theme == s ? Palette.on-accent : Palette.text-dim;
@@ -1709,7 +1810,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                         }
                                     ]
                                     Text {
-                                        text: s == "santur" ? "سنتور" : (s == "daf" ? "دف" : (s == "tombak" ? "تنبک" : (s == "karn" ? "کرنای" : (s == "sand" ? "سنج" : "کوروش"))));
+                                        text: s == "santur" ? Strings.snd-santur : (s == "daf" ? Strings.snd-daf : (s == "tombak" ? Strings.snd-tombak : (s == "karn" ? Strings.snd-karn : (s == "sand" ? Strings.snd-sand : Strings.snd-cyrus))));
                                         font-size: 11px;
                                         font-weight: root.sound-theme == s ? 600 : 400;
                                         color: root.sound-theme == s ? Palette.on-accent : Palette.text-dim;
@@ -1769,7 +1870,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                         }
                                     ]
                                     Text {
-                                        text: "شنیدن";
+                                        text: Strings.preview;
                                         font-size: 11px;
                                         color: Palette.text;
                                         horizontal-alignment: center;
@@ -1780,7 +1881,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     }
 
                     // ── system ──
-                    SectionLabel { text: "سامانه"; }
+                    SectionLabel { text: Strings.sec-system; }
                     Card {
                         height: 162px;
                         VerticalLayout {
@@ -1788,26 +1889,26 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             spacing: 0px;
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: "کلیدهای میان‌بر همگانی"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-hotkeys; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Toggle { checked <=> root.hotkey-enabled; y: (parent.height - self.height) / 2; }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: "نمایش روشن بماند"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-awake; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Toggle { checked <=> root.inhibit-enabled; y: (parent.height - self.height) / 2; }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: "پوشش هنگام آسایش"; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
+                                Text { text: Strings.lbl-overlay; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
                                 Toggle { checked <=> root.overlay-enabled; y: (parent.height - self.height) / 2; }
                             }
                         }
                     }
 
                     // ── automation ──
-                    SectionLabel { text: "خودکاری"; }
+                    SectionLabel { text: Strings.sec-automation; }
                     Card {
                         height: 132px;
                         VerticalLayout {
@@ -1833,7 +1934,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     background: Palette.surface-2;
                                     LineEdit {
                                         text: root.new-task-text;
-                                        placeholder-text: "دستور، مانند playerctl pause";
+                                        placeholder-text: Strings.automation-placeholder;
                                         font-size: 11px;
                                         edited(t) => { root.new-task-text = t; }
                                     }
@@ -1854,7 +1955,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                         }
                                     ]
                                     Text {
-                                        text: "افزودن";
+                                        text: Strings.add;
                                         font-size: 11px;
                                         font-weight: 600;
                                         color: Palette.on-accent;
@@ -1864,7 +1965,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             }
 
                             Text {
-                                text: "هنگام آغاز کار ژرف اجرا می‌شود. متغیرها: %event%، %session%.";
+                                text: Strings.automation-hint;
                                 font-size: 10px;
                                 color: Palette.text-faint;
                                 wrap: word-wrap;
@@ -1873,7 +1974,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     }
 
                     // ── cloud ──
-                    SectionLabel { text: "ابر"; }
+                    SectionLabel { text: Strings.sec-cloud; }
                     Card {
                         height: 62px;
                         VerticalLayout {
@@ -1893,7 +1994,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                         }
                                     ]
                                     Text {
-                                        text: "پشتیبان‌گیری";
+                                        text: Strings.backup;
                                         font-size: 12px;
                                         color: Palette.text;
                                         horizontal-alignment: center;
@@ -1912,7 +2013,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                         }
                                     ]
                                     Text {
-                                        text: "بازگردانی";
+                                        text: Strings.restore;
                                         font-size: 12px;
                                         color: Palette.text;
                                         horizontal-alignment: center;
@@ -1923,7 +2024,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     }
 
                     // ── about ──
-                    SectionLabel { text: "شناسنامه"; }
+                    SectionLabel { text: Strings.sec-about; }
                     Card {
                         height: 132px;
                         VerticalLayout {
@@ -1939,7 +2040,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     fade: 0.9;
                                 }
                                 Text {
-                                    text: "ساختهٔ";
+                                    text: Strings.made-by;
                                     font-size: 11px;
                                     color: Palette.text-faint;
                                     vertical-alignment: center;
@@ -1982,7 +2083,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             // Free Art License 1.3 requires visible attribution for
                             // the Parthian emblem (Derafsh Kaviani, by Oneasy).
                             Text {
-                                text: "نماد اشکانی از Oneasy، پروانهٔ هنر آزاد ۱٫۳";
+                                text: Strings.emblem-credit;
                                 font-size: 9px;
                                 color: Palette.text-faint;
                                 wrap: word-wrap;
@@ -1998,7 +2099,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     }
 
                     Text {
-                        text: "پنگان · ساختهٔ خسروان";
+                        text: Strings.app-credit;
                         font-size: 10px;
                         color: Palette.text-faint;
                         horizontal-alignment: center;
