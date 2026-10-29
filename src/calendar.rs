@@ -504,6 +504,98 @@ pub fn weekday_name_en(jy: i32, jm: u32, jd: u32) -> &'static str {
     WEEKDAYS_EN[idx]
 }
 
+/// One square of a month grid.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GridCell {
+    /// Day of the month, 1..=31. Zero for the leading blanks that pad the
+    /// first week out to Saturday.
+    pub day: u32,
+    /// Jalali year and month this cell belongs to. For a blank cell these are
+    /// still the month being displayed, so the caller can skip them by `day`.
+    pub year: i32,
+    pub month: u32,
+    /// `YYYY-MM-DD` for a real day, empty for a blank.
+    pub key: String,
+    pub is_today: bool,
+}
+
+/// The month laid out as weeks of seven, Saturday first.
+///
+/// The Iranian week starts on Saturday, so the grid is padded with blanks at
+/// the front until the 1st lands in the right column. The result is always a
+/// whole number of weeks, so the grid never has a ragged last row.
+pub fn month_grid(jy: i32, jm: u32, today: (i32, u32, u32)) -> Vec<GridCell> {
+    let jm = jm.clamp(1, 12);
+    let len = month_len(jy, jm);
+
+    // Column of the 1st: 0 = Saturday .. 6 = Friday.
+    let jdn = jalali_to_jdn(jy, jm, 1);
+    let lead = ((jdn + 2) % 7) as u32;
+
+    let mut cells = Vec::with_capacity(((lead + len + 6) / 7 * 7) as usize);
+    for _ in 0..lead {
+        cells.push(GridCell {
+            day: 0,
+            year: jy,
+            month: jm,
+            key: String::new(),
+            is_today: false,
+        });
+    }
+    for day in 1..=len {
+        cells.push(GridCell {
+            day,
+            year: jy,
+            month: jm,
+            key: format!("{jy:04}-{jm:02}-{day:02}"),
+            is_today: today == (jy, jm, day),
+        });
+    }
+    while cells.len() % 7 != 0 {
+        cells.push(GridCell {
+            day: 0,
+            year: jy,
+            month: jm,
+            key: String::new(),
+            is_today: false,
+        });
+    }
+    cells
+}
+
+/// Step a Jalali month forward or back by one, rolling the year over.
+pub fn shift_month(jy: i32, jm: u32, delta: i32) -> (i32, u32) {
+    let mut y = jy;
+    let mut m = jm as i32 + delta;
+    while m < 1 {
+        m += 12;
+        y -= 1;
+    }
+    while m > 12 {
+        m -= 12;
+        y += 1;
+    }
+    (y, m as u32)
+}
+
+/// Move a `YYYY-MM-DD` Jalali key by a whole number of days.
+///
+/// This goes through the Julian day number rather than trying to add to the
+/// day field, so it crosses month and year boundaries correctly and cannot
+/// produce a day 31 in a 30-day month.
+pub fn shift_day_key(key: &str, delta: i32) -> Option<String> {
+    let mut it = key.split('-');
+    let y: i32 = it.next()?.parse().ok()?;
+    let m: u32 = it.next()?.parse().ok()?;
+    let d: u32 = it.next()?.parse().ok()?;
+    if it.next().is_some() {
+        return None;
+    }
+    let jdn = jalali_to_jdn(y, m, d) + delta as i64;
+    let (ny, nm, nd) = jdn_to_jalali(jdn);
+    Some(format!("{ny:04}-{nm:02}-{nd:02}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -658,5 +750,87 @@ mod display_tests {
             found >= 18,
             "expected at least 18 festival days, got {found}"
         );
+    }
+}
+
+#[cfg(test)]
+mod grid_tests {
+    use super::*;
+    #[test]
+    fn grid_is_whole_weeks_and_starts_on_saturday() {
+        for m in 1..=12u32 {
+            let g = month_grid(1405, m, (1405, 8, 7));
+            assert_eq!(g.len() % 7, 0, "month {m} is not whole weeks"); // The first real day must land in the column its weekday says.
+            let first = g.iter().position(|c| c.day == 1).unwrap();
+            let jdn = jalali_to_jdn(1405, m, 1);
+            assert_eq!(first as u32, ((jdn + 2) % 7) as u32);
+        }
+    }
+
+    #[test]
+    fn grid_holds_every_day_exactly_once() {
+        let g = month_grid(1405, 8, (1405, 8, 7));
+        let days: Vec<u32> = g.iter().filter(|c| c.day > 0).map(|c| c.day).collect();
+        assert_eq!(days, (1..=30).collect::<Vec<u32>>());
+    }
+
+    #[test]
+    fn today_is_marked_once() {
+        let g = month_grid(1405, 8, (1405, 8, 7));
+        let marked: Vec<u32> = g.iter().filter(|c| c.is_today).map(|c| c.day).collect();
+        assert_eq!(marked, vec![7]);
+    }
+
+    #[test]
+    fn keys_are_zero_padded_and_sortable() {
+        let g = month_grid(1405, 8, (1405, 8, 7));
+        let k = &g.iter().find(|c| c.day == 7).unwrap().key;
+        assert_eq!(k, "1405-08-07");
+    }
+
+    #[test]
+    fn month_stepping_rolls_the_year() {
+        assert_eq!(shift_month(1405, 12, 1), (1406, 1));
+        assert_eq!(shift_month(1405, 1, -1), (1404, 12));
+        assert_eq!(shift_month(1405, 6, 0), (1405, 6));
+        assert_eq!(shift_month(1405, 1, -13), (1403, 12));
+    }
+}
+
+#[cfg(test)]
+mod step_tests {
+    use super::*;
+    #[test]
+    fn stepping_a_day_moves_one_day_each_way() {
+        assert_eq!(shift_day_key("1405-08-07", 1).unwrap(), "1405-08-08");
+        assert_eq!(shift_day_key("1405-08-07", -1).unwrap(), "1405-08-06");
+    }
+
+    #[test]
+    fn stepping_crosses_month_and_year_boundaries() {
+        // 30 Aban + 1 = 1 Azar.
+        assert_eq!(shift_day_key("1405-08-30", 1).unwrap(), "1405-09-01");
+        // 1 Farvardin - 1 = the last day of the previous Esfand. 1404 is not a
+        // leap year, so that is 29 Esfand, not 30 — the step goes through the
+        // day number rather than assuming a fixed month length.
+        assert!(!is_leap(1404));
+        assert_eq!(shift_day_key("1405-01-01", -1).unwrap(), "1404-12-29");
+        // 31 Tir + 1 = 1 Amordad (Tir has 31 days).
+        assert_eq!(shift_day_key("1405-04-31", 1).unwrap(), "1405-05-01");
+    }
+
+    #[test]
+    fn stepping_never_produces_an_invalid_day() {
+        // Walk a whole year forward one day at a time and check every step is
+        // a real date with a day inside its month's length.
+        let mut key = "1405-01-01".to_string();
+        for _ in 0..366 {
+            let mut it = key.split('-');
+            let y: i32 = it.next().unwrap().parse().unwrap();
+            let m: u32 = it.next().unwrap().parse().unwrap();
+            let d: u32 = it.next().unwrap().parse().unwrap();
+            assert!(d >= 1 && d <= month_len(y, m), "invalid day in {key}");
+            key = shift_day_key(&key, 1).unwrap();
+        }
     }
 }

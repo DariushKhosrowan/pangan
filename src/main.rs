@@ -53,6 +53,12 @@ struct AppState {
     /// The Jalali date the calendar card was last built for, so the card is
     /// rebuilt when the day rolls over and not on every 300 ms tick.
     calendar_day: Mutex<(i32, u32, u32)>,
+    /// Which day the calendar screen is showing tasks for, as a `YYYY-MM-DD`
+    /// key. Empty until the screen is first opened, when it is set to today.
+    selected_day: Mutex<String>,
+    /// The Jalali month the grid is showing, independent of the selected day:
+    /// you can page to next month and look around without moving the selection.
+    shown_month: Mutex<(i32, u32)>,
 }
 
 impl AppState {
@@ -73,6 +79,8 @@ impl AppState {
                 None => events::Events::load(),
             }),
             calendar_day: Mutex::new((0, 0, 0)),
+            selected_day: Mutex::new(String::new()),
+            shown_month: Mutex::new((0, 0)),
         }
     }
 
@@ -189,21 +197,32 @@ fn run_action(
     });
 }
 
-/// Build and push the Persian-calendar card: the Jalali date, the weekday, the
-/// Sasanian day-name, the feast (if today is one) and the day's events.
+/// The day the calendar screen is showing: the user's selection, or today
+/// before anything has been selected.
 ///
-/// Rebuilt only when the Jalali day changes, so the 300 ms UI tick does not
-/// re-serialise a few hundred event rows twice a second.
-fn refresh_calendar(win: &PanganWindow, app: &AppState) {
-    let (jy, jm, jd) = calendar::today();
+/// Every part of the screen (the date card, the day-name, the feast and the
+/// events) is built from this, so picking a day in the grid moves the whole
+/// screen and not just the task list underneath it.
+fn selected_day(app: &AppState) -> (i32, u32, u32) {
+    let key = app.selected_day.lock().unwrap().clone();
+    parse_day_key(&key).unwrap_or_else(calendar::today)
+}
+
+/// Build and push the Persian-calendar card: the Jalali date, the weekday, the
+/// Sasanian day-name, the feast (if that day is one) and the day's events.
+///
+/// Rebuilt only when the day being shown changes, so the 300 ms UI tick does
+/// not re-serialise a few hundred event rows twice a second.
+fn refresh_calendar(win: &PanganWindow, app: &AppState, day: (i32, u32, u32)) {
+    let (jy, jm, jd) = day;
     let lang = app.settings.lock().unwrap().lang.clone();
     let en = lang == "en";
     {
         let mut last = app.calendar_day.lock().unwrap();
-        if *last == (jy, jm, jd) {
+        if *last == day {
             return;
         }
-        *last = (jy, jm, jd);
+        *last = day;
     }
 
     let month_name = if en {
@@ -297,6 +316,214 @@ fn refresh_calendar(win: &PanganWindow, app: &AppState) {
     let world = app.events.lock().unwrap().world(&lang, gm, gd);
     let world_label = if en { "World" } else { "جهان" };
     win.set_cal_world(ModelRc::new(VecModel::from(to_ui(world, world_label))));
+}
+
+/// Parse a `YYYY-MM-DD` Jalali key back into `(year, month, day)`.
+fn parse_day_key(key: &str) -> Option<(i32, u32, u32)> {
+    let mut it = key.split('-');
+    let y = it.next()?.parse().ok()?;
+    let m = it.next()?.parse().ok()?;
+    let d = it.next()?.parse().ok()?;
+    if it.next().is_some() || !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    Some((y, m, d))
+}
+
+/// Build the month grid and the selected day's task list.
+///
+/// This is the calendar screen's whole state: which month is on screen, which
+/// day is selected, and what work sits on that day. It is rebuilt whenever any
+/// of those change, which is cheap — a month is at most 42 cells.
+fn refresh_day_view(win: &PanganWindow, app: &AppState) {
+    let (ty, tm, td) = calendar::today();
+    let en = app.settings.lock().unwrap().lang == "en";
+    let today_key = format!("{ty:04}-{tm:02}-{td:02}");
+
+    // Default the selection to today the first time the screen is built.
+    let selected_key = {
+        let mut sel = app.selected_day.lock().unwrap();
+        if sel.is_empty() {
+            *sel = today_key.clone();
+        }
+        sel.clone()
+    };
+    let (sy, sm, sd) = parse_day_key(&selected_key).unwrap_or((ty, tm, td));
+
+    // The grid follows the selected day unless the user has paged away.
+    let (gy, gm) = {
+        let shown = *app.shown_month.lock().unwrap();
+        if shown == (0, 0) {
+            (sy, sm)
+        } else {
+            shown
+        }
+    };
+
+    // ── the grid ──
+    let counts: std::collections::HashMap<String, u32> = {
+        let st = app.store.lock().unwrap();
+        st.open_counts_by_date().into_iter().collect()
+    };
+    let cells: Vec<ui::DayCell> = calendar::month_grid(gy, gm, (ty, tm, td))
+        .into_iter()
+        .map(|c| {
+            let has = counts.get(&c.key).copied().unwrap_or(0);
+            ui::DayCell {
+                day: c.day as i32,
+                label: if c.day == 0 {
+                    SharedString::new()
+                } else if en {
+                    SharedString::from(c.day.to_string())
+                } else {
+                    SharedString::from(calendar::fa_num(c.day as i64))
+                },
+                key: SharedString::from(c.key.clone()),
+                is_today: c.is_today,
+                selected: c.key == selected_key,
+                has_tasks: has > 0,
+                open_count: if has > 0 {
+                    SharedString::from(if en {
+                        has.to_string()
+                    } else {
+                        calendar::fa_num(has as i64)
+                    })
+                } else {
+                    SharedString::new()
+                },
+            }
+        })
+        .collect();
+    // Slint's GridLayout has no explicit column count, so the month is handed
+    // over as weeks of seven rather than one flat list.
+    let rows: Vec<ui::DayRow> = cells
+        .chunks(7)
+        .map(|w| ui::DayRow {
+            cells: ModelRc::new(VecModel::from(w.to_vec())),
+        })
+        .collect();
+    win.set_month_rows(ModelRc::new(VecModel::from(rows)));
+
+    // ── the month title ──
+    let month_name = if en {
+        calendar::MONTHS_EN[(gm as usize).clamp(1, 12) - 1]
+    } else {
+        calendar::MONTHS[(gm as usize).clamp(1, 12) - 1]
+    };
+    let era = calendar::era_year(gy);
+    win.set_month_title(SharedString::from(if en {
+        format!("{month_name} {era}")
+    } else {
+        format!("{} {}", month_name, calendar::fa_num(era as i64))
+    }));
+
+    // ── the selected day's heading ──
+    let sel_month = if en {
+        calendar::MONTHS_EN[(sm as usize).clamp(1, 12) - 1]
+    } else {
+        calendar::MONTHS[(sm as usize).clamp(1, 12) - 1]
+    };
+    let weekday = if en {
+        calendar::weekday_name_en(sy, sm, sd)
+    } else {
+        calendar::weekday_name(sy, sm, sd)
+    };
+    let is_today = selected_key == today_key;
+    win.set_selected_is_today(is_today);
+    win.set_cal_selected(SharedString::from(selected_key.clone()));
+
+    win.set_selected_day_title(SharedString::from(if en {
+        format!("{weekday}, {sd} {sel_month}")
+    } else {
+        format!("{}، {} {}", weekday, calendar::fa_num(sd as i64), sel_month)
+    }));
+    win.set_selected_day_sub(SharedString::from(if en {
+        if is_today {
+            "today".to_string()
+        } else {
+            String::new()
+        }
+    } else if is_today {
+        "امروز".to_string()
+    } else {
+        String::new()
+    }));
+
+    // ── the day's tasks ──
+    let tasks: Vec<ui::TaskItem> = {
+        let st = app.store.lock().unwrap();
+        st.tasks_on(&selected_key)
+            .into_iter()
+            .map(|t| ui::TaskItem {
+                id: t.id as i32,
+                title: SharedString::from(t.title),
+                time: SharedString::from(t.time),
+                done: t.done,
+            })
+            .collect()
+    };
+    win.set_day_tasks(ModelRc::new(VecModel::from(tasks)));
+
+    // ── the timer screen's day navigator ──
+    // The same selection drives both screens, so stepping the day on the timer
+    // and picking a day in the month grid always agree.
+    let open_here = app
+        .store
+        .lock()
+        .unwrap()
+        .tasks_on(&selected_key)
+        .iter()
+        .filter(|t| !t.done)
+        .count();
+    // The headline is the full date in the era reckoning — "۷ آبان ۲۵۸۵" —
+    // with the weekday kept in the subline. The date itself leads, marked
+    // "(امروز)" when it is today, rather than the word "today" standing in
+    // for a date.
+    let sel_era = calendar::era_year(sy);
+    let date_text = if en {
+        format!("{sd} {sel_month} {sel_era}")
+    } else {
+        format!(
+            "{} {} {}",
+            calendar::fa_num(sd as i64),
+            sel_month,
+            calendar::fa_num(sel_era as i64)
+        )
+    };
+    win.set_day_headline(SharedString::from(if is_today {
+        if en {
+            format!("{date_text} (today)")
+        } else {
+            format!("{date_text} (امروز)")
+        }
+    } else {
+        date_text
+    }));
+
+    let day_name = calendar::day_name(sm, sd);
+    let feast = calendar::feast_on(sm, sd).map(|f| f.0).unwrap_or("");
+    let mut bits: Vec<String> = Vec::new();
+    bits.push(weekday.to_string());
+    if !feast.is_empty() {
+        bits.push(feast.to_string());
+    }
+    bits.push(day_name.name.to_string());
+    bits.push(if en {
+        if open_here == 1 {
+            "1 open task".to_string()
+        } else {
+            format!("{open_here} open tasks")
+        }
+    } else {
+        format!("{} کار باز", calendar::fa_num(open_here as i64))
+    });
+    win.set_day_subline(SharedString::from(bits.join(" · ")));
+    win.set_day_is_today(is_today);
+
+    // The card below the grid (date, day-name, feast, events) belongs to the
+    // same day as the grid and the task list. Without this the screen said
+    // "7 Aban" while the grid had 12 Aban selected.
+    refresh_calendar(win, app, (sy, sm, sd));
 }
 
 /// Recompute and set report + task text on the window.
@@ -427,7 +654,7 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
 
     // The calendar card only changes at midnight; it guards itself against
     // rebuilding on every 300 ms tick.
-    refresh_calendar(win, app);
+    refresh_calendar(win, app, selected_day(app));
 }
 
 /// Recompute the automation summary line and push it to the window.
@@ -715,7 +942,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     win.on_open_today(move || {
         if let Some(w) = today_open_weak.upgrade() {
             *today_open_app.calendar_day.lock().unwrap() = (0, 0, 0);
-            refresh_calendar(&w, &today_open_app);
+            refresh_calendar(&w, &today_open_app, selected_day(&today_open_app));
             w.set_show_view("today".into());
         }
     });
@@ -805,7 +1032,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if txt.trim().is_empty() {
             return;
         }
-        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        // Stamp the task with the Jalali day, which is the key every other
+        // part of the app uses. A Gregorian stamp here meant the task existed
+        // but appeared on no calendar day at all.
+        let (ty, tm, td) = calendar::today();
+        let today = format!("{ty:04}-{tm:02}-{td:02}");
         {
             let mut st = task_app.store.lock().unwrap();
             st.add_task(txt.trim().to_string(), today, String::new());
@@ -813,6 +1044,157 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(w) = task_weak.upgrade() {
             w.set_new_task_text(SharedString::from(""));
             refresh_screens(&w, &task_app);
+            refresh_day_view(&w, &task_app);
+        }
+    });
+
+    // ── calendar screen: pick a day, page the month, jump to today ──
+    let pick_app = Arc::clone(&app);
+    let pick_weak = weak.clone();
+    win.on_pick_day(move |key| {
+        let key = key.to_string();
+        if parse_day_key(&key).is_none() {
+            return;
+        }
+        *pick_app.selected_day.lock().unwrap() = key.clone();
+        // Selecting a day also brings the grid to that day's month, so the
+        // selection is never off-screen after a jump.
+        if let Some((y, m, _)) = parse_day_key(&key) {
+            *pick_app.shown_month.lock().unwrap() = (y, m);
+        }
+        if let Some(w) = pick_weak.upgrade() {
+            refresh_day_view(&w, &pick_app);
+        }
+    });
+
+    let shift_app = Arc::clone(&app);
+    let shift_weak = weak.clone();
+    win.on_shift_month(move |delta| {
+        let (ty, tm, _) = calendar::today();
+        let (cy, cm) = {
+            let shown = *shift_app.shown_month.lock().unwrap();
+            if shown == (0, 0) {
+                (ty, tm)
+            } else {
+                shown
+            }
+        };
+        let (ny, nm) = calendar::shift_month(cy, cm, delta);
+        *shift_app.shown_month.lock().unwrap() = (ny, nm);
+        if let Some(w) = shift_weak.upgrade() {
+            refresh_day_view(&w, &shift_app);
+        }
+    });
+
+    let goto_app = Arc::clone(&app);
+    let goto_weak = weak.clone();
+    win.on_goto_today(move || {
+        let (ty, tm, td) = calendar::today();
+        *goto_app.selected_day.lock().unwrap() = format!("{ty:04}-{tm:02}-{td:02}");
+        *goto_app.shown_month.lock().unwrap() = (ty, tm);
+        if let Some(w) = goto_weak.upgrade() {
+            refresh_day_view(&w, &goto_app);
+        }
+    });
+
+    // Add a task onto a specific day, which is the whole point of the calendar:
+    // a task typed while looking at next Tuesday belongs to next Tuesday.
+    let addon_app = Arc::clone(&app);
+    let addon_weak = weak.clone();
+    win.on_add_task_on(move |key| {
+        let key = key.to_string();
+        let Some(w) = addon_weak.upgrade() else {
+            return;
+        };
+        let txt = w.get_new_task_text().to_string();
+        if txt.trim().is_empty() {
+            return;
+        }
+        if parse_day_key(&key).is_none() {
+            return;
+        }
+        {
+            let mut st = addon_app.store.lock().unwrap();
+            st.add_task(txt.trim().to_string(), key, String::new());
+        }
+        w.set_new_task_text(SharedString::from(""));
+        refresh_day_view(&w, &addon_app);
+    });
+
+    // ── per-task management: delete, rename, move between days ──
+    let del_app = Arc::clone(&app);
+    let del_weak = weak.clone();
+    win.on_delete_task(move |id| {
+        {
+            let mut st = del_app.store.lock().unwrap();
+            st.remove_task(id as u64);
+        }
+        if let Some(w) = del_weak.upgrade() {
+            refresh_screens(&w, &del_app);
+            refresh_day_view(&w, &del_app);
+        }
+    });
+
+    let ren_app = Arc::clone(&app);
+    let ren_weak = weak.clone();
+    win.on_rename_task(move |id, title| {
+        {
+            let mut st = ren_app.store.lock().unwrap();
+            st.set_task_title(id as u64, title.to_string());
+        }
+        if let Some(w) = ren_weak.upgrade() {
+            w.set_edit_text(SharedString::new());
+            refresh_screens(&w, &ren_app);
+            refresh_day_view(&w, &ren_app);
+        }
+    });
+
+    // Nudging a task a day either way. The selection follows the task, so the
+    // row does not vanish out from under the cursor when it lands on a day you
+    // are not looking at.
+    let mv_app = Arc::clone(&app);
+    let mv_weak = weak.clone();
+    win.on_move_task(move |id, delta| {
+        let (ty, tm, td) = calendar::today();
+        let today_key = format!("{ty:04}-{tm:02}-{td:02}");
+        let landed = {
+            let mut st = mv_app.store.lock().unwrap();
+            st.shift_task_days(id as u64, delta, &today_key)
+        };
+        if let Some(w) = mv_weak.upgrade() {
+            if let Some(next) = landed {
+                *mv_app.selected_day.lock().unwrap() = next.clone();
+                if let Some((y, m, _)) = parse_day_key(&next) {
+                    *mv_app.shown_month.lock().unwrap() = (y, m);
+                }
+            }
+            refresh_screens(&w, &mv_app);
+            refresh_day_view(&w, &mv_app);
+        }
+    });
+
+    // Step the selected day by one, from the timer screen's navigator.
+    let step_app = Arc::clone(&app);
+    let step_weak = weak.clone();
+    win.on_step_day(move |delta| {
+        let cur = {
+            let sel = step_app.selected_day.lock().unwrap().clone();
+            if sel.is_empty() {
+                let (ty, tm, td) = calendar::today();
+                format!("{ty:04}-{tm:02}-{td:02}")
+            } else {
+                sel
+            }
+        };
+        let Some(next) = calendar::shift_day_key(&cur, delta) else {
+            return;
+        };
+        *step_app.selected_day.lock().unwrap() = next.clone();
+        if let Some((y, m, _)) = parse_day_key(&next) {
+            *step_app.shown_month.lock().unwrap() = (y, m);
+        }
+        if let Some(w) = step_weak.upgrade() {
+            refresh_day_view(&w, &step_app);
         }
     });
 
@@ -833,6 +1215,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if let Some(w) = toggle_weak.upgrade() {
             refresh_screens(&w, &toggle_app);
+            // The calendar's dots and the day's list both depend on done state.
+            refresh_day_view(&w, &toggle_app);
         }
     }); // Explicit theme selection from the Settings segmented control.
     let settheme_app = Arc::clone(&app);
@@ -882,7 +1266,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let app2 = Arc::clone(&ref_app);
         let weak2 = ref_weak.clone();
         std::thread::spawn(move || {
-            let (jy, jm, jd) = calendar::today();
+            // Refresh the day the user is looking at, not always today: the
+            // button sits on a screen that can be showing any day.
+            let (jy, jm, jd) = selected_day(&app2);
             let (_, gm, gd) = calendar::to_gregorian(jy, jm, jd); // Start from the embedded table so a partial refresh never loses
                                                                   // days it did not touch.
             let mut table: serde_json::Value =
@@ -902,7 +1288,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(w) = weak2.upgrade() {
                     w.set_refresh_status(SharedString::from(status.clone()));
-                    refresh_calendar(&w, &app2);
+                    refresh_calendar(&w, &app2, selected_day(&app2));
                 }
             });
         });
@@ -927,7 +1313,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             w.set_theme_label(SharedString::from(theme_label));
             // The calendar card is language-dependent; force a rebuild.
             *lang_app.calendar_day.lock().unwrap() = (0, 0, 0);
-            refresh_calendar(&w, &lang_app);
+            refresh_calendar(&w, &lang_app, selected_day(&lang_app));
             refresh_screens(&w, &lang_app);
         }
     });
@@ -1115,6 +1501,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     apply_snapshot(&win, &shared);
     apply_session_dots(&win, &shared, &app);
     refresh_screens(&win, &app);
+    refresh_day_view(&win, &app);
     update_automation_summary(&weak, &app);
     win.set_sync_status(SharedString::from("همگام‌سازی ابری آماده است"));
     win.show()?;
@@ -1233,5 +1620,40 @@ fn hotkey_thread(shared: Arc<Shared>, tx: Sender<TrayAction>) {
             }
         }
         std::thread::sleep(Duration::from_millis(40));
+    }
+}
+
+#[cfg(test)]
+mod day_key_tests {
+    use super::parse_day_key;
+    #[test]
+    fn a_well_formed_key_parses() {
+        assert_eq!(parse_day_key("1405-08-07"), Some((1405, 8, 7)));
+    }
+
+    #[test]
+    fn a_malformed_key_is_rejected_rather_than_guessed() {
+        // Every one of these used to be reachable from the grid or a stored
+        // task, and a wrong answer here would move the whole screen to a day
+        // that does not exist.
+        assert_eq!(parse_day_key(""), None);
+        assert_eq!(parse_day_key("1405-08"), None);
+        assert_eq!(parse_day_key("1405-08-07-01"), None);
+        assert_eq!(parse_day_key("1405-13-01"), None, "month 13");
+        assert_eq!(parse_day_key("1405-00-01"), None, "month 0");
+        assert_eq!(parse_day_key("1405-08-00"), None, "day 0");
+        assert_eq!(parse_day_key("1405-08-32"), None, "day 32");
+        assert_eq!(parse_day_key("abcd-08-07"), None);
+        assert_eq!(parse_day_key("1405/08/07"), None, "wrong separator");
+    }
+
+    #[test]
+    fn a_key_round_trips_through_the_format_the_grid_emits() {
+        // The grid builds keys with `{y:04}-{m:02}-{d:02}`; anything the grid
+        // can produce must parse back to the same day.
+        for (y, m, d) in [(1405, 1, 1), (1405, 12, 29), (1399, 7, 15)] {
+            let key = format!("{y:04}-{m:02}-{d:02}");
+            assert_eq!(parse_day_key(&key), Some((y, m, d)), "key {key}");
+        }
     }
 }

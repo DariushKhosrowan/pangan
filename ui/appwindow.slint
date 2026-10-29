@@ -106,6 +106,23 @@ export struct CalEvent {
     text: string,
 }
 
+// One square of the month grid.
+export struct DayCell {
+    day: int,          // 0 for the blanks that pad the first week
+    label: string,     // the day in Persian digits, or ""
+    key: string,       // "1405-08-07", or "" for a blank
+    is-today: bool,
+    selected: bool,
+    has-tasks: bool,   // at least one open task on this day
+    open-count: string, // how many, in Persian digits, or ""
+}
+
+// One week of the month grid. Slint's GridLayout has no explicit column count,
+// so the grid is built as a list of rows of seven rather than one flat list.
+export struct DayRow {
+    cells: [DayCell],
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Icons — drawn, not glyphs, so they stay crisp and identical everywhere.
 // ───────────────────────────────────────────────────────────────────────────
@@ -231,6 +248,104 @@ component Icon {
         fill: transparent;
         commands: "M 12 7.5 A 4.5 4.5 0 1 0 12 16.5 A 4.5 4.5 0 0 0 12 7.5 Z M 12 2 v 2 M 12 20 v 2 M 2 12 h 2 M 20 12 h 2 M 5 5 l 1.5 1.5 M 17.5 17.5 L 19 19 M 19 5 L 17.5 6.5 M 6.5 17.5 L 5 19";
     }
+    // Pencil: a slanted nib with a baseline, for rename.
+    if kind == "edit" : Path {
+        width: size; height: size;
+        viewbox-width: 24; viewbox-height: 24;
+        stroke: color;
+        stroke-width: 1.8px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+        fill: transparent;
+        commands: "M 4 20 h 4 L 19 9 L 15 5 L 4 16 Z M 14 6 L 18 10";
+    }
+    // Bin: a lid, a body and two ribs, for delete.
+    if kind == "trash" : Path {
+        width: size; height: size;
+        viewbox-width: 24; viewbox-height: 24;
+        stroke: color;
+        stroke-width: 1.8px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+        fill: transparent;
+        commands: "M 4 7 h 16 M 9 7 V 4 h 6 v 3 M 6 7 l 1 13 h 10 l 1 -13 M 10 11 v 5 M 14 11 v 5";
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// TaskAction — one of the small per-task controls (move, rename, delete).
+//
+// Kept deliberately quiet: at rest it is barely visible, and it only takes on
+// colour on hover. Four always-lit icons on every row would turn a task list
+// into a toolbar.
+// ───────────────────────────────────────────────────────────────────────────
+component TaskAction inherits Rectangle {
+    in property <string> icon: "edit";
+    /// What this control does, in words. Icon-only buttons are invisible to a
+    /// screen reader, so the label is what makes them usable without sight.
+    in property <string> tip: "";
+    /// Turns the icon red on hover. Used for delete, so the destructive action
+    /// reads as destructive before it is clicked.
+    in property <bool> destructive: false;
+    callback clicked;
+
+    width: 24px;
+    height: 24px;
+    border-radius: 12px;
+    background: transparent;
+    accessible-role: button;
+    accessible-label: root.tip;
+
+    ta-act := TouchArea {
+        clicked => { root.clicked(); }
+        mouse-cursor: pointer;
+    }
+
+    states [
+        hovered when ta-act.has-hover : {
+            background: Palette.surface-3;
+            in { animate background { duration: Motion.quick; } }
+        }
+    ]
+
+    Icon {
+        kind: root.icon;
+        size: 13px;
+        // text-faint was too pale to see against the card, which made the
+        // controls look absent rather than quiet. text-dim is legible at rest
+        // and still recedes behind the task title.
+        color: root.destructive && ta-act.has-hover
+            ? Palette.danger
+            : (ta-act.has-hover ? Palette.text : Palette.text-dim);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// DayStep — the previous/next-day button on the timer screen.
+//
+// A rounded square rather than a circle, so it reads as a control beside the
+// date block instead of another round icon competing with the timer's own
+// round buttons. The chevron is a single clean stroke; on hover the tile lifts
+// to the accent tint and the chevron darkens, and on press it scales down a
+// touch so the click is felt.
+// ───────────────────────────────────────────────────────────────────────────
+component DayStep inherits Rectangle {
+    in property <bool> forward: false; callback clicked; width: 34px; height: 34px; border-radius: 11px; background: Palette.surface-2; border-width: 1px; border-color: Palette.hairline; ta := TouchArea { clicked => { root.clicked(); } }
+
+    states [
+        hovered when ta.has-hover : {
+            background: Palette.accent-soft; border-color: Palette.accent; in { animate background { duration: Motion.quick; } animate border-color { duration: Motion.quick; } }
+        }
+        pressed when ta.pressed : {
+            background: Palette.accent; in { animate background { duration: Motion.instant; } }
+        }
+    ]
+
+    // The chevron. `forward` mirrors it, so one path serves both directions.
+    Icon {
+        kind: root.forward ? "chevron" : "back"; size: 15px; color: ta.pressed ? Palette.on-accent : (ta.has-hover ? Palette.accent : Palette.text-dim); x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -673,6 +788,78 @@ component TaskRow inherits Rectangle {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// MonthGrid — the Jalali month as weeks of seven, Saturday first.
+//
+// This is what makes the task list a calendar rather than a list: a day with
+// open work carries a dot, and clicking a square shows that day's tasks. The
+// grid is a list of weeks of seven (Slint's GridLayout has no explicit column
+// count), and the leading blanks come from Rust as cells with day == 0, so the
+// 1st always lands under the right weekday.
+// ───────────────────────────────────────────────────────────────────────────
+component MonthGrid inherits Rectangle {
+    in property <[DayRow]> rows: [];
+    callback picked(string);
+
+    height: rows.length * 34px;
+    background: transparent;
+
+    VerticalLayout {
+        spacing: 2px;
+
+        for r in root.rows : HorizontalLayout {
+            height: 32px;
+            spacing: 2px;
+
+            for c in r.cells : Rectangle {
+                horizontal-stretch: 1;
+                height: 32px;
+                border-radius: 9px;
+                // A day square is a button. The dot says "work here" visually;
+                // the label says it in words, which is the only way a screen
+                // reader can report it at all.
+                accessible-role: button;
+                accessible-label: c.day == 0
+                    ? ""
+                    : (c.label + (c.has-tasks ? ", " + c.open-count : ""));
+                background: c.day == 0
+                    ? transparent
+                    : (c.selected ? Palette.accent : (c.is-today ? Palette.accent-soft : transparent));
+                border-width: c.is-today && !c.selected ? 1px : 0px;
+                border-color: Palette.accent;
+
+                animate background { duration: Motion.quick; }
+
+                if c.day != 0 : Text {
+                    text: c.label;
+                    font-family: "Vazirmatn";
+                    font-size: 12px;
+                    font-weight: c.is-today || c.selected ? 700 : 400;
+                    color: c.selected ? Palette.on-accent : (c.is-today ? Palette.accent : Palette.text);
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                // The dot: this day has open work. A dot rather than a number,
+                // so a full month still reads at a glance.
+                if c.has-tasks : Rectangle {
+                    width: 4px;
+                    height: 4px;
+                    border-radius: 2px;
+                    x: (parent.width - self.width) / 2;
+                    y: parent.height - 7px;
+                    background: c.selected ? Palette.on-accent : Palette.accent;
+                }
+
+                if c.day != 0 : TouchArea {
+                    clicked => { root.picked(c.key); }
+                    mouse-cursor: pointer;
+                }
+            }
+        }
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // SectionLabel — small caps group heading.
 // ───────────────────────────────────────────────────────────────────────────
 component SectionLabel {
@@ -759,8 +946,18 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in property <string> cal-empty: "برای این روز رویدادی ثبت نشده است."; // ---- Reports / status / sync / task input ----
     in property <string> status-line; in property <string> report-text; in property <string> sync-status; in-out property <string> new-task-text; in-out property <string> show-view: "main"; // ---- Settings (edited in the Settings screen) ----
     in-out property <int> work-minutes: 25; in-out property <int> short-break-minutes: 5; in-out property <int> long-break-minutes: 15; in-out property <int> long-break-interval: 4; in-out property <int> daily-goal-minutes: 120; in-out property <bool> auto-start-next: true; in-out property <bool> auto-start-on-launch: false; in-out property <bool> sound-enabled: true; in-out property <string> sound-theme: "santur"; in-out property <bool> hotkey-enabled: true; in-out property <bool> inhibit-enabled: true; in-out property <bool> overlay-enabled: true; in-out property <bool> compact-mode: false; in-out property <bool> animations: true; in-out property <int> sound-volume: 80; in property <string> automation-summary; // ---- Rich data (pushed from Rust) ----
-    in property <[TaskItem]> tasks: []; in property <[float]> week-bars: [0, 0, 0, 0, 0, 0, 0]; in property <[string]> week-labels: ["ش", "ی", "د", "س", "چ", "پ", "ج"]; in property <int> today-sessions: 0; in property <int> today-minutes: 0; in property <int> today-score: 0; in property <int> today-streak: 0; in property <int> today-consistency: 0; in property <int> today-best: 0; in property <int> session-total: 4; in property <int> session-done: 0; in property <int> goal-minutes: 120; in property <int> goal-done-minutes: 0; // ---- Callbacks to Rust ----
-    callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback refresh-events; callback open-url(string); callback window-drag-start; callback set-compact-mode(bool); callback set-animations(bool);
+    in property <[TaskItem]> tasks: []; in property <[DayRow]> month-rows: []; in property <[TaskItem]> day-tasks: []; in property <string> month-title: ""; in property <string> selected-day-title: ""; in property <string> selected-day-sub: ""; in property <bool> selected-is-today: false; in-out property <string> cal-selected: "";
+    // Which task row is open for renaming (its id), or 0 for none. Only one row
+    // can be edited at a time, so this is a single id rather than a set.
+    in-out property <int> editing: 0;
+    // The day navigator on the timer screen: the headline date, a subline with
+    // the day-name and how much work sits on it, and whether it is today.
+    in property <string> day-headline: "";
+    in property <string> day-subline: "";
+    in property <bool> day-is-today: true;
+    in-out property <string> edit-text: "";
+    in property <[float]> week-bars: [0, 0, 0, 0, 0, 0, 0]; in property <[string]> week-labels: ["ش", "ی", "د", "س", "چ", "پ", "ج"]; in property <int> today-sessions: 0; in property <int> today-minutes: 0; in property <int> today-score: 0; in property <int> today-streak: 0; in property <int> today-consistency: 0; in property <int> today-best: 0; in property <int> session-total: 4; in property <int> session-done: 0; in property <int> goal-minutes: 120; in property <int> goal-done-minutes: 0; // ---- Callbacks to Rust ----
+    callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback refresh-events; callback open-url(string); callback window-drag-start; callback set-compact-mode(bool); callback set-animations(bool); callback pick-day(string); callback shift-month(int); callback goto-today; callback add-task-on(string); callback delete-task(int); callback rename-task(int, string); callback move-task(int, int); callback step-day(int);
     // Resize: the edge/corner grab zones report the pointer's screen position
     // and which edge is being dragged; Rust turns that into a new window size.
 
@@ -1056,6 +1253,29 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         text: Digits.pad2(root.time-minutes) + ":" + Digits.pad2(root.time-seconds); font-size: Math.max(34px, Math.min(62px, hero-ring.width * 0.26)); font-weight: 300; letter-spacing: 0.5px; color: Palette.text; horizontal-alignment: center; }
                     Text {
                         text: root.phase; font-size: 11px; color: Palette.text-faint; horizontal-alignment: center; }
+                    // The day's goal, inside the ring rather than in a card of
+                    // its own. It belongs to the timer — it is the same number
+                    // the ring is filling towards — and a separate bar below
+                    // was one more block competing with the clock.
+                    Rectangle { height: 6px; }
+                    HorizontalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: Math.min(hero-ring.width * 0.52, 120px);
+                            height: 3px;
+                            border-radius: 1.5px;
+                            background: Palette.track;
+                            Rectangle {
+                                width: parent.width * clamp(root.goal-done-minutes / max(root.goal-minutes, 1), 0, 1);
+                                height: parent.height;
+                                border-radius: 1.5px;
+                                background: Palette.accent;
+                                animate width { duration: Motion.lazy; easing: ease-out; }
+                            }
+                        }
+                    }
+                    Text {
+                        text: Digits.num(root.goal-done-minutes) + " / " + Digits.num(root.goal-minutes) + " " + Strings.minutes-short; font-size: 9px; color: Palette.text-faint; horizontal-alignment: center; }
                 }
             }
 
@@ -1067,19 +1287,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                 }
             }
 
-            // A lotus-and-bud frieze, after the bands carved along the Apadana
-            // stairways. It separates the hero from the controls the way the
-            // real frieze separates registers on the terrace wall.
-            LotusRow {
-                height: 18px;
-                count: Math.max(7, Math.round(parent.width / 56px));
-                unit: 30px;
-                color: Palette.accent;
-                fade: root.resolved-theme == "light" ? 0.62 : 0.58;
-                x: (parent.width - self.width) / 2;
-            }
-
-            Rectangle { height: 6px; }
+            Rectangle { height: 10px; }
 
             // ---- controls ----
             HorizontalLayout {
@@ -1106,126 +1314,67 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
             Rectangle { height: 16px; }
 
-            // ---- today's Persian date, at a glance ----
+            // ---- the day navigator ----
+            // One block that says which day you are on and lets you walk to any
+            // other. The date reads as a full date with the era year and a
+            // "(today)" marker, the chevrons step a day at a time, and tapping
+            // the date opens the month grid.
             Rectangle {
-                height: 46px;
+                height: 64px;
                 x: 22px;
                 width: parent.width - 22px - 22px;
-                border-radius: 12px;
+                border-radius: 16px;
                 background: Palette.surface;
                 border-width: 1px;
                 border-color: Palette.hairline;
-                ta-date := TouchArea { clicked => { root.open-today(); } }
 
-                VerticalLayout {
-                    padding-left: 12px;
-                    padding-right: 12px;
-                    padding-top: 8px;
-                    padding-bottom: 8px;
-                    spacing: 1px;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 4px;
 
-                    HorizontalLayout {
-                        spacing: 6px;
-                        Text {
-                            text: root.cal-weekday;
-                            font-family: "Vazirmatn";
-                            font-size: 10px;
-                            font-weight: 600;
-                            color: Palette.accent;
-                            vertical-alignment: center;
-                        }
-                        Text {
-                            text: root.cal-date;
-                            font-family: "Vazirmatn";
-                            font-size: 12px;
-                            font-weight: 600;
-                            color: Palette.text;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                        }
-                        if root.cal-feast != "" : Text {
-                            text: Strings.feast-prefix + root.cal-feast;
-                            font-family: "Vazirmatn";
-                            font-size: 9px;
-                            color: Palette.accent;
-                            vertical-alignment: center;
+                    DayStep {
+                        clicked => { root.step-day(-1); }
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: transparent;
+                        ta-day := TouchArea { clicked => { root.open-today(); } }
+
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 1px;
+
+                            Text {
+                                text: root.day-headline;
+                                font-family: "Vazirmatn";
+                                font-size: 15px;
+                                font-weight: 600;
+                                color: Palette.text;
+                                horizontal-alignment: center;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                text: root.day-subline;
+                                font-family: "Vazirmatn";
+                                font-size: 9px;
+                                color: Palette.text-faint;
+                                horizontal-alignment: center;
+                                overflow: elide;
+                            }
                         }
                     }
 
-                    Text {
-                        text: root.cal-day-name + " · " + root.cal-day-index;
-                        font-family: "Vazirmatn";
-                        font-size: 10px;
-                        color: Palette.text-faint;
-                        overflow: elide;
+                    DayStep {
+                        forward: true;
+                        clicked => { root.step-day(1); }
                     }
                 }
             }
 
             Rectangle { height: 10px; }
-
-            // ---- today's progress ----
-            Rectangle {
-                height: 54px;
-                x: 22px;
-                width: parent.width - 22px - 22px;
-                border-radius: 14px;
-                background: Palette.surface;
-                border-width: 1px;
-                border-color: Palette.hairline;
-
-                VerticalLayout {
-                    padding-left: 11px;
-                    padding-right: 14px;
-                    padding-top: 11px;
-                    padding-bottom: 14px;
-                    spacing: 6px;
-
-                    HorizontalLayout {
-                        Text {
-                            text: Strings.today;
-                            font-size: 10px;
-                            font-weight: 700;
-                            letter-spacing: 1.1px;
-                            color: Palette.text-faint;
-                        }
-                        Rectangle { horizontal-stretch: 1; }
-                        Text {
-                            text: Digits.num(root.today-minutes) + " / " + Digits.num(root.goal-minutes) + " " + Strings.minutes-short;
-                            font-size: 11px;
-                            color: Palette.text-dim;
-                        }
-                    }
-
-                    Rectangle {
-                        height: 5px;
-                        border-radius: 2.5px;
-                        background: Palette.track;
-                        Rectangle {
-                            width: parent.width * clamp(root.goal-done-minutes / max(root.goal-minutes, 1), 0, 1);
-                            height: parent.height;
-                            border-radius: 2.5px;
-                            background: Palette.accent;
-                            animate width { duration: Motion.lazy; easing: ease-out; }
-                        }
-                    }
-                }
-            }
-
-            Rectangle { height: 12px; }
-
-            // A winged rule, after the Faravahar's pinions, closing the
-            // summary block before the task list.
-            WingedDivider {
-                height: 10px;
-                x: 30px;
-                width: parent.width - 60px;
-                wing: 40px;
-                color: Palette.accent;
-                fade: root.resolved-theme == "light" ? 0.30 : 0.26;
-            }
-
-            Rectangle { height: 12px; }
 
             // ---- tasks ----
             // A fixed, comfortable height: the list scrolls inside the card, so
@@ -1398,7 +1547,324 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
             Flickable {
                 vertical-stretch: 1; content-height: today-content.preferred-height; interactive: true; today-content := VerticalLayout {
-                    width: parent.width; height: self.preferred-height; padding-left: 18px; padding-right: 18px; padding-bottom: 20px; spacing: 10px; // ---- the date card ----
+                    width: parent.width; height: self.preferred-height; padding-left: 18px; padding-right: 18px; padding-bottom: 20px; spacing: 10px;
+
+                    // ---- the month calendar ----
+                    // The point of the whole screen: pick a day, see that day's
+                    // work, and add to a future day without leaving it.
+                    Rectangle {
+                        height: month-card.preferred-height + 24px;
+                        border-radius: 14px;
+                        background: Palette.surface;
+                        border-width: 1px;
+                        border-color: Palette.hairline;
+
+                        month-card := VerticalLayout {
+                            x: 12px;
+                            y: 12px;
+                            width: parent.width - 24px;
+                            height: self.preferred-height;
+                            spacing: 6px;
+
+                            // month header: back, title, forward, today
+                            HorizontalLayout {
+                                height: 30px;
+                                spacing: 4px;
+
+                                IconButton {
+                                    icon: "back";
+                                    size: 26px;
+                                    icon-size: 13px;
+                                    clicked => { root.shift-month(-1); }
+                                }
+                                Text {
+                                    text: root.month-title;
+                                    font-family: "Vazirmatn";
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                    color: Palette.text;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                IconButton {
+                                    icon: "skip";
+                                    size: 26px;
+                                    icon-size: 13px;
+                                    clicked => { root.shift-month(1); }
+                                }
+                                // Back to today, only when you have wandered off.
+                                if !root.selected-is-today : Rectangle {
+                                    width: 44px;
+                                    height: 24px;
+                                    border-radius: 12px;
+                                    background: Palette.accent-soft;
+                                    y: (parent.height - self.height) / 2;
+                                    ta-today := TouchArea { clicked => { root.goto-today(); } }
+                                    states [
+                                        h when ta-today.has-hover : {
+                                            background: Palette.surface-3;
+                                            in { animate background { duration: Motion.quick; } }
+                                        }
+                                    ]
+                                    Text {
+                                        text: Strings.today;
+                                        font-family: "Vazirmatn";
+                                        font-size: 9px;
+                                        color: Palette.accent;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            // weekday initials, Saturday first
+                            HorizontalLayout {
+                                height: 16px;
+                                for w in ["ش", "ی", "د", "س", "چ", "پ", "ج"] : Text {
+                                    text: w;
+                                    font-family: "Vazirmatn";
+                                    font-size: 9px;
+                                    color: Palette.text-faint;
+                                    horizontal-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+
+                            MonthGrid {
+                                rows: root.month-rows;
+                                picked(k) => { root.pick-day(k); }
+                            }
+                        }
+                    }
+
+                    // ---- the selected day's tasks ----
+                    HorizontalLayout {
+                        height: 22px;
+                        padding-left: 2px;
+                        spacing: 6px;
+                        alignment: start;
+                        Text {
+                            text: root.selected-day-title;
+                            font-family: "Vazirmatn";
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: Palette.text;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: root.selected-day-sub;
+                            font-family: "Vazirmatn";
+                            font-size: 10px;
+                            color: Palette.text-faint;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        Text {
+                            text: Digits.num(root.day-tasks.length);
+                            font-size: 10px;
+                            color: Palette.text-faint;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    if root.day-tasks.length == 0 : Rectangle {
+                        height: 48px;
+                        border-radius: 12px;
+                        background: Palette.surface;
+                        border-width: 1px;
+                        border-color: Palette.hairline;
+                        Text {
+                            text: Strings.tasks-none-day;
+                            font-family: "Vazirmatn";
+                            font-size: 11px;
+                            color: Palette.text-faint;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    for t in root.day-tasks : Rectangle {
+                        height: editing == t.id ? 76px : 42px;
+                        border-radius: 12px;
+                        background: Palette.surface;
+                        border-width: 1px;
+                        border-color: editing == t.id ? Palette.accent : Palette.hairline;
+
+                        animate height { duration: Motion.normal; }
+
+                        VerticalLayout {
+                            padding-left: 12px;
+                            padding-right: 8px;
+                            spacing: 0px;
+
+                            HorizontalLayout {
+                                height: 40px;
+                                spacing: 10px;
+
+                                Rectangle {
+                                    width: 18px;
+                                    height: 18px;
+                                    border-radius: 9px;
+                                    border-width: 1.5px;
+                                    border-color: t.done ? Palette.accent : Palette.surface-3;
+                                    background: t.done ? Palette.accent : transparent;
+                                    y: (parent.height - self.height) / 2;
+                                    transform-scale: t.done ? 1.0 : 0.92;
+                                    animate transform-scale { duration: Motion.normal; easing: ease-out-back; }
+                                    animate background { duration: Motion.normal; }
+
+                                    if t.done : Icon {
+                                        kind: "check";
+                                        size: 10px;
+                                        color: Palette.on-accent;
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                    }
+
+                                    TouchArea { clicked => { root.toggle-task(t.id); } }
+                                }
+
+                                Text {
+                                    text: t.title;
+                                    font-family: "Vazirmatn";
+                                    font-size: 12px;
+                                    color: t.done ? Palette.text-faint : Palette.text;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                    height: parent.height;
+                                    vertical-alignment: center;
+                                    animate color { duration: Motion.normal; }
+                                }
+
+                                if t.time != "" : Text {
+                                    text: t.time;
+                                    font-size: 10px;
+                                    color: Palette.text-faint;
+                                    vertical-alignment: center;
+                                }
+
+                                // ── per-task controls ──
+                                // Nudge the task a day either way, rename it, or
+                                // delete it. These are what make the calendar a
+                                // place to manage work rather than just look at it.
+                                TaskAction {
+                                    icon: "back";
+                                    tip: Strings.move-earlier;
+                                    clicked => { root.move-task(t.id, -1); }
+                                }
+                                TaskAction {
+                                    icon: "skip";
+                                    tip: Strings.move-later;
+                                    clicked => { root.move-task(t.id, 1); }
+                                }
+                                TaskAction {
+                                    icon: "edit";
+                                    tip: Strings.rename;
+                                    clicked => { editing = editing == t.id ? 0 : t.id; }
+                                }
+                                TaskAction {
+                                    icon: "trash";
+                                    tip: Strings.delete;
+                                    destructive: true;
+                                    clicked => { root.delete-task(t.id); }
+                                }
+                            }
+
+                            // The rename field, only for the row being edited.
+                            if editing == t.id : Rectangle {
+                                height: 32px;
+                                border-radius: 9px;
+                                background: Palette.surface-2;
+
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 4px;
+                                    spacing: 4px;
+
+                                    LineEdit {
+                                        text <=> root.edit-text;
+                                        font-size: 12px;
+                                        horizontal-stretch: 1;
+                                        accepted(v) => {
+                                            root.rename-task(t.id, v);
+                                            editing = 0;
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: 26px;
+                                        height: 26px;
+                                        border-radius: 13px;
+                                        background: Palette.accent;
+                                        y: (parent.height - self.height) / 2;
+                                        ta-save := TouchArea {
+                                            clicked => {
+                                                root.rename-task(t.id, root.edit-text);
+                                                editing = 0;
+                                            }
+                                        }
+                                        Icon {
+                                            kind: "check";
+                                            size: 12px;
+                                            color: Palette.on-accent;
+                                            x: (parent.width - self.width) / 2;
+                                            y: (parent.height - self.height) / 2;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ---- add to the selected day ----
+                    Rectangle {
+                        height: 38px;
+                        border-radius: 10px;
+                        background: Palette.surface-2;
+
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 4px;
+                            spacing: 6px;
+
+                            LineEdit {
+                                text <=> root.new-task-text;
+                                placeholder-text: root.selected-is-today
+                                    ? Strings.task-placeholder
+                                    : Strings.task-placeholder-day;
+                                font-size: 12px;
+                                horizontal-stretch: 1;
+                                accepted(t) => {
+                                    root.new-task-text = t;
+                                    root.add-task-on(root.cal-selected);
+                                }
+                            }
+
+                            Rectangle {
+                                width: 28px;
+                                height: 28px;
+                                border-radius: 14px;
+                                background: root.new-task-text != "" ? Palette.accent : Palette.surface-3;
+                                y: (parent.height - self.height) / 2;
+                                ta-add := TouchArea { clicked => { root.add-task-on(root.cal-selected); } }
+                                states [
+                                    h when ta-add.has-hover && root.new-task-text != "" : {
+                                        background: Palette.text;
+                                        in { animate background { duration: Motion.quick; } }
+                                    }
+                                ]
+                                Icon {
+                                    kind: "plus";
+                                    size: 14px;
+                                    color: root.new-task-text != "" ? Palette.on-accent : Palette.text-faint;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                            }
+                        }
+                    }
+
                     Rectangle {
                         height: 146px; border-radius: 14px; background: Palette.surface; border-width: 1px; border-color: Palette.hairline; // era emblem, faint, on the right
                         Rectangle {
