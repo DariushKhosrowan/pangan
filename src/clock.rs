@@ -313,6 +313,12 @@ impl Shared {
         self.lang.lock().unwrap().as_str() == "en"
     }
 
+    /// Whether the UI is currently in English. The tray menu is built outside
+    /// the window and needs the same answer.
+    pub fn lang_is_en(&self) -> bool {
+        self.is_en()
+    }
+
     pub fn snapshot(&self) -> Snapshot {
         let s = self.state.lock().unwrap();
         let secs = s.remaining.as_secs();

@@ -12,13 +12,14 @@ use crate::TrayAction;
 // Linux: ksni
 // ---------------------------------------------------------------------------
 #[cfg(target_os = "linux")]
-pub fn spawn(_shared: Arc<Shared>, tx: Sender<TrayAction>) {
+pub fn spawn(shared: Arc<Shared>, tx: Sender<TrayAction>) {
     use ksni::blocking::TrayMethods;
     use ksni::menu::StandardItem;
     use ksni::{Icon, MenuItem, Tray};
 
     struct PanganTray {
         tx: Sender<TrayAction>,
+        en: bool,
     }
 
     impl Tray for PanganTray {
@@ -42,8 +43,14 @@ pub fn spawn(_shared: Arc<Shared>, tx: Sender<TrayAction>) {
             }]
         }
         fn menu(&self) -> Vec<MenuItem<Self>> {
+            let en = self.en;
             let toggle = StandardItem {
-                label: "آغاز/درنگ".into(),
+                label: if en {
+                    "Start / Pause"
+                } else {
+                    "آغاز/درنگ"
+                }
+                .into(),
                 enabled: true,
                 visible: true,
                 shortcut: vec![vec!["Super".into(), "P".into()]],
@@ -53,21 +60,21 @@ pub fn spawn(_shared: Arc<Shared>, tx: Sender<TrayAction>) {
                 ..Default::default()
             };
             let skip = StandardItem {
-                label: "گذشتن".into(),
+                label: if en { "Skip" } else { "گذشتن" }.into(),
                 activate: Box::new(|tray: &mut Self| {
                     let _ = tray.tx.send(TrayAction::Skip);
                 }),
                 ..Default::default()
             };
             let reset = StandardItem {
-                label: "از نو".into(),
+                label: if en { "Reset" } else { "از نو" }.into(),
                 activate: Box::new(|tray: &mut Self| {
                     let _ = tray.tx.send(TrayAction::Reset);
                 }),
                 ..Default::default()
             };
             let quit = StandardItem {
-                label: "بیرون رفتن".into(),
+                label: if en { "Quit" } else { "بیرون رفتن" }.into(),
                 activate: Box::new(|tray: &mut Self| {
                     let _ = tray.tx.send(TrayAction::Quit);
                 }),
@@ -83,7 +90,8 @@ pub fn spawn(_shared: Arc<Shared>, tx: Sender<TrayAction>) {
         }
     }
 
-    let tray = PanganTray { tx };
+    let en = shared.lang_is_en();
+    let tray = PanganTray { tx, en };
 
     // Run the tray service on a dedicated thread; blocking API.
     std::thread::spawn(move || {
@@ -111,21 +119,26 @@ pub fn spawn(shared: Arc<Shared>, tx: Sender<TrayAction>) {
         Icon, TrayIconBuilder,
     };
 
+    let en = shared.lang_is_en();
     let toggle = MenuItemBuilder::new()
         .id("toggle".into())
-        .text("آغاز/درنگ")
+        .text(if en {
+            "Start / Pause"
+        } else {
+            "آغاز/درنگ"
+        })
         .build();
     let skip = MenuItemBuilder::new()
         .id("skip".into())
-        .text("گذشتن")
+        .text(if en { "Skip" } else { "گذشتن" })
         .build();
     let reset = MenuItemBuilder::new()
         .id("reset".into())
-        .text("از نو")
+        .text(if en { "Reset" } else { "از نو" })
         .build();
     let quit = MenuItemBuilder::new()
         .id("quit".into())
-        .text("بیرون رفتن")
+        .text(if en { "Quit" } else { "بیرون رفتن" })
         .build();
 
     let menu = Menu::new();
