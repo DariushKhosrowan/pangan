@@ -21,7 +21,7 @@
 use crate::gdrive::{self, Tokens};
 use crate::merge;
 use crate::store::Data;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// What happened on the last sync, for the status line.
@@ -46,6 +46,9 @@ pub struct Engine {
     pub enabled: AtomicBool,
     /// Set whenever local data changes, so the timer knows to push.
     pub dirty: AtomicBool,
+    /// How many cycles in a row have failed. The timer backs off on this so a
+    /// dead network does not mean a request every tick.
+    pub consecutive_failures: AtomicUsize,
 }
 
 impl Engine {
@@ -54,6 +57,7 @@ impl Engine {
             state: Mutex::new(SyncState::default()),
             enabled: AtomicBool::new(false),
             dirty: AtomicBool::new(false),
+            consecutive_failures: AtomicUsize::new(0),
         }
     }
 
@@ -244,5 +248,72 @@ mod tests {
         assert!(!e.is_dirty());
         e.mark_dirty();
         assert!(e.is_dirty());
+    }
+
+    /// A real round trip through the engine against a fake Drive: device A
+    /// pushes, device B pulls and ends up with A's data, and a third pass is
+    /// quiet. This is the behaviour the whole feature exists for.
+    ///
+    /// Note the `save` contract: the engine only calls it when the merge
+    /// changed the local copy. A device whose data is already the merged
+    /// result is left alone, which is why A's own snapshot stays authoritative
+    /// for A after its first push.
+    #[test]
+    fn two_devices_converge_through_the_engine() {
+        let _guard = crate::gdrive::drive_roundtrip::DRIVE_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (base, _store) = crate::gdrive::drive_roundtrip::fake_drive_for_tests();
+        std::env::set_var("PANGAN_DRIVE_BASE", &base);
+
+        let mut tokens = Tokens {
+            access_token: "tok".into(),
+            refresh_token: "refresh".into(),
+            expires_at: chrono::Utc::now().timestamp() + 3600,
+            email: "a@example.com".into(),
+        };
+
+        // Device A: one session and one task, nothing remote yet.
+        let a = Data {
+            sessions: vec![SessionRecord { at: 100, minutes: 25 }],
+            tasks: vec![task(1, "write the report", 10)],
+            next_task_id: 2,
+        };
+        let out_a = sync_once(&mut tokens, &a, &mut |_| {}).unwrap();
+        assert!(out_a.pushed, "A must push when the remote is empty");
+        assert!(
+            !out_a.changed_locally,
+            "A's own copy is already the merged result, so it must not be rewritten"
+        );
+
+        // Device B: starts empty and pulls. It must end up with A's data.
+        let b = Data::default();
+        let mut b_now = Data::default();
+        let out_b = sync_once(&mut tokens, &b, &mut |m| b_now = m.clone()).unwrap();
+        assert!(out_b.pulled, "B must pull A's data");
+        assert!(out_b.changed_locally, "B's empty copy must be replaced");
+        assert_eq!(b_now.sessions.len(), 1);
+        assert_eq!(b_now.tasks.len(), 1);
+        assert_eq!(b_now.tasks[0].title, "write the report");
+
+        // B adds a task and pushes.
+        let b2 = Data {
+            tasks: vec![task(1, "write the report", 10), task(2, "review", 20)],
+            next_task_id: 3,
+            ..b_now.clone()
+        };
+        sync_once(&mut tokens, &b2, &mut |_| {}).unwrap();
+
+        // A pulls and must see both tasks, with its own session intact.
+        let mut a_final = Data::default();
+        sync_once(&mut tokens, &a, &mut |m| a_final = m.clone()).unwrap();
+        assert_eq!(a_final.tasks.len(), 2, "A must see B's task");
+        assert_eq!(a_final.sessions.len(), 1, "A's session must survive");
+
+        // A third pass changes nothing: the engine is quiet on stable data.
+        let out_c = sync_once(&mut tokens, &a_final, &mut |_| {}).unwrap();
+        assert!(out_c.quiet(), "a stable state must not push or pull");
+
+        std::env::remove_var("PANGAN_DRIVE_BASE");
     }
 }

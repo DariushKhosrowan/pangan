@@ -891,11 +891,47 @@ fn do_sync(win: &slint::Weak<PanganWindow>, app: &Arc<AppState>) {
                 st.last_ok = chrono::Utc::now().timestamp();
             }
         }
+
+        // Track failure streaks so the timer can back off, and notice a dead
+        // credential: a revoked or expired refresh token can never succeed, so
+        // the right move is to stop syncing and tell the user to sign in again
+        // rather than retry forever behind a status line that says "error".
+        let mut signed_out = false;
+        match &result {
+            Ok(_) => engine
+                .consecutive_failures
+                .store(0, std::sync::atomic::Ordering::Relaxed),
+            Err(e) => {
+                if gdrive::is_auth_error(e) {
+                    signed_out = true;
+                    let _ = sync::clear_tokens();
+                    *app2.tokens.lock().unwrap() = gdrive::Tokens::default();
+                    {
+                        let mut st = app2.settings.lock().unwrap();
+                        st.sync_enabled = false;
+                        st.save();
+                    }
+                } else {
+                    engine
+                        .consecutive_failures
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+        }
+
         *app2.last_sync.lock().unwrap() = status.clone();
 
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(w) = weak.upgrade() {
                 w.set_sync_status(SharedString::from(status));
+                if signed_out {
+                    // Drop the UI back to the signed-out state so the Connect
+                    // button returns. The account is genuinely gone; leaving
+                    // the card showing "Connected" would be a lie.
+                    w.set_sync_signed_in(false);
+                    w.set_sync_auto_on(false);
+                    w.set_sync_account(SharedString::new());
+                }
             }
         });
     });
@@ -1021,7 +1057,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tick_app = Arc::clone(&app);
     let tick_sounds_work = sounds.work.clone();
     let tick_sounds_rest = sounds.rest.clone();
-    let mut last_auto_sync = chrono::Local::now();
+    // Start the clock in the past so the first tick syncs at once. Waiting a
+    // full interval meant a user who opened the app for a minute saw nothing
+    // arrive from their other machine — and then assumed sync was broken.
+    let mut last_auto_sync =
+        chrono::Local::now() - chrono::Duration::seconds(3600);
 
     let timer = Timer::default();
     timer.start(TimerMode::Repeated, Duration::from_millis(300), move || {
@@ -1083,9 +1123,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let settings = tick_app.settings.lock().unwrap().clone();
             let signed_in = !tick_app.tokens.lock().unwrap().is_empty();
             if settings.sync_enabled && signed_in {
-                let interval = settings.sync_interval_secs.max(30);
+                // A failed sync backs off instead of retrying every tick: a
+                // dead network would otherwise mean a request every 300 ms,
+                // which burns battery and hammers Drive for nothing. The
+                // delay doubles up to five minutes and resets on success.
+                let failures = tick_app
+                    .cloud
+                    .consecutive_failures
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                let base = settings.sync_interval_secs.max(30) as i64;
+                let interval = if failures == 0 {
+                    base
+                } else {
+                    (base * (1 << failures.min(4))).min(300)
+                };
                 let due = chrono::Local::now() - last_auto_sync
-                    > chrono::Duration::seconds(interval as i64);
+                    > chrono::Duration::seconds(interval);
                 if tick_app.cloud.take_dirty() || due {
                     last_auto_sync = chrono::Local::now();
                     do_sync(&tick_weak, &tick_app);

@@ -3005,8 +3005,13 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     // device already has a browser. No password ever touches
                     // the app, and no local port has to be reachable.
                     Card {
-                        height: root.sync-signed-in ? 150px : (root.sync-device-code == "" ? (root.sync-available ? 190px : 268px) : 300px);
-                        VerticalLayout {
+                        // Height follows the content. The card has four very
+                        // different states (signed in, ready, waiting for a
+                        // code, no client id) and a fixed height per state was
+                        // wrong every time the copy changed — it clipped the
+                        // console button in the no-client state.
+                        height: sync-col.preferred-height + 28px;
+                        sync-col := VerticalLayout {
                             padding: 14px;
                             spacing: 9px;
 

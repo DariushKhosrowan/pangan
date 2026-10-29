@@ -47,6 +47,47 @@ const USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v3/userinfo";
 const SCOPE: &str =
     "https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.email";
 
+/// Base URL for the Drive API.
+///
+/// Overridable so the round-trip can be tested against a local fake server: the
+/// multipart upload format and the file-id handling are exactly the kind of
+/// thing that looks right and is not, and they can only be checked by actually
+/// speaking the protocol. Production always uses the real host.
+fn drive_base() -> String {
+    std::env::var("PANGAN_DRIVE_BASE")
+        .unwrap_or_else(|_| "https://www.googleapis.com".to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
+/// A shared HTTP agent with real timeouts.
+///
+/// Without this, a stalled connection blocks the calling thread indefinitely.
+/// Sync runs off the UI thread, but a hung request still means the engine's
+/// `busy` flag never clears and every later sync is silently skipped — the app
+/// looks like it is syncing and never is. A global budget turns that into a
+/// plain error the caller can report and retry.
+fn agent() -> ureq::Agent {
+    static ONCE: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new(); ONCE.get_or_init( || {
+        ureq::Agent::new_with_config(
+            ureq::Agent::config_builder()
+                .timeout_global(Some(Duration::from_secs(20)))
+                .timeout_connect(Some(Duration::from_secs(8)))
+                .build(),
+        )
+    })
+    .clone()
+}
+
+/// True when an error means the credential is dead rather than the network.
+///
+/// A revoked or expired refresh token can never succeed by retrying, so the app
+/// must stop and ask the user to sign in again instead of looping on failures
+/// forever. Everything else — a timeout, a 500, no route — is worth retrying.
+pub fn is_auth_error(msg: &str) -> bool {
+    let m = msg.to_ascii_lowercase(); m.contains("invalid_grant") || m.contains("invalid_client") || m.contains("unauthorized") || m.contains("401") || m.contains("no refresh token") || m.contains("sign in again")
+}
+
 /// The file name inside `appDataFolder`.
 const REMOTE_FILE: &str = "pangan-sync.json";
 
@@ -102,7 +143,7 @@ pub fn request_device_code() -> Result<DeviceCode, String> {
         "client_id": client_id(),
         "scope": SCOPE,
     });
-    let resp = ureq::post(DEVICE_CODE_URL)
+    let resp = agent().post(DEVICE_CODE_URL)
         .header("Content-Type", "application/json")
         .send_json(body);
     let text = match resp {
@@ -149,7 +190,7 @@ pub fn poll_token(device_code: &str) -> PollOutcome {
         "device_code": device_code,
         "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
     });
-    let resp = ureq::post(TOKEN_URL)
+    let resp = agent().post(TOKEN_URL)
         .header("Content-Type", "application/json")
         .send_json(body);
     let text = match resp {
@@ -229,7 +270,7 @@ pub fn refresh(tokens: &Tokens) -> Result<Tokens, String> {
         "refresh_token": tokens.refresh_token,
         "grant_type": "refresh_token",
     });
-    let resp = ureq::post(TOKEN_URL)
+    let resp = agent().post(TOKEN_URL)
         .header("Content-Type", "application/json")
         .send_json(body);
     let text = match resp {
@@ -267,7 +308,8 @@ pub fn access_token(tokens: &mut Tokens) -> Result<String, String> {
 
 /// Ask Google which account the token belongs to.
 pub fn fetch_email(token: &str) -> Option<String> {
-    let resp = ureq::get(USERINFO_URL)
+    let resp = agent()
+        .get(USERINFO_URL)
         .header("Authorization", &format!("Bearer {token}"))
         .call()
         .ok()?;
@@ -283,10 +325,11 @@ pub fn fetch_email(token: &str) -> Option<String> {
 /// Find the sync file's id inside `appDataFolder`, if it exists.
 fn find_file(token: &str, name: &str) -> Result<Option<String>, String> {
     let url = format!(
-        "https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&fields=files(id,name)&q=name%20%3D%20%27{}%27",
+        "{}/drive/v3/files?spaces=appDataFolder&fields=files(id,name)&q=name%20%3D%20%27{}%27",
+        drive_base(),
         name
     );
-    let resp = ureq::get(&url)
+    let resp = agent().get(&url)
         .header("Authorization", &format!("Bearer {token}"))
         .call();
     let text = match resp {
@@ -312,8 +355,8 @@ pub fn download_named(token: &str, name: &str) -> Result<Option<String>, String>
     let Some(id) = find_file(token, name)? else {
         return Ok(None);
     };
-    let url = format!("https://www.googleapis.com/drive/v3/files/{id}?alt=media");
-    let resp = ureq::get(&url)
+    let url = format!("{}/drive/v3/files/{id}?alt=media", drive_base());
+    let resp = agent().get(&url)
         .header("Authorization", &format!("Bearer {token}"))
         .call();
     match resp {
@@ -333,8 +376,8 @@ pub fn upload_named(token: &str, name: &str, body: &str) -> Result<(), String> {
         Some(id) => {
             // Content-only update: PATCH the media, leave metadata alone.
             let url =
-                format!("https://www.googleapis.com/upload/drive/v3/files/{id}?uploadType=media");
-            let resp = ureq::patch(&url)
+                format!("{}/upload/drive/v3/files/{id}?uploadType=media", drive_base());
+            let resp = agent().patch(&url)
                 .header("Authorization", &format!("Bearer {token}"))
                 .header("Content-Type", "application/json")
                 .send(body);
@@ -357,8 +400,9 @@ pub fn upload_named(token: &str, name: &str, body: &str) -> Result<(), String> {
                 m = meta,
                 body = body
             );
-            let url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
-            let resp = ureq::post(url)
+            let url = format!("{}/upload/drive/v3/files?uploadType=multipart", drive_base());
+            let resp = agent()
+                .post(&url)
                 .header("Authorization", &format!("Bearer {token}"))
                 .header(
                     "Content-Type",
@@ -438,5 +482,172 @@ mod tests {
             ..Default::default()
         };
         assert!(!t.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::*;
+
+    #[test]
+    fn a_dead_credential_is_told_apart_from_a_network_failure() {
+        // These must stop syncing and ask for a new sign-in: retrying can
+        // never succeed, so the app must not loop on them.
+        assert!(is_auth_error("refresh failed: invalid_grant"));
+        assert!(is_auth_error("invalid_client"));
+        assert!(is_auth_error("no refresh token; sign in again"));
+        assert!(is_auth_error("drive list failed: HTTP 401 Unauthorized"));
+
+        // These are transient and worth retrying.
+        assert!(!is_auth_error("drive download failed: timeout"));
+        assert!(!is_auth_error("drive create HTTP 500"));
+        assert!(!is_auth_error("dns error"));
+    }
+
+    #[test]
+    fn the_agent_is_shared_not_rebuilt_per_request() {
+        // The agent lives in a OnceLock, so every call hands back the same
+        // pooled instance. Building one per request would throw away
+        // connection reuse on every sync.
+        let a = agent();
+        let b = agent();
+        assert!(std::ptr::eq(
+            a.config() as *const _ as *const u8,
+            b.config() as *const _ as *const u8
+        ));
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod drive_roundtrip {
+    use super::*;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
+
+    /// A fake Drive: enough of the protocol to prove the client speaks it.
+    ///
+    /// It keeps one file in memory and answers the calls the client makes:
+    /// list, download, multipart create, media update. The point is to exercise
+    /// the real request shapes, because a multipart body with the wrong
+    /// boundary or a missing `parents` field fails only against a real server,
+    /// never in a test that mocks the function out.
+    /// Serialises the tests that point the client at a fake server.
+    ///
+    /// `PANGAN_DRIVE_BASE` is process-wide, so two such tests running in
+    /// parallel would each see the other's server and fail confusingly. The
+    /// guard makes them run one at a time.
+    pub(crate) static DRIVE_ENV_LOCK: Mutex<()> = Mutex::new(()); pub(crate) fn fake_drive_for_tests() -> (String, Arc<Mutex<Option<String>>>) {
+        fake_drive()
+    }
+
+    fn fake_drive() -> (String, Arc<Mutex<Option<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let stored: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let store = Arc::clone(&stored);
+
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+
+                let mut request_line = String::new();
+                if reader.read_line(&mut request_line).is_err() {
+                    continue;
+                }
+                let mut content_length = 0usize;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                        break;
+                    }
+                    if line == "\r\n" || line == "\n" {
+                        break;
+                    }
+                    let lower = line.to_ascii_lowercase();
+                    if let Some(v) = lower.strip_prefix("content-length:") {
+                        content_length = v.trim().parse().unwrap_or(0);
+                    }
+                }
+                let mut body = vec![0u8; content_length];
+                if content_length > 0 {
+                    let _ = reader.read_exact(&mut body);
+                }
+                let body = String::from_utf8_lossy(&body).to_string();
+
+                let path = request_line.split_whitespace().nth(1).unwrap_or("/");
+
+                // Order matters: "/upload/drive/v3/files?..." also contains
+                // "/drive/v3/files?", so the upload cases must come first or a
+                // create is answered as a list and silently stores nothing.
+                let (status, payload) = if path.contains("uploadType=multipart") {
+                    // The content is the last part of the multipart body.
+                    let after_meta = body.find("\r\n\r\n").map(|i| i + 4).unwrap_or(0);
+                    let rest = &body[after_meta..];
+                    let content = rest
+                        .find("\r\n\r\n")
+                        .map(|i| rest[i + 4..].to_string())
+                        .unwrap_or_default();
+                    let content = content
+                        .rsplit_once("\r\n--")
+                        .map(|(c, _)| c.to_string())
+                        .unwrap_or(content);
+                    *store.lock().unwrap() = Some(content);
+                    ("200 OK", r#"{"id":"file-1"}"#.to_string())
+                } else if path.contains("uploadType=media") {
+                    *store.lock().unwrap() = Some(body);
+                    ("200 OK", r#"{"id":"file-1"}"#.to_string())
+                } else if path.contains("alt=media") {
+                    match store.lock().unwrap().clone() {
+                        Some(data) => ("200 OK", data),
+                        None => ("404 Not Found", String::new()),
+                    }
+                } else if path.contains("/drive/v3/files?") {
+                    if store.lock().unwrap().is_some() {
+                        (
+                            "200 OK",
+                            r#"{"files":[{"id":"file-1","name":"pangan-sync.json"}]}"#.to_string(),
+                        )
+                    } else {
+                        ("200 OK", r#"{"files":[]}"#.to_string())
+                    }
+                } else {
+                    ("404 Not Found", String::new())
+                };
+
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                    payload.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+
+        (format!("http://{addr}"), stored)
+    }
+
+    #[test]
+    fn upload_then_download_returns_exactly_what_was_sent() {
+        let _guard = DRIVE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let (base, _store) = fake_drive();
+        std::env::set_var("PANGAN_DRIVE_BASE", &base);
+
+        let payload = r#"{"sessions":[],"tasks":[],"next_task_id":1}"#;
+
+        // Nothing there yet.
+        assert_eq!(download("tok").unwrap(), None);
+
+        // Create, then read it back byte for byte.
+        upload("tok", payload).unwrap();
+        assert_eq!(download("tok").unwrap().as_deref(), Some(payload));
+
+        // Update in place: the second upload must not create a second file.
+        let payload2 = r#"{"sessions":[],"tasks":[],"next_task_id":9}"#;
+        upload("tok", payload2).unwrap();
+        assert_eq!(download("tok").unwrap().as_deref(), Some(payload2));
+
+        std::env::remove_var("PANGAN_DRIVE_BASE");
     }
 }
