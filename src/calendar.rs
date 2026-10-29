@@ -6,7 +6,31 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Persian month names, in order.
+///
+/// These are the Middle Persian (Pahlavi) forms, not the modern New Persian
+/// ones. The app is a heritage calendar, so the month is called امرداد rather
+/// than مرداد, and سپندارمذ rather than اسفند — the same names the Zoroastrian
+/// and Sasanian calendars used. The New Persian spellings are kept in
+/// MONTHS_NEW_PERSIAN for anything that needs to look a page up by the modern
+/// name (the Wikipedia fetch does: those pages are titled مرداد, not امرداد).
 pub const MONTHS: [&str; 12] = [
+    "فروردین",
+    "اردیبهشت",
+    "خرداد",
+    "تیر",
+    "امرداد",
+    "شهریور",
+    "مهر",
+    "آبان",
+    "آذر",
+    "دی",
+    "بهمن",
+    "سپندارمذ",
+];
+
+/// The modern New Persian spellings, used only to address Wikipedia pages,
+/// which are titled with the modern forms. Never shown to the user.
+pub const MONTHS_NEW_PERSIAN: [&str; 12] = [
     "فروردین",
     "اردیبهشت",
     "خرداد",
@@ -166,6 +190,74 @@ const MONTH_FEASTS: [&str; 12] = [
     "بهمنگان",
     "سپندارمذگان",
 ];
+
+/// Festivals that do not fall on a namesake day.
+///
+/// The twelve name-day feasts (Tirgan, Mehregan, and the rest) are derived
+/// from MONTH_NAME_DAY and need no entry here. What is listed here is the
+/// handful of festivals that are fixed to a month-day for other reasons.
+///
+/// The six Gahambars are deliberately *not* here. They are five-day windows
+/// rather than single days, and the Shahenshahi and Kadmi variants of the
+/// Zoroastrian calendar shift them by months, so pinning them to one Jalali
+/// month-day would be wrong more often than right.
+///
+/// `(month, day, name, note)`. The note is a one-line gloss, shown under the
+/// name; keep it short — it is a caption, not an article.
+const FIXED_FEASTS: [(u32, u32, &str, &str); 7] = [
+    // ── Nowruz and the days that follow it ──
+    (1, 1, "نوروز", "سرآغاز سال نو و جشن بهار"),
+    (1, 2, "نوروز", "دومین روز نوروز"),
+    (1, 3, "نوروز", "سومین روز نوروز"),
+    (1, 4, "نوروز", "چهارمین روز نوروز"),
+    (1, 6, "زایش زرتشت", "به روایتی زادروز اشو زرتشت"),
+    (1, 13, "سیزده‌به‌در", "روز طبیعت و پایان جشن‌های نوروز"),
+    // ── Sadeh: the mid-winter fire festival, fifty days before Nowruz ──
+    (11, 10, "سده", "جشن آتش در میانهٔ زمستان"),
+];
+
+/// The era year: the count of years since the founding of the Iranian
+/// kingdom, which is the reckoning this calendar uses instead of the Hijri
+/// Solar year.
+///
+/// The epoch is 559 BC, the accession of Cyrus the Great — the point at which
+/// Iran becomes a kingdom in the record. So 1405 SH (the Jalali year this app
+/// computes) is 2585 in the era count: 1405 + 1180 = 2585.
+///
+/// This is a display conversion only. All the arithmetic stays in Jalali,
+/// because that is the calendar the day boundaries and leap years follow; the
+/// era year is the label put on the result.
+pub const ERA_EPOCH_OFFSET: i32 = 1180;
+
+/// The era year for a Jalali year.
+pub fn era_year(jy: i32) -> i32 {
+    jy + ERA_EPOCH_OFFSET
+}
+
+/// A festival falling on a given month-day, if any.
+///
+/// Name-day feasts are derived from the day-name table; the fixed festivals
+/// are looked up in FIXED_FEASTS. A day can be both, in which case the
+/// name-day feast is the more specific answer and wins.
+pub fn feast_on(month: u32, day: u32) -> Option<(&'static str, &'static str)> {
+    let m = (month as usize).clamp(1, 12) - 1;
+
+    // A fixed festival first: these carry a note, which the name-day feasts
+    // do not have.
+    if let Some(&(_, _, name, note)) = FIXED_FEASTS
+        .iter()
+        .find(|&&(fm, fd, _, _)| fm == month && fd == day)
+    {
+        return Some((name, note));
+    }
+
+    // Otherwise the name-day feast, if this is the namesake day.
+    if MONTH_NAME_DAY[m] == day {
+        return Some((MONTH_FEASTS[m], ""));
+    }
+
+    None
+}
 
 /// The day of the month on which each month's namesake day falls.
 /// (The day-name index that equals the month's own name.)
@@ -493,5 +585,78 @@ mod tests {
     fn weekday_is_correct() {
         // 20 March 2024 was a Wednesday -> چهارشنبه
         assert_eq!(weekday_name(1403, 1, 1), "چهارشنبه");
+    }
+}
+
+#[cfg(test)]
+mod era_tests {
+    use super::*;
+    #[test]
+    fn era_year_counts_from_cyrus() {
+        // 1405 SH is the year this app runs in; the era count is 2585.
+        assert_eq!(era_year(1405), 2585); // The epoch itself: 559 BC is year 1 of the count.
+        assert_eq!(era_year(-559), 621);
+    }
+
+    #[test]
+    fn month_names_use_the_ancient_forms() {
+        assert_eq!(MONTHS[4], "امرداد");
+        assert_eq!(MONTHS[11], "سپندارمذ"); // The modern spellings are still available for Wikipedia lookups.
+        assert_eq!(MONTHS_NEW_PERSIAN[4], "مرداد");
+        assert_eq!(MONTHS_NEW_PERSIAN[11], "اسفند");
+    }
+
+    #[test]
+    fn festivals_are_found() {
+        // Nowruz, the first day of the year.
+        assert_eq!(feast_on(1, 1).map(|f| f.0), Some("نوروز")); // Tirgan: the name-day feast of Tir, on Tir-ruz in Tir-mah.
+        assert_eq!(feast_on(4, 13).map(|f| f.0), Some("تیرگان")); // Mehregan: Mehr-ruz in Mehr-mah.
+        assert_eq!(feast_on(7, 16).map(|f| f.0), Some("مهرگان")); // Sadeh, the mid-winter fire festival.
+        assert_eq!(feast_on(11, 10).map(|f| f.0), Some("سده")); // An ordinary day is not a festival.
+        assert_eq!(feast_on(2, 11), None);
+    }
+
+    #[test]
+    fn festivals_carry_a_note() {
+        let (_, note) = feast_on(1, 1).unwrap();
+        assert!(!note.is_empty(), "Nowruz should explain itself");
+    }
+}
+
+#[cfg(test)]
+mod display_tests {
+    use super::*;
+
+    /// What the calendar screen actually puts on the date line, for today.
+    #[test]
+    fn today_reads_in_the_era_reckoning() {
+        let (jy, jm, jd) = today();
+        let era = era_year(jy);
+        let month = MONTHS[(jm as usize).clamp(1, 12) - 1];
+        let line = format!("{} {} {}", fa_num(jd as i64), month, fa_num(era as i64));
+        println!("date line: {line}  (jalali {jy}-{jm}-{jd}, era {era})");
+        assert_eq!(era, 2585, "expected the era year 2585 in 2026");
+        assert!(
+            line.contains("۲۵۸۵"),
+            "date line should carry the era year: {line}"
+        );
+    }
+
+    #[test]
+    fn every_festival_is_reachable_and_named() {
+        let mut found = 0;
+        for m in 1..=12u32 {
+            for d in 1..=31u32 {
+                if let Some((name, _)) = feast_on(m, d) {
+                    assert!(!name.is_empty());
+                    found += 1;
+                }
+            }
+        }
+        println!("festival days in the year: {found}");
+        assert!(
+            found >= 18,
+            "expected at least 18 festival days, got {found}"
+        );
     }
 }

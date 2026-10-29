@@ -218,15 +218,19 @@ fn refresh_calendar(win: &PanganWindow, app: &AppState) {
     };
     let day = calendar::day_name(jm, jd);
 
-    // The date line: Persian digits for Persian, plain digits for English.
+    // The date line. The year is the era count — years since the founding of
+    // the Iranian kingdom — not the Hijri Solar year, which is the reckoning
+    // this calendar deliberately replaces. The Jalali year is still what drives
+    // all the arithmetic; only the label changes.
+    let era = calendar::era_year(jy);
     let date_line = if en {
-        format!("{jd} {month_name} {jy}")
+        format!("{jd} {month_name} {era}")
     } else {
         format!(
             "{} {} {}",
             calendar::fa_num(jd as i64),
             month_name,
-            calendar::fa_num(jy as i64)
+            calendar::fa_num(era as i64)
         )
     };
     win.set_cal_date(SharedString::from(date_line));
@@ -246,7 +250,16 @@ fn refresh_calendar(win: &PanganWindow, app: &AppState) {
     } else {
         format!("روز {} ماه", calendar::ordinal_fa(jd))
     }));
-    win.set_cal_feast(SharedString::from(day.feast.unwrap_or("")));
+
+    // The festival for today, with its one-line gloss. This covers the fixed
+    // festivals (Nowruz, the six Gahambars, the fire and water feasts) as well
+    // as the twelve name-day ones, so a day that is a festival at all says so.
+    let (feast_name, feast_note) = match calendar::feast_on(jm, jd) {
+        Some((name, note)) => (name, note),
+        None => ("", ""),
+    };
+    win.set_cal_feast(SharedString::from(feast_name));
+    win.set_cal_feast_note(SharedString::from(feast_note));
 
     let month_len = calendar::month_len(jy, jm);
     win.set_cal_month_progress(SharedString::from(if en {

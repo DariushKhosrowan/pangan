@@ -750,6 +750,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in property <string> cal-day-name: "";    // "خور" — the Sasanian day-name
     in property <string> cal-day-index: "";   // "روز یازدهم ماه"
     in property <string> cal-feast: "";       // "مهرگان" or empty
+    in property <string> cal-feast-note: "";  // one-line gloss under the name
     in property <string> cal-month-progress: ""; // "روز ۱۲ از ۳۰"
     in property <[CalEvent]> cal-events: [];
     in property <[CalEvent]> cal-world: [];
@@ -1436,11 +1437,19 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                     // ---- feast badge, only when today is one ----
                     if root.cal-feast != "" : Rectangle {
-                        height: 46px; border-radius: 12px; background: Palette.surface-2; border-width: 1px; border-color: Palette.hairline; HorizontalLayout {
+                        height: root.cal-feast-note != "" ? 62px : 46px;
+                        border-radius: 12px; background: Palette.surface-2; border-width: 1px; border-color: Palette.hairline; HorizontalLayout {
                             padding-left: 14px; padding-right: 14px; spacing: 8px; alignment: start; Boteh {
                                 size: 20px; y: (parent.height - self.height) / 2; color: Palette.accent; fade: 0.9; }
-                            Text {
-                                text: Strings.feast-prefix + root.cal-feast; font-family: "Vazirmatn"; font-size: 13px; font-weight: 600; color: Palette.text; vertical-alignment: center; }
+                            VerticalLayout {
+                                vertical-stretch: 0;
+                                alignment: center;
+                                spacing: 1px;
+                                Text {
+                                    text: Strings.feast-prefix + root.cal-feast; font-family: "Vazirmatn"; font-size: 13px; font-weight: 600; color: Palette.text; vertical-alignment: center; }
+                                if root.cal-feast-note != "" : Text {
+                                    text: root.cal-feast-note; font-family: "Vazirmatn"; font-size: 10px; color: Palette.text-faint; overflow: elide; }
+                            }
                         }
                     }
 

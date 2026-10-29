@@ -155,8 +155,13 @@ export global Strings {
         ? "شاهنشاهی ساسانی؛ سیم‌رغ و زنگار، اوج هنر و دیوان‌سالاری ایرانی."
         : "The Sasanian Empire; simurgh roundels and verdigris, the height of Iranian art and administration.";
 
-    out property <string> heritage-title: fa ? "شاهنشاهی ایران" : "Iranian Empire";
+    // The calendar's own name. The old pair of strings here was
+    // "شاهنشاهی ایران · هزار سال فرمانروایی پیش از اسلام", which was both
+    // inaccurate (Iranian rule runs well past a thousand years) and too long
+    // to sit under the date without crowding it. This says what the calendar
+    // is, in four words.
+    out property <string> heritage-title: fa ? "گاه‌شمار پادشاهی ایران" : "Chronicle of the Iranian Kingdom";
     out property <string> heritage-sub: fa
-        ? "هزار سال فرمانروایی پیش از اسلام"
-        : "A thousand years of pre-Islamic rule";
+        ? "از کوروش بزرگ تا امروز"
+        : "From Cyrus the Great to the present";
 }
