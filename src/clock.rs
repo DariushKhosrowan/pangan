@@ -64,6 +64,10 @@ impl Phase {
 #[derive(Clone, Debug)]
 pub struct Snapshot {
     pub time: String,
+    /// Remaining time split out, so the UI can render Persian numerals
+    /// without having to parse "MM:SS" back apart.
+    pub minutes: u32,
+    pub seconds: u32,
     pub session: String,
     pub progress: f32,
     pub phase: String,
@@ -262,6 +266,8 @@ impl Shared {
         };
         Snapshot {
             time,
+            minutes: (secs / 60) as u32,
+            seconds: (secs % 60) as u32,
             session: s.phase.label().to_string(),
             progress: progress.clamp(0.0, 1.0),
             phase: if s.running { "روان" } else { "درنگ" }.to_string(),

@@ -1,0 +1,169 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// ring.slint — the hero timer, built as the winged solar disc.
+//
+// The progress ring is not a plain stroke. It is the Achaemenid sun disc
+// rebuilt as geometry:
+//
+//   • a corona of radiating rays around the ring, which stand up one by one as
+//     the session advances, so the sun visibly "rises" as you work;
+//   • a gilded arc that fills clockwise from 12 o'clock;
+//   • a pair of stylised wings that spread wider the deeper the session runs.
+//
+// Everything is drawn from primitives and path strings, so it stays crisp at
+// any size and carries no image asset. Slint has no `transform` in this
+// version and no recursion in pure functions, so the rays are emitted as one
+// path string from a straight-line helper.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── geometry helpers ──────────────────────────────────────────────────────
+// All of these work in a 100×100 viewbox and are scaled by the Path element.
+global SunGeom {
+    // One ray from r1 to r2 at ray i of n, lit only if the sweep has passed it.
+    // Lit rays reach further out than unlit ones, so the corona visibly rises
+    // as the session advances instead of just changing colour.
+    public pure function ray(i: int, n: int, prog: float, r1: float, r2: float) -> string {
+        return (i * 1.0 / n) < prog
+            ? "M " + (50 + r1 * sin(360deg * (i * 1.0 / n))) + " " + (50 - r1 * cos(360deg * (i * 1.0 / n)))
+              + " L " + (50 + r2 * sin(360deg * (i * 1.0 / n))) + " " + (50 - r2 * cos(360deg * (i * 1.0 / n))) + " "
+            : "M " + (50 + (r1 + (r2 - r1) * 0.55) * sin(360deg * (i * 1.0 / n))) + " " + (50 - (r1 + (r2 - r1) * 0.55) * cos(360deg * (i * 1.0 / n)))
+              + " L " + (50 + r2 * sin(360deg * (i * 1.0 / n))) + " " + (50 - r2 * cos(360deg * (i * 1.0 / n))) + " ";
+    }
+
+    // The full corona: 48 rays. Written out because Slint pure functions
+    // cannot recurse and there is no loop inside a function.
+    public pure function corona(prog: float, r1: float, r2: float) -> string {
+        return ray(0, 48, prog, r1, r2) + ray(1, 48, prog, r1, r2) + ray(2, 48, prog, r1, r2)
+             + ray(3, 48, prog, r1, r2) + ray(4, 48, prog, r1, r2) + ray(5, 48, prog, r1, r2)
+             + ray(6, 48, prog, r1, r2) + ray(7, 48, prog, r1, r2) + ray(8, 48, prog, r1, r2)
+             + ray(9, 48, prog, r1, r2) + ray(10, 48, prog, r1, r2) + ray(11, 48, prog, r1, r2)
+             + ray(12, 48, prog, r1, r2) + ray(13, 48, prog, r1, r2) + ray(14, 48, prog, r1, r2)
+             + ray(15, 48, prog, r1, r2) + ray(16, 48, prog, r1, r2) + ray(17, 48, prog, r1, r2)
+             + ray(18, 48, prog, r1, r2) + ray(19, 48, prog, r1, r2) + ray(20, 48, prog, r1, r2)
+             + ray(21, 48, prog, r1, r2) + ray(22, 48, prog, r1, r2) + ray(23, 48, prog, r1, r2)
+             + ray(24, 48, prog, r1, r2) + ray(25, 48, prog, r1, r2) + ray(26, 48, prog, r1, r2)
+             + ray(27, 48, prog, r1, r2) + ray(28, 48, prog, r1, r2) + ray(29, 48, prog, r1, r2)
+             + ray(30, 48, prog, r1, r2) + ray(31, 48, prog, r1, r2) + ray(32, 48, prog, r1, r2)
+             + ray(33, 48, prog, r1, r2) + ray(34, 48, prog, r1, r2) + ray(35, 48, prog, r1, r2)
+             + ray(36, 48, prog, r1, r2) + ray(37, 48, prog, r1, r2) + ray(38, 48, prog, r1, r2)
+             + ray(39, 48, prog, r1, r2) + ray(40, 48, prog, r1, r2) + ray(41, 48, prog, r1, r2)
+             + ray(42, 48, prog, r1, r2) + ray(43, 48, prog, r1, r2) + ray(44, 48, prog, r1, r2)
+             + ray(45, 48, prog, r1, r2) + ray(46, 48, prog, r1, r2) + ray(47, 48, prog, r1, r2);
+    }
+
+    // The gilded arc, from 12 o'clock clockwise. A full circle needs two
+    // half-arcs because an SVG arc cannot sweep 360 degrees in one command.
+    public pure function arc(prog: float, r: float) -> string {
+        return prog <= 0
+            ? ""
+            : prog >= 0.9999
+            ? "M 50 " + (50 - r) + " A " + r + " " + r + " 0 1 1 50 " + (50 + r) + " A " + r + " " + r + " 0 1 1 50 " + (50 - r)
+            : "M 50 " + (50 - r)
+              + " A " + r + " " + r + " 0 " + (prog > 0.5 ? 1 : 0) + " 1 "
+              + (50 + r * sin(360deg * prog)) + " " + (50 - r * cos(360deg * prog));
+    }
+
+    // One wing feather: a tapering bar sweeping outward from the ring.
+    // `spread` grows with progress, so the wings open as the session runs.
+    // Kept short and swept upward: the pinions sit beside the disc, they do
+    // not run past it.
+    public pure function feather(f: int, spread: float, r: float, sign: float) -> string {
+        return "M " + (50 + sign * (r + 1.5)) + " " + (50 - 6 + f * 5.5)
+             + " L " + (50 + sign * (r + 1.5 + spread * (1.0 - f * 0.22))) + " " + (50 - 6 + f * 5.5 - 1.5 - f * 1.2) + " ";
+    }
+
+    public pure function wings(spread: float, r: float) -> string {
+        return feather(0, spread, r, -1) + feather(1, spread, r, -1) + feather(2, spread, r, -1)
+             + feather(0, spread, r, 1) + feather(1, spread, r, 1) + feather(2, spread, r, 1);
+    }
+}
+
+// ── the ring ──────────────────────────────────────────────────────────────
+export component SunRing {
+    in property <float> progress: 0;
+    in property <length> d: 236px;
+    in property <length> t: 7px;
+    in property <bool> glow: false;
+    in property <brush> track-color: #232833;
+    in property <brush> fill-color: #D6A84E;
+
+    width: d;
+    height: d;
+
+    // A soft disc of light behind everything, only while running.
+    if glow : Rectangle {
+        width: parent.width * 0.86;
+        height: parent.height * 0.86;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: self.width / 2;
+        background: fill-color;
+        opacity: 0.055;
+    }
+
+    // The corona — rays standing up as the sweep passes them.
+    // Two passes: a faint full ring, then the lit rays drawn bright on top.
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        commands: SunGeom.corona(root.progress, 44.0, 49.5);
+        stroke: fill-color;
+        stroke-width: 0.55px;
+        stroke-line-cap: round;
+        fill: transparent;
+        opacity: 0.30;
+    }
+
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        commands: SunGeom.corona(root.progress, 41.5, 50.5);
+        stroke: fill-color;
+        stroke-width: 0.9px;
+        stroke-line-cap: round;
+        fill: transparent;
+        opacity: 0.85;
+    }
+
+    // The track — a true stroked circle, continuous at any size.
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: self.width / 2;
+        background: transparent;
+        border-width: root.t;
+        border-color: root.track-color;
+    }
+
+    // The gilded arc.
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        commands: SunGeom.arc(root.progress, 42);
+        stroke: fill-color;
+        stroke-width: 4.2px;
+        stroke-line-cap: round;
+        fill: transparent;
+    }
+
+    // The wings — the Faravahar's pinions, tucked beside the disc and
+    // spreading only a little with progress. Short on purpose: they are a
+    // whisper of the emblem, not a second ring.
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        commands: SunGeom.wings(3 + root.progress * 4, 42);
+        stroke: fill-color;
+        stroke-width: 0.8px;
+        stroke-line-cap: round;
+        fill: transparent;
+        opacity: 0.22 + root.progress * 0.18;
+    }
+}

@@ -83,6 +83,9 @@ pub fn clean(text: &str) -> String {
     t = strip_external_links(&t);
     // [[target|label]] -> label ; [[target]] -> target
     t = resolve_links(&t);
+    // Safety net: a malformed or truncated entry can still leave a bare
+    // marker behind. The UI shows plain prose, so no bracket pair survives.
+    t = t.replace("[[", "").replace("]]", "");
     // remaining tags
     t = strip_tags(&t);
     t = t.replace("'''", "").replace("''", "");
@@ -236,7 +239,17 @@ fn resolve_links(s: &str) -> String {
                 }
                 rest = &rest[i + j + 2..];
             }
-            None => return out,
+            None => {
+                // An unclosed link: Wikipedia truncates long entries mid-markup,
+                // so this is common. Drop the opening marker and keep the text
+                // rather than swallowing the rest of the sentence.
+                let tail = &rest[i + 2..];
+                out.push_str(match tail.split_once('|') {
+                    Some((_, label)) => label,
+                    None => tail,
+                });
+                return out;
+            }
         }
     }
     out.push_str(rest);
@@ -517,6 +530,24 @@ fn events_section_all_lists(html: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unclosed_link_keeps_its_text() {
+        // Wikipedia truncates long entries mid-markup, so an opening [[ with no
+        // closing ]] is common. It used to swallow the rest of the sentence.
+        let s = clean("۱۳۷۹ - [[وزارت جهاد کشاورزی|تصویب لایحه ادغام وزارت جهاد سازندگی");
+        assert!(!s.contains("[["), "marker leaked: {s:?}");
+        assert!(s.contains("تصویب لایحه ادغام"), "text was dropped: {s:?}");
+        assert!(s.starts_with("۱۳۷۹"), "prefix lost: {s:?}");
+    }
+
+    #[test]
+    fn no_bracket_marker_survives_clean() {
+        for raw in ["a [[b", "a [[b]] c", "x [[y|z", "[[", "]]"] {
+            let s = clean(raw);
+            assert!(!s.contains("[[") && !s.contains("]]"), "leaked from {raw:?}: {s:?}");
+        }
+    }
 
     #[test]
     fn extracts_items_from_rendered_html() {

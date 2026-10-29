@@ -192,3 +192,219 @@ component EmblemField {
 }
 
 export { Shahbaz, Faravahar, Derafsh, Senmurv, Boteh, BotehDivider, EmblemField }
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Ornament — drawn geometry from Achaemenid and Sasanian architecture.
+//
+// These are NOT Islamic patterns. Every shape here comes from Persepolis or a
+// Sasanian relief:
+//
+//   SteppedCrenellation  the stepped merlon of Persepolis parapets (the
+//                        "crenellated" skyline of the Apadana terrace).
+//   LotusRow             the lotus-and-bud frieze that bands Persepolis walls.
+//   WingedDivider        a hairline rule that opens into a shallow wing, after
+//                        the Faravahar's outstretched pinions.
+//   ArchFrame            a rounded Sasanian arch (the Taq-e Kasra profile),
+//                        used as a soft header behind numerals.
+//
+// All four are drawn from primitives — no image assets, crisp at any size.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// The stepped merlon of Persepolis. Drawn as a staircase of rectangles so it
+// stays crisp at any size and needs no image asset.
+component SteppedCrenellation {
+    in property <int> count: 12;
+    in property <length> unit: 10px;   // width of one merlon
+    in property <brush> color: #D6A84E;
+    in property <float> fade: 0.5;
+
+    height: unit * 1.6;
+    width: count * unit;
+
+    for i in root.count : Rectangle {
+        x: i * root.unit;
+        width: root.unit;
+        height: parent.height;
+        background: transparent;
+
+        // Three steps up, then a flat cap: the Persepolis profile.
+        Rectangle {
+            x: 0px;
+            y: parent.height - parent.height * 0.30;
+            width: parent.width;
+            height: parent.height * 0.30;
+            background: root.color;
+            opacity: root.fade;
+        }
+        Rectangle {
+            x: parent.width * 0.18;
+            y: parent.height - parent.height * 0.62;
+            width: parent.width * 0.64;
+            height: parent.height * 0.32;
+            background: root.color;
+            opacity: root.fade;
+        }
+        Rectangle {
+            x: parent.width * 0.34;
+            y: 0px;
+            width: parent.width * 0.32;
+            height: parent.height * 0.38;
+            background: root.color;
+            opacity: root.fade;
+        }
+    }
+}
+
+// Lotus-and-bud frieze: alternating open lotus and closed bud, as carved along
+// the Apadana stairways.
+component LotusRow {
+    in property <int> count: 9;
+    in property <length> unit: 16px;
+    in property <brush> color: #D6A84E;
+    in property <float> fade: 0.45;
+
+    height: unit;
+    width: count * unit;
+
+    for i in root.count : Rectangle {
+        x: i * root.unit;
+        width: root.unit;
+        height: parent.height;
+        background: transparent;
+
+        // Open lotus: three petals fanning from a base point.
+        if Math.mod(i, 2) == 0 : Rectangle {
+            width: parent.width * 0.62;
+            height: parent.height * 0.72;
+            x: (parent.width - self.width) / 2;
+            y: parent.height - self.height;
+            background: transparent;
+
+            // Centre petal.
+            Rectangle {
+                width: parent.width * 0.34;
+                height: 100%;
+                x: (parent.width - self.width) / 2;
+                border-radius: self.width / 2;
+                background: root.color;
+                opacity: root.fade;
+            }
+            // Left petal.
+            Rectangle {
+                width: parent.width * 0.26;
+                height: 78%;
+                x: parent.width * 0.02;
+                y: parent.height * 0.22;
+                border-radius: self.width / 2;
+                background: root.color;
+                opacity: root.fade * 0.8;
+            }
+            // Right petal.
+            Rectangle {
+                width: parent.width * 0.26;
+                height: 78%;
+                x: parent.width - self.width - parent.width * 0.02;
+                y: parent.height * 0.22;
+                border-radius: self.width / 2;
+                background: root.color;
+                opacity: root.fade * 0.8;
+            }
+        }
+
+        // Closed bud: a single narrow teardrop between the lotuses.
+        if Math.mod(i, 2) == 1 : Rectangle {
+            width: parent.width * 0.22;
+            height: parent.height * 0.55;
+            x: (parent.width - self.width) / 2;
+            y: parent.height - self.height;
+            border-radius: self.width / 2;
+            background: root.color;
+            opacity: root.fade * 0.65;
+        }
+    }
+}
+
+// A hairline that opens into a shallow wing, after the Faravahar's pinions.
+component WingedDivider {
+    in property <brush> color: #D6A84E;
+    in property <float> fade: 0.5;
+    in property <length> wing: 46px;
+
+    height: 10px;
+
+    // Left hairline.
+    Rectangle {
+        x: 0px;
+        y: (parent.height - self.height) / 2;
+        width: (parent.width - root.wing * 2) / 2;
+        height: 1px;
+        background: root.color;
+        opacity: root.fade * 0.5;
+    }
+
+    // Left wing: three tapering bars sweeping up to the centre.
+    for i in 3 : Rectangle {
+        x: (parent.width - root.wing * 2) / 2 + i * root.wing * 0.30;
+        y: (parent.height - self.height) / 2 - i * 1.6px;
+        width: root.wing * 0.34;
+        height: 1px;
+        background: root.color;
+        opacity: root.fade * (0.75 - i * 0.18);
+    }
+
+    // Right wing, mirrored.
+    for i in 3 : Rectangle {
+        x: (parent.width + root.wing * 2) / 2 - root.wing * 0.34 - i * root.wing * 0.30;
+        y: (parent.height - self.height) / 2 - i * 1.6px;
+        width: root.wing * 0.34;
+        height: 1px;
+        background: root.color;
+        opacity: root.fade * (0.75 - i * 0.18);
+    }
+
+    // Right hairline.
+    Rectangle {
+        x: (parent.width + root.wing * 2) / 2;
+        y: (parent.height - self.height) / 2;
+        width: (parent.width - root.wing * 2) / 2;
+        height: 1px;
+        background: root.color;
+        opacity: root.fade * 0.5;
+    }
+
+    // Centre: a small diamond, the Achaemenid "window" motif.
+    Path {
+        width: 6px;
+        height: 6px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        commands: "M 3 0 L 6 3 L 3 6 L 0 3 Z";
+        fill: root.color;
+        opacity: root.fade;
+    }
+}
+
+// A Sasanian arch profile — the Taq-e Kasra silhouette — as a soft header.
+// Square shoulders, semicircular crown, drawn as an outline.
+component ArchFrame {
+    in property <brush> color: #D6A84E;
+    in property <float> fade: 0.35;
+    in property <length> stroke: 1px;
+
+    // One continuous outline: two jambs rising into a parabolic crown, the
+    // Taq-e Kasra profile. Drawn in a 100x100 viewbox and scaled to fit.
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        commands: "M 0 100 L 0 42 Q 0 0 50 0 Q 100 0 100 42 L 100 100";
+        stroke: root.color;
+        stroke-width: root.stroke;
+        fill: transparent;
+        opacity: root.fade;
+    }
+}
+
+export { SteppedCrenellation, LotusRow, WingedDivider, ArchFrame }

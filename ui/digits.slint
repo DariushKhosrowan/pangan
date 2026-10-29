@@ -1,0 +1,66 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// digits.slint — Persian numerals.
+//
+// A Persian app that prints "25:00" is only half Persian. Every numeral the
+// user reads goes through here: the countdown, the date, the counters, the
+// stats. The helpers read Strings.fa themselves, so a call site is always
+// just `Digits.num(x)` and never has to branch on language.
+//
+// Slint has no string replace and no recursion in pure functions, so `num` is
+// a straight-line walk over the five decimal places we need.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { Strings } from "strings.slint";
+
+export global Digits {
+    // The Persian digit for 0–9.
+    public pure function digit(d: int) -> string {
+        return d == 0 ? "۰"
+            : d == 1 ? "۱"
+            : d == 2 ? "۲"
+            : d == 3 ? "۳"
+            : d == 4 ? "۴"
+            : d == 5 ? "۵"
+            : d == 6 ? "۶"
+            : d == 7 ? "۷"
+            : d == 8 ? "۸"
+            : "۹";
+    }
+
+    // 1405 -> "۱۴۰۵". Leading places are dropped, so 7 -> "۷" not "۰۰۰۰۷".
+    // Negative numbers get the Persian minus sign (U+2212), not a hyphen.
+    // Slint rejects a pure function that calls itself, so the sign is handled
+    // inline rather than by recursion.
+    public pure function fa-num(n: int) -> string {
+        return (n < 0 ? "−" : "")
+            + (n >= 10000 || n <= -10000 ? digit(Math.floor(Math.abs(n) / 10000)) : "")
+            + (n >= 1000 || n <= -1000 ? digit(Math.floor(Math.abs(n) / 1000) - Math.floor(Math.abs(n) / 10000) * 10) : "")
+            + (n >= 100 || n <= -100 ? digit(Math.floor(Math.abs(n) / 100) - Math.floor(Math.abs(n) / 1000) * 10) : "")
+            + (n >= 10 || n <= -10 ? digit(Math.floor(Math.abs(n) / 10) - Math.floor(Math.abs(n) / 100) * 10) : "")
+            + digit(Math.abs(n) - Math.floor(Math.abs(n) / 10) * 10);
+    }
+
+    // Language-aware: Persian digits in `fa`, plain Latin in `en`.
+    public pure function num(n: int) -> string {
+        return Strings.fa ? fa-num(n) : (n < 0 ? "−" + (-n) : "" + n);
+    }
+
+    // 7 -> "۰۷". For minutes and seconds, where the leading zero is the point.
+    public pure function pad2(n: int) -> string {
+        return Strings.fa ? (n < 10 ? "۰" + digit(n) : fa-num(n)) : (n < 10 ? "0" + n : "" + n);
+    }
+
+    // 0.83 -> "۸۳٪".
+    public pure function pct(f: float) -> string {
+        return num(Math.round(f * 100)) + (Strings.fa ? "٪" : "%");
+    }
+
+    // "25:00" (from the Rust clock) -> "۲۵:۰۰".
+    // A malformed value passes through untouched rather than rendering as
+    // garbage, which is what a naive parse would do.
+    public pure function clock(s: string) -> string {
+        return s.to-float() >= 0
+            ? pad2(Math.floor(s.to-float() / 60)) + ":" + pad2(Math.round(s.to-float()) - Math.floor(s.to-float() / 60) * 60)
+            : s;
+    }
+}

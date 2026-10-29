@@ -1,7 +1,10 @@
 import { LineEdit } from "std-widgets.slint";
-import { Shahbaz, Faravahar, Derafsh, Senmurv, Boteh, BotehDivider, EmblemField } from "heritage.slint";
+import { Shahbaz, Faravahar, Derafsh, Senmurv, Boteh, BotehDivider, EmblemField, SteppedCrenellation, LotusRow, WingedDivider, ArchFrame } from "heritage.slint";
+import { SunRing } from "ring.slint";
+import { Digits } from "digits.slint";
 import { Strings } from "strings.slint";
 export { Strings } from "strings.slint";
+export { Digits } from "digits.slint";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Pangan — پنگان
@@ -454,7 +457,7 @@ component Stepper inherits Rectangle {
         }
 
         Text {
-            text: root.value + root.suffix;
+            text: Digits.num(root.value) + root.suffix;
             font-size: 12px;
             font-weight: 600;
             color: Palette.text;
@@ -716,7 +719,7 @@ component EraCard inherits Rectangle {
 
 export component PanganWindow inherits Window {
     // ---- Live timer state (pushed from Rust each tick) ----
-    in property <string> time-left; in property <string> session-name; in property <float> progress; in property <string> phase; in property <bool> running; in property <int> work-done; in property <string> session-counter; // ---- Theme ----
+    in property <string> time-left; in property <int> time-minutes; in property <int> time-seconds; in property <string> session-name; in property <float> progress; in property <string> phase; in property <bool> running; in property <int> work-done; in property <string> session-counter; // ---- Theme ----
     in property <string> theme-label: "سامانه"; in property <string> resolved-theme: "dark"; in-out property <string> theme-pref: "system"; // Heritage era identity
 in property <string> era: "cyrus"; in property <string> era-label: "کوروش"; in property <string> era-blurb: "زر آخامنشی بر لاجورد";
 
@@ -736,6 +739,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in-out property <int> work-minutes: 25; in-out property <int> short-break-minutes: 5; in-out property <int> long-break-minutes: 15; in-out property <int> long-break-interval: 4; in-out property <int> daily-goal-minutes: 120; in-out property <bool> auto-start-next: true; in-out property <bool> auto-start-on-launch: false; in-out property <bool> sound-enabled: true; in-out property <string> sound-theme: "santur"; in-out property <bool> hotkey-enabled: true; in-out property <bool> inhibit-enabled: true; in-out property <bool> overlay-enabled: true; in-out property <bool> compact-mode: false; in-out property <int> sound-volume: 80; in property <string> automation-summary; // ---- Rich data (pushed from Rust) ----
     in property <[TaskItem]> tasks: []; in property <[float]> week-bars: [0, 0, 0, 0, 0, 0, 0]; in property <[string]> week-labels: ["ش", "ی", "د", "س", "چ", "پ", "ج"]; in property <int> today-sessions: 0; in property <int> today-minutes: 0; in property <int> today-score: 0; in property <int> today-streak: 0; in property <int> today-consistency: 0; in property <int> today-best: 0; in property <int> session-total: 4; in property <int> session-done: 0; in property <int> goal-minutes: 120; in property <int> goal-done-minutes: 0; // ---- Callbacks to Rust ----
     callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback refresh-events; callback open-url(string); callback window-drag-start;
+    // Resize: the edge/corner grab zones report the pointer's screen position
+    // and which edge is being dragged; Rust turns that into a new window size.
 
     // Frameless drag: window position that keeps the pointer over the grab point.
     out property <length> drag-origin-x: self.absolute-position.x - root.drag-start-x;
@@ -744,11 +749,26 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in-out property <length> drag-start-y: 0px;
 
     title: "Pangan";
-    no-frame: true;
-    width: root.compact-mode ? 320px : 420px;
-    height: root.compact-mode ? 300px : 680px;
-    background: Palette.bg;
-    default-font-family: "Inter";
+    // A real window frame, not a frameless one.
+    //
+    // The app used to be `no-frame: true` and drew its own chrome, which meant
+    // the window manager gave it no resize border at all — that is why the
+    // window could not be resized. Hand-rolled edge grab zones were fragile
+    // (the release event is lost as soon as the window shrinks out from under
+    // the pointer). Letting the platform own the frame gives real, reliable
+    // resizing on every desktop, the way a normal app behaves.
+    no-frame: false;
+    // No width/height binding here on purpose.
+    //
+    // A binding like `width: 420px` makes Slint re-apply that size on every
+    // resize, so the window manager's resize is immediately undone — which is
+    // exactly why the window could not be resized. The initial size is set
+    // once from Rust instead, leaving the WM free to resize afterwards.
+    min-width: 340px; min-height: 400px; background: Palette.bg; 
+    // Vazirmatn is the Persian face the whole app is set in; Inter carries
+    // the Latin side. Both are named so the platform picks the right one per
+    // script instead of falling back to a system default that mangles Persian.
+    default-font-family: Strings.fa ? "Vazirmatn" : "Inter";
 
     // ─────────────────────────────────────────────────────────────────────
     // Heritage texture — the era emblem repeated at very low opacity, so the
@@ -837,6 +857,19 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                 }
             }
         }
+
+        // The stepped merlon of the Apadana parapet, drawn as a hairline of
+        // crenellations along the bottom edge of the header. It gives the
+        // window a skyline instead of a flat cut.
+        SteppedCrenellation {
+            x: 0px;
+            y: parent.height - self.height;
+            width: parent.width;
+            count: Math.max(8, Math.round(parent.width / 26px));
+            unit: 26px;
+            color: Palette.accent;
+            fade: root.resolved-theme == "light" ? 0.42 : 0.38;
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -853,7 +886,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             }
 
             Text {
-                text: root.time-left; font-size: 54px; font-weight: 300; letter-spacing: 1px; color: Palette.text; horizontal-alignment: center; }
+                text: Digits.pad2(root.time-minutes) + ":" + Digits.pad2(root.time-seconds); font-size: 54px; font-weight: 300; letter-spacing: 1px; color: Palette.text; horizontal-alignment: center; }
 
             Rectangle {
                 height: 4px; border-radius: 2px; background: Palette.track; Rectangle {
@@ -883,8 +916,21 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
         }
 
         // ═══ MAIN ═══
-        if root.show-view == "main" && !root.compact-mode : VerticalLayout {
-            padding-bottom: 14px; spacing: 0px; // view switcher
+        // The whole column scrolls when the window is short, so nothing can be
+        // cut off at the bottom. The hero shrinks with the window instead of
+        // holding a fixed 268px, which is what used to squeeze the task list
+        // down to four pixels.
+        if root.show-view == "main" && !root.compact-mode : Flickable {
+            vertical-stretch: 1;
+            content-height: main-col.preferred-height;
+            interactive: main-col.preferred-height > self.height;
+
+            // No explicit height here: the Flickable measures the column's
+            // preferred height itself. Setting `height: self.preferred-height`
+            // on the child of a Flickable is a binding loop and collapsed the
+            // whole column to a sliver.
+            main-col := VerticalLayout {
+            width: parent.width; padding-bottom: 14px; spacing: 0px; // view switcher
             HorizontalLayout {
                 height: 40px; alignment: center; Segmented {
                     options: [Strings.nav-timer, Strings.nav-today, Strings.nav-stats]; current: 0; selected(i) => {
@@ -895,15 +941,27 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             }
 
             // ---- hero: ring + time ----
+            // Grows and shrinks with the window, within sane bounds.
             Rectangle {
-                height: 268px; background: transparent; Ring {
-                    progress: root.progress; d: 236; t: 7; glow: root.running; x: (parent.width - self.width) / 2; y: 6px; }
+                height: Math.max(150px, Math.min(268px, root.height - 430px));
+                background: transparent;
+                hero-ring := SunRing {
+                    progress: root.progress;
+                    d: Math.max(120px, Math.min(236px, parent.height - 32px));
+                    t: 7px;
+                    glow: root.running;
+                    track-color: Palette.track; fill-color: Palette.accent;
+                    x: (parent.width - self.width) / 2; y: 6px; }
 
                 VerticalLayout {
-                    width: 200px; height: 200px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; spacing: 2px; alignment: center; Text {
+                    width: hero-ring.width * 0.85;
+                    height: hero-ring.height * 0.85;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    spacing: 2px; alignment: center; Text {
                         text: root.session-name; font-size: 10px; font-weight: 700; letter-spacing: 2px; color: Palette.accent; horizontal-alignment: center; }
                     Text {
-                        text: root.time-left; font-size: 62px; font-weight: 300; letter-spacing: 0.5px; color: Palette.text; horizontal-alignment: center; }
+                        text: Digits.pad2(root.time-minutes) + ":" + Digits.pad2(root.time-seconds); font-size: Math.max(34px, Math.min(62px, hero-ring.width * 0.26)); font-weight: 300; letter-spacing: 0.5px; color: Palette.text; horizontal-alignment: center; }
                     Text {
                         text: root.phase; font-size: 11px; color: Palette.text-faint; horizontal-alignment: center; }
                 }
@@ -917,7 +975,19 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                 }
             }
 
-            Rectangle { height: 14px; }
+            // A lotus-and-bud frieze, after the bands carved along the Apadana
+            // stairways. It separates the hero from the controls the way the
+            // real frieze separates registers on the terrace wall.
+            LotusRow {
+                height: 18px;
+                count: Math.max(7, Math.round(parent.width / 56px));
+                unit: 30px;
+                color: Palette.accent;
+                fade: root.resolved-theme == "light" ? 0.62 : 0.58;
+                x: (parent.width - self.width) / 2;
+            }
+
+            Rectangle { height: 6px; }
 
             // ---- controls ----
             HorizontalLayout {
@@ -1029,7 +1099,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         }
                         Rectangle { horizontal-stretch: 1; }
                         Text {
-                            text: root.today-minutes + " / " + root.goal-minutes + " " + Strings.minutes-short;
+                            text: Digits.num(root.today-minutes) + " / " + Digits.num(root.goal-minutes) + " " + Strings.minutes-short;
                             font-size: 11px;
                             color: Palette.text-dim;
                         }
@@ -1050,11 +1120,26 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                 }
             }
 
-            Rectangle { height: 14px; }
+            Rectangle { height: 12px; }
+
+            // A winged rule, after the Faravahar's pinions, closing the
+            // summary block before the task list.
+            WingedDivider {
+                height: 10px;
+                x: 30px;
+                width: parent.width - 60px;
+                wing: 40px;
+                color: Palette.accent;
+                fade: root.resolved-theme == "light" ? 0.30 : 0.26;
+            }
+
+            Rectangle { height: 12px; }
 
             // ---- tasks ----
+            // A fixed, comfortable height: the list scrolls inside the card, so
+            // the card never collapses when the window is short.
             Rectangle {
-                vertical-stretch: 1;
+                height: 200px;
                 x: 22px;
                 width: parent.width - 22px - 22px;
                 border-radius: 14px;
@@ -1080,7 +1165,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         }
                         Rectangle { horizontal-stretch: 1; }
                         Text {
-                            text: root.tasks.length + "";
+                            text: Digits.num(root.tasks.length);
                             font-size: 10px;
                             color: Palette.text-faint;
                         }
@@ -1120,12 +1205,15 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             padding-right: 4px;
                             spacing: 6px;
 
+                            // Two-way binding: a one-way `text:` binding is
+                            // broken by the first keystroke, so clearing
+                            // new-task-text from Rust never reached the field
+                            // and the typed text stayed on screen after adding.
                             LineEdit {
-                                text: root.new-task-text;
+                                text <=> root.new-task-text;
                                 placeholder-text: Strings.task-placeholder;
                                 font-size: 12px;
                                 horizontal-stretch: 1;
-                                edited(t) => { root.new-task-text = t; }
                                 accepted(t) => {
                                     root.new-task-text = t;
                                     root.add-task();
@@ -1188,6 +1276,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         }
                     ]
                 }
+            }
             }
         }
 
@@ -1391,7 +1480,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 horizontal-alignment: center;
                             }
                             Text {
-                                text: root.today-score + "";
+                                text: Digits.num(root.today-score);
                                 font-size: 38px;
                                 font-weight: 300;
                                 color: Palette.accent;
@@ -1432,12 +1521,12 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         spacing: 10px;
                         StatCard {
                             label: Strings.sessions;
-                            value: root.today-sessions + "";
+                            value: Digits.num(root.today-sessions);
                             horizontal-stretch: 1;
                         }
                         StatCard {
                             label: Strings.focus;
-                            value: root.today-minutes + "د";
+                            value: Digits.num(root.today-minutes) + " " + Strings.minutes-short;
                             horizontal-stretch: 1;
                         }
                     }
@@ -1445,12 +1534,12 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         spacing: 10px;
                         StatCard {
                             label: Strings.streak;
-                            value: root.today-streak + "ر";
+                            value: Digits.num(root.today-streak) + (Strings.fa ? " روز" : "d");
                             horizontal-stretch: 1;
                         }
                         StatCard {
                             label: Strings.consistency;
-                            value: root.today-consistency + "%";
+                            value: Digits.pct(root.today-consistency / 100.0);
                             horizontal-stretch: 1;
                         }
                     }
@@ -1562,7 +1651,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             HorizontalLayout {
                                 height: 40px;
                                 Text { text: Strings.lbl-long-every; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; }
-                                Stepper { value <=> root.long-break-interval; min: 1; max: 12; suffix: "×"; changed(v) => { root.long-break-interval = v; } }
+                                Stepper { value <=> root.long-break-interval; min: 1; max: 12; suffix: ""; changed(v) => { root.long-break-interval = v; } }
                             }
                         }
                     }
@@ -1850,7 +1939,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 }
 
                                 Text {
-                                    text: root.sound-volume + "%";
+                                    text: Digits.num(root.sound-volume) + (Strings.fa ? "٪" : "%");
                                     font-size: 11px;
                                     color: Palette.text-dim;
                                     width: 34px;
@@ -2108,4 +2197,9 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             }
         }
     }
+    // ─────────────────────────────────────────────────────────────────────
+    // Resize handles — a frameless window gets no WM resize border, so these
+    // eight invisible grab zones give the edges and corners back. They sit on
+    // top of the content and are only 5px wide, so they never block a click.
+    // ─────────────────────────────────────────────────────────────────────
 }

@@ -112,6 +112,8 @@ fn resolve_theme(pref: &str) -> &'static str {
 fn apply_snapshot(win: &PanganWindow, shared: &Shared) {
     let snap = shared.snapshot();
     win.set_time_left(SharedString::from(snap.time));
+    win.set_time_minutes(snap.minutes as i32);
+    win.set_time_seconds(snap.seconds as i32);
     win.set_session_name(SharedString::from(snap.session));
     win.set_progress(snap.progress);
     win.set_phase(SharedString::from(snap.phase));
@@ -360,10 +362,20 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
         .collect();
     win.set_week_bars(ModelRc::new(VecModel::from(bars)));
 
-    let labels: Vec<SharedString> = ["M", "T", "W", "T", "F", "S", "S"]
-        .iter()
-        .map(|s| SharedString::from(*s))
-        .collect();
+    let labels: Vec<SharedString> = if en {
+        ["M", "T", "W", "T", "F", "S", "S"]
+            .iter()
+            .map(|s| SharedString::from(*s))
+            .collect()
+    } else {
+        // The bars are Monday-first (see Period::Week::bounds), so the Persian
+        // initials follow the same order rather than the Saturday-first week
+        // the calendar view uses. Misaligning them would label the wrong day.
+        ["د", "س", "چ", "پ", "ج", "ش", "ی"]
+            .iter()
+            .map(|s| SharedString::from(*s))
+            .collect()
+    };
     win.set_week_labels(ModelRc::new(VecModel::from(labels)));
 
     // Task list for the redesigned panel: open tasks first, then done.
@@ -509,6 +521,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         win.set_auto_start_on_launch(settings.auto_start_on_launch);
         win.set_daily_goal_minutes(settings.daily_goal_minutes as i32);
         win.set_compact_mode(settings.compact_mode);
+        // The UI deliberately has no width/height binding (that would undo any
+        // user resize), so the initial size is applied here, once. After this
+        // the window manager owns the geometry.
+        let (w0, h0) = if settings.compact_mode { (320.0, 300.0) } else { (420.0, 680.0) };
+        let _ = win.window().set_size(slint::WindowSize::Logical(
+            slint::LogicalSize::new(w0, h0),
+        ));
         win.set_sound_enabled(settings.sound_enabled);
         win.set_sound_theme(SharedString::from(settings.sound_theme.clone()));
         win.set_sound_volume(settings.sound_volume as i32);
@@ -893,7 +912,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 slint::LogicalPosition::new(x, y),
             ));
         }
-    }); // Sync now.
+    });
+ // Sync now.
     let sync_app = Arc::clone(&app);
     let sync_weak = weak.clone();
     win.on_sync_now(move || {
@@ -955,6 +975,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         w.set_sound_theme(SharedString::from(s.sound_theme.clone()));
                         w.set_sound_volume(s.sound_volume as i32);
                         w.set_compact_mode(s.compact_mode);
+                        let (cw, ch) = if s.compact_mode { (320.0, 300.0) } else { (420.0, 680.0) };
+                        let _ = w.window().set_size(slint::WindowSize::Logical(
+                            slint::LogicalSize::new(cw, ch),
+                        ));
                         w.set_theme_pref(SharedString::from(s.theme.clone()));
                         w.set_theme_label(SharedString::from(s.theme_label()));
                         let resolved = resolve_theme(&s.theme);
