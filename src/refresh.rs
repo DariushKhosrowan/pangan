@@ -432,12 +432,35 @@ fn decode_entities(s: &str) -> String {
     out
 }
 
+/// Entries the owner of this calendar does not want shown, matched as a
+/// substring of the cleaned item text.
+///
+/// The live refresh replaces a whole day with whatever Wikipedia currently
+/// says, so an entry deleted from data/day_events.json by hand reappears the
+/// next time the day is refreshed. This list is what makes a removal stick.
+///
+/// Keep it short and specific: a broad term here silently drops unrelated
+/// history with no warning.
+const EXCLUDED_ITEMS: [&str; 1] = [
+    // 8 Aban: the joint statement naming the Ministry of Intelligence and the
+    // IRGC Intelligence Organisation. Removed at the owner's request.
+    "وزارت اطلاعات و سازمان اطلاعات سپاه",
+];
+
+fn is_excluded(text: &str) -> bool {
+    EXCLUDED_ITEMS.iter().any(|term| text.contains(term))
+}
+
 /// The list items of the named sections, in document order.
 fn section_items(html: &str, headings: &[&str]) -> Vec<String> {
     let mut out = Vec::new();
     for (title, body) in html_sections(html) {
         if headings.contains(&title.as_str()) {
-            out.extend(html_list_items(&body));
+            out.extend(
+                html_list_items(&body)
+                    .into_iter()
+                    .filter(|s| !is_excluded(s)),
+            );
         }
     }
     out

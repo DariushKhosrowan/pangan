@@ -47,9 +47,25 @@ IRAN_SECTIONS = {
     "زادروزها": "birth",
     "درگذشت‌ها": "death",
     "درگذشت‌ها و سالگردها": "death",
-    "مناسبت‌ها": "occasion",
-    "تعطیلات و مناسبت‌ها": "occasion",
+    "مناسبت‌ها": "occasion",    "تعطیلات و مناسبت‌ها": "occasion",
 }
+
+# Entries the owner of this calendar does not want shown, as a substring match
+# against the cleaned item text. Wikipedia is the source, so anything removed
+# from data/day_events.json by hand comes straight back on the next refresh;
+# this list is what makes a removal stick.
+#
+# Keep it short and specific. A broad term here silently drops unrelated
+# history, and the next refresh gives no warning that it did.
+EXCLUDED_ITEMS = [
+    # 8 Aban: the joint statement naming the Ministry of Intelligence and the
+    # IRGC Intelligence Organisation. Removed at the owner's request.
+    "وزارت اطلاعات و سازمان اطلاعات سپاه",
+]
+
+
+def is_excluded(text: str) -> bool:
+    return any(term in text for term in EXCLUDED_ITEMS)
 
 
 def api(lang: str, page: str) -> str | None:
@@ -152,7 +168,9 @@ def fetch_iran(jm: int, jd: int) -> dict:
         kind = IRAN_SECTIONS.get(heading.strip())
         if not kind:
             continue
-        buckets[kind].extend(list_items(body))
+        buckets[kind].extend(
+            item for item in list_items(body) if not is_excluded(item)
+        )
 
     return {
         "title": page,
