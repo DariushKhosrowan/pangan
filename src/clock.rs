@@ -14,6 +14,11 @@ pub struct Config {
     pub long_break_minutes: u64,
     pub long_break_interval: u32,
     pub auto_start_next: bool,
+    /// "fa" | "en". The clock produces the phase and state labels the UI
+    /// shows, so it has to know which language to produce them in; before
+    /// this the labels were hardcoded Persian and stayed Persian in English
+    /// mode no matter what the rest of the window did.
+    pub lang: String,
 }
 
 impl From<&Settings> for Config {
@@ -24,6 +29,7 @@ impl From<&Settings> for Config {
             long_break_minutes: s.long_break_minutes,
             long_break_interval: s.long_break_interval,
             auto_start_next: s.auto_start_next,
+            lang: s.lang.clone(),
         }
     }
 }
@@ -36,6 +42,7 @@ impl Default for Config {
             long_break_minutes: 15,
             long_break_interval: 4,
             auto_start_next: true,
+            lang: "fa".to_string(),
         }
     }
 }
@@ -52,11 +59,31 @@ pub enum Phase {
 }
 
 impl Phase {
-    pub fn label(&self) -> &'static str {
+    /// The phase's name in the given language ("fa" | "en").
+    pub fn label(&self, lang: &str) -> &'static str {
+        let en = lang == "en";
         match self {
-            Phase::Work => "کار ژرف",
-            Phase::ShortBreak => "آسایش کوتاه",
-            Phase::LongBreak => "آسایش دراز",
+            Phase::Work => {
+                if en {
+                    "Deep Work"
+                } else {
+                    "کار ژرف"
+                }
+            }
+            Phase::ShortBreak => {
+                if en {
+                    "Short Break"
+                } else {
+                    "آسایش کوتاه"
+                }
+            }
+            Phase::LongBreak => {
+                if en {
+                    "Long Break"
+                } else {
+                    "آسایش دراز"
+                }
+            }
         }
     }
 }
@@ -88,6 +115,10 @@ pub struct Shared {
     state: Mutex<State>,
     pub quit: std::sync::atomic::AtomicBool,
     pub cfg: Config,
+    /// The UI language the snapshot's labels are produced in. Separate from
+    /// `cfg` because it changes at runtime when the user switches language,
+    /// while the durations in `cfg` are only re-read when settings close.
+    lang: Mutex<String>,
     /// Completed focus sessions not yet persisted by the event loop.
     pending_sessions: Mutex<Vec<SessionRecord>>,
     /// Count of completed breaks (rest periods) not yet consumed.
@@ -100,7 +131,9 @@ pub struct Shared {
 impl Shared {
     pub fn new(cfg: Config) -> Self {
         let total = Duration::from_secs(cfg.work_minutes * 60);
+        let lang = Mutex::new(cfg.lang.clone());
         Self {
+            lang,
             state: Mutex::new(State {
                 phase: Phase::Work,
                 running: false,
@@ -168,11 +201,19 @@ impl Shared {
                 .lock()
                 .unwrap()
                 .push(crate::settings::EVENT_BREAK_START.into());
-            Some(format!(
-                "{} به پایان رسید — {} آغاز شد.",
-                Phase::Work.label(),
-                s.phase.label()
-            ))
+            Some(if self.is_en() {
+                format!(
+                    "{} finished — {} started.",
+                    Phase::Work.label(&self.lang_str()),
+                    s.phase.label(&self.lang_str())
+                )
+            } else {
+                format!(
+                    "{} به پایان رسید — {} آغاز شد.",
+                    Phase::Work.label(&self.lang_str()),
+                    s.phase.label(&self.lang_str())
+                )
+            })
         } else {
             s.phase = Phase::Work;
             // Automation: the break ended; focus begins again.
@@ -184,7 +225,11 @@ impl Shared {
                 .lock()
                 .unwrap()
                 .push(crate::settings::EVENT_FOCUS_START.into());
-            Some("آسایش به سر رسید — بازگشت به کار ژرف.".to_string())
+            Some(if self.is_en() {
+                "Break over — back to deep work.".to_string()
+            } else {
+                "آسایش به سر رسید — بازگشت به کار ژرف.".to_string()
+            })
         };
         s.total = self.phase_total(s.phase);
         s.remaining = s.total;
@@ -255,6 +300,19 @@ impl Shared {
         s.work_done = 0;
     }
 
+    /// Switch the language the snapshot labels are produced in.
+    pub fn set_lang(&self, lang: &str) {
+        *self.lang.lock().unwrap() = lang.to_string();
+    }
+
+    fn lang_str(&self) -> String {
+        self.lang.lock().unwrap().clone()
+    }
+
+    fn is_en(&self) -> bool {
+        self.lang.lock().unwrap().as_str() == "en"
+    }
+
     pub fn snapshot(&self) -> Snapshot {
         let s = self.state.lock().unwrap();
         let secs = s.remaining.as_secs();
@@ -268,9 +326,22 @@ impl Shared {
             time,
             minutes: (secs / 60) as u32,
             seconds: (secs % 60) as u32,
-            session: s.phase.label().to_string(),
+            session: s.phase.label(&self.lang_str()).to_string(),
             progress: progress.clamp(0.0, 1.0),
-            phase: if s.running { "روان" } else { "درنگ" }.to_string(),
+            // "running" / "paused" — the word under the clock, and the other
+            // half of the untranslated timer screen.
+            phase: if self.is_en() {
+                if s.running {
+                    "Running"
+                } else {
+                    "Paused"
+                }
+            } else if s.running {
+                "روان"
+            } else {
+                "درنگ"
+            }
+            .to_string(),
             running: s.running,
             work_done: s.work_done,
         }
@@ -294,7 +365,29 @@ mod tests {
             long_break_minutes: 15,
             long_break_interval: 4,
             auto_start_next: true,
+            lang: "fa".to_string(),
         }
+    }
+
+    /// The phase and state labels are shown on the timer screen, so they have
+    /// to follow the selected language. They were hardcoded Persian and stayed
+    /// Persian in English mode while every label around them switched.
+    #[test]
+    fn labels_follow_the_language() {
+        let s = Shared::new(config());
+        assert_eq!(s.snapshot().session, "کار ژرف");
+        assert_eq!(s.snapshot().phase, "درنگ");
+
+        s.set_lang("en");
+        assert_eq!(s.snapshot().session, "Deep Work");
+        assert_eq!(s.snapshot().phase, "Paused");
+
+        s.toggle();
+        assert_eq!(s.snapshot().phase, "Running");
+
+        s.set_lang("fa");
+        assert_eq!(s.snapshot().session, "کار ژرف");
+        assert_eq!(s.snapshot().phase, "روان");
     }
 
     #[test]

@@ -63,6 +63,7 @@ mod tests {
             long_break_minutes: 15,
             long_break_interval: 4,
             auto_start_next: true,
+            lang: "fa".to_string(),
         });
         // Start focus -> focus_start event.
         s.toggle();
@@ -88,6 +89,7 @@ mod tests {
             long_break_minutes: 15,
             long_break_interval: 4,
             auto_start_next: true,
+            lang: "fa".to_string(),
         });
         // Complete 3 focus sessions (each: focus -> break -> focus).
         for _ in 0..3 {

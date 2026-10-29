@@ -66,11 +66,16 @@ impl AppState {
         let store = Store::load();
         let settings = Settings::load();
         let sound_theme = settings.sound_theme.clone();
+        let last_sync = if settings.lang == "en" {
+            "Cloud sync ready".to_string()
+        } else {
+            "همگام‌سازی ابری آماده است".to_string()
+        };
         Self {
             store: Mutex::new(store),
             settings: Mutex::new(settings),
             sound_theme: Mutex::new(sound_theme),
-            last_sync: Mutex::new("همگام‌سازی ابری آماده است".into()),
+            last_sync: Mutex::new(last_sync),
             // A cached table is only used when it is actually better than the
             // copy compiled into the binary; a stale or damaged cache must not
             // be able to show worse data than the app ships with.
@@ -726,7 +731,8 @@ fn sync_row(app: &AppState) -> sync::SyncRow {
 /// Perform a sync (used by the button and the auto-sync timer).
 fn do_sync(win: &slint::Weak<PanganWindow>, app: &AppState) {
     let row = sync_row(app);
-    let status = sync::try_sync(&row);
+    let en = app.settings.lock().unwrap().lang == "en";
+    let status = sync::try_sync(&row, en);
     {
         let mut ls = app.last_sync.lock().unwrap();
         *ls = status.clone();
@@ -1324,6 +1330,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // this only has to flip that and refresh the strings Rust owns.
     let lang_weak = weak.clone();
     let lang_app = Arc::clone(&app);
+    let lang_clock = Arc::clone(&shared);
     win.on_set_lang(move |lang| {
         let lang = lang.to_string();
         let (label, blurb, theme_label) = {
@@ -1339,6 +1346,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             w.set_era_label(SharedString::from(label));
             w.set_era_blurb(SharedString::from(blurb));
             w.set_theme_label(SharedString::from(theme_label));
+            // The clock produces the phase and state labels in Rust, so it
+            // needs the new language as well. Without this "کار ژرف" and
+            // "درنگ" stayed Persian while every label around them switched.
+            lang_clock.set_lang(&lang);
+            // The sync status line is Rust-owned too.
+            w.set_sync_status(SharedString::from(if lang == "en" {
+                "Cloud sync ready"
+            } else {
+                "همگام‌سازی ابری آماده است"
+            }));
             // The calendar card is language-dependent; force a rebuild.
             *lang_app.calendar_day.lock().unwrap() = (0, 0, 0);
             refresh_calendar(&w, &lang_app, selected_day(&lang_app));
@@ -1411,9 +1428,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backup_app = Arc::clone(&app);
     let backup_weak = weak.clone();
     win.on_backup_now(move || {
+        let en = backup_app.settings.lock().unwrap().lang == "en";
         let Some(cfg) = sync::load_config() else {
             if let Some(w) = backup_weak.upgrade() {
-                w.set_sync_status(SharedString::from("پشتیبان‌گیری خاموش است (نشانه‌ای نیست)."));
+                w.set_sync_status(SharedString::from(if en {
+                    "Backup is off (no token)."
+                } else {
+                    "پشتیبان‌گیری خاموش است (نشانه‌ای نیست)."
+                }));
             }
             return;
         };
@@ -1427,8 +1449,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             data: serde_json::to_string_pretty(&d).unwrap_or_default(),
         };
         let status = match sync::push_backup(&cfg, &payload) {
-            Ok(()) => "پشتیبان در برگه‌های گوگل ذخیره شد ✓".into(),
-            Err(e) => format!("خطای پشتیبان‌گیری: {e}"),
+            Ok(()) => {
+                if en {
+                    "Backup saved to Google Sheets ✓".to_string()
+                } else {
+                    "پشتیبان در برگه‌های گوگل ذخیره شد ✓".to_string()
+                }
+            }
+            Err(e) => {
+                if en {
+                    format!("Backup error: {e}")
+                } else {
+                    format!("خطای پشتیبان‌گیری: {e}")
+                }
+            }
         };
         {
             let mut ls = backup_app.last_sync.lock().unwrap();
@@ -1443,9 +1477,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let restore_app = Arc::clone(&app);
     let restore_weak = weak.clone();
     win.on_restore_now(move || {
+        let en = restore_app.settings.lock().unwrap().lang == "en";
         let Some(cfg) = sync::load_config() else {
             if let Some(w) = restore_weak.upgrade() {
-                w.set_sync_status(SharedString::from("بازگردانی خاموش است (نشانه‌ای نیست)."));
+                w.set_sync_status(SharedString::from(if en {
+                    "Restore is off (no token)."
+                } else {
+                    "بازگردانی خاموش است (نشانه‌ای نیست)."
+                }));
             }
             return;
         };
@@ -1485,9 +1524,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     st.data = d;
                     st.save();
                 }
-                format!("پشتیبان بازگردانده شد از {}", payload.ts)
+                if en {
+                    format!("Backup restored from {}", payload.ts)
+                } else {
+                    format!("پشتیبان بازگردانده شد از {}", payload.ts)
+                }
             }
-            Err(e) => format!("خطای بازگردانی: {e}"),
+            Err(e) => {
+                if en {
+                    format!("Restore error: {e}")
+                } else {
+                    format!("خطای بازگردانی: {e}")
+                }
+            }
         };
         {
             let mut ls = restore_app.last_sync.lock().unwrap();
@@ -1531,7 +1580,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     refresh_screens(&win, &app);
     refresh_day_view(&win, &app);
     update_automation_summary(&weak, &app);
-    win.set_sync_status(SharedString::from("همگام‌سازی ابری آماده است"));
+    win.set_sync_status(SharedString::from(if settings.lang == "en" {
+        "Cloud sync ready"
+    } else {
+        "همگام‌سازی ابری آماده است"
+    }));
     win.show()?;
 
     slint::run_event_loop()?;

@@ -655,6 +655,7 @@ component Stepper inherits Rectangle {
                 font-size: 15px;
                 color: root.value > root.min ? Palette.text : Palette.text-faint;
                 horizontal-alignment: center;
+                vertical-alignment: center;
                 width: parent.width;
                 height: parent.height;
             }
@@ -666,6 +667,10 @@ component Stepper inherits Rectangle {
             font-weight: 600;
             color: Palette.text;
             horizontal-alignment: center;
+            // Slint defaults vertical-alignment to top. With a full-height
+            // Text that pinned "25 دقیقه" to the top of the pill instead of
+            // sitting it in the middle, which read as "the numbers drifted up".
+            vertical-alignment: center;
             width: 66px;
             height: parent.height;
         }
@@ -695,6 +700,7 @@ component Stepper inherits Rectangle {
                 font-size: 14px;
                 color: root.value < root.max ? Palette.text : Palette.text-faint;
                 horizontal-alignment: center;
+                vertical-alignment: center;
                 width: parent.width;
                 height: parent.height;
             }
@@ -2286,24 +2292,28 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                             HorizontalLayout {
                                 height: 40px;
+                                alignment: center;
                                 Text { text: Strings.lbl-work; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Stepper { value <=> root.work-minutes; min: 1; max: 180; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.work-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
+                                alignment: center;
                                 Text { text: Strings.lbl-short; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Stepper { value <=> root.short-break-minutes; min: 1; max: 60; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.short-break-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
+                                alignment: center;
                                 Text { text: Strings.lbl-long; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Stepper { value <=> root.long-break-minutes; min: 1; max: 90; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.long-break-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
+                                alignment: center;
                                 Text { text: Strings.lbl-long-every; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Stepper { value <=> root.long-break-interval; min: 1; max: 12; suffix: ""; changed(v) => { root.long-break-interval = v; } }
                             }
@@ -2317,6 +2327,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         VerticalLayout {
                             padding: 14px;
                             HorizontalLayout {
+                                alignment: center;
                                 Text { text: Strings.lbl-goal; font-size: 13px; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
                                 Stepper { value <=> root.daily-goal-minutes; min: 15; max: 600; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.daily-goal-minutes = v; } }
                             }

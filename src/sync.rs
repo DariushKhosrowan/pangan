@@ -114,13 +114,33 @@ pub fn push_row(cfg: &SyncCfg, row: &SyncRow) -> Result<(), String> {
 }
 
 /// Attempt a sync with best-effort error reporting. Returns a status string.
-pub fn try_sync(row: &SyncRow) -> String {
+///
+/// `en` selects the language of that status. The status is shown in the
+/// settings screen, which is otherwise fully translated, so these three
+/// strings were the last Persian left in an English window.
+pub fn try_sync(row: &SyncRow, en: bool) -> String {
     let Some(cfg) = load_config() else {
-        return "همگام‌سازی گوگل خاموش است (نشانه‌ای نیست). راهنما را ببینید.".into();
+        return if en {
+            "Google sync is off (no token). See the guide.".into()
+        } else {
+            "همگام‌سازی گوگل خاموش است (نشانه‌ای نیست). راهنما را ببینید.".into()
+        };
     };
     match push_row(&cfg, row) {
-        Ok(()) => "با برگه‌های گوگل همگام شد ✓".into(),
-        Err(e) => format!("خطای همگام‌سازی: {e}"),
+        Ok(()) => {
+            if en {
+                "Synced with Google Sheets ✓".into()
+            } else {
+                "با برگه‌های گوگل همگام شد ✓".into()
+            }
+        }
+        Err(e) => {
+            if en {
+                format!("Sync error: {e}")
+            } else {
+                format!("خطای همگام‌سازی: {e}")
+            }
+        }
     }
 }
 
