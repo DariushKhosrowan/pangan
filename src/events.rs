@@ -43,6 +43,79 @@ pub struct Table {
     pub world_en: std::collections::HashMap<String, Vec<String>>,
 }
 
+impl Table {
+    /// Whether this table is worth trusting over the compiled-in copy.
+    ///
+    /// A table that parses can still be junk: an older build wrote a cache
+    /// where some Iranian days held only the tail of each entry (a bare
+    /// "دادستان تهران" instead of "۱۳۹۹ - قاضی حداد، معاون امنیت دادستان
+    /// تهران"). Those entries have no year prefix and no role, so they are
+    /// detectable. The bar is deliberately low — one broken day out of 366 is
+    /// enough to reject the cache, because the embedded copy is always better.
+    fn is_usable(&self) -> bool {
+        // Every Jalali month-day must be present.
+        if self.iran.len() < 360 {
+            return false;
+        }
+        // No Iranian day may be entirely empty, and no event entry may be a
+        // bare fragment.
+        for day in self.iran.values() {
+            let total = day.events.len() + day.births.len() + day.deaths.len() + day.occasions.len();
+            if total == 0 {
+                return false;
+            }
+            for entry in day.events.iter().chain(&day.births).chain(&day.deaths) {
+                if is_fragment(entry) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+}
+
+/// True for an entry that is clearly the tail of a longer line rather than a
+/// whole one.
+///
+/// The damaged cache held things like "زندانی سیاسی" and "دادستان تهران":
+/// short noun phrases that were the *last link* of a line whose year, name and
+/// role had been dropped. A whole entry in this data almost always starts with
+/// a year and names a person, so the test is: no year anywhere, no comma, and
+/// it reads as a description rather than a name. A bare name such as
+/// "مظفرالدین‌شاه قاجار" is a legitimate entry and must not be rejected.
+fn is_fragment(s: &str) -> bool {
+    let t = s.trim();
+    if t.chars().count() >= 40 {
+        return false;
+    }
+    let has_year = t
+        .chars()
+        .any(|c| c.is_ascii_digit() || ('۰'..='۹').contains(&c));
+    if has_year {
+        return false;
+    }
+    if t.contains('،') || t.contains(',') || t.contains('-') {
+        return false;
+    }
+    // A description, not a name: these are the words that gave the damaged
+    // entries away. A name never contains them.
+    const DESCRIPTORS: [&str; 12] = [
+        "سیاسی",
+        "مجلس",
+        "دادستان",
+        "دوره",
+        "وزارت",
+        "سازمان",
+        "استان",
+        "شهرستان",
+        "دانشگاه",
+        "بازیگر",
+        "خواننده",
+        "نویسنده",
+    ];
+    DESCRIPTORS.iter().any(|d| t.contains(d))
+}
+
 /// Parsed event table, plus where it came from.
 pub struct Events {
     table: Table,
@@ -83,6 +156,24 @@ impl Events {
                 Events {
                     table: Table::default(),
                 }
+            }
+        }
+    }
+
+    /// Parse a cached table, falling back to the compiled-in one when the
+    /// cache is unusable.
+    ///
+    /// The cache is written by an older build of this app, and a stale cache
+    /// must never be able to show worse data than the copy shipped in the
+    /// binary. A cache that parses but has lost its structure (empty Iranian
+    /// days, entries that are just a bare fragment) is rejected here.
+    pub fn from_cache_or_embedded(raw: &str) -> Self {
+        let parsed = serde_json::from_str::<Table>(raw);
+        match parsed {
+            Ok(table) if table.is_usable() => Events { table },
+            _ => {
+                eprintln!("events: cached table unusable, using the embedded copy");
+                Self::load()
             }
         }
     }
@@ -205,6 +296,42 @@ pub fn split_year(line: &str) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fragment_detection() {
+        // Real tails of longer lines, seen in a cache written by an older build.
+        assert!(is_fragment("زندانی سیاسی"));
+        assert!(is_fragment("دادستان تهران"));
+        assert!(is_fragment("مجلس خبرگان قانون اساسی"));
+        // Whole entries: year prefix and/or a role after a comma.
+        assert!(!is_fragment("۱۳۹۹ - قاضی حداد، معاون امنیت دادستان تهران"));
+        assert!(!is_fragment("۱۲۸۲ - احترام‌السلطنه، شاهزاده قاجار"));
+        assert!(!is_fragment("مظفرالدین‌شاه قاجار"));
+    }
+
+    #[test]
+    fn damaged_cache_is_rejected_in_favour_of_the_embedded_copy() {
+        // Take the good table and damage one day the way the old build did.
+        let mut table: serde_json::Value =
+            serde_json::from_str(include_str!("../data/day_events.json")).unwrap();
+        table["iran"]["8-7"]["deaths"] = serde_json::json!([
+            "مظفرالدین‌شاه قاجار",
+            "زندانی سیاسی",
+            "دادستان تهران"
+        ]);
+        let damaged = serde_json::to_string(&table).unwrap();
+
+        let e = Events::from_cache_or_embedded(&damaged);
+        // The embedded copy is used, so the real entry is back.
+        let (_, _, deaths, _) = e.iran(8, 7);
+        let joined = format!("{deaths:?}");
+        assert!(
+            joined.contains("قاضی حداد"),
+            "expected the embedded entry, got {joined}"
+        );
+        // The damaged day had exactly three entries; the real one has five.
+        assert_eq!(deaths.len(), 5, "damaged day survived: {joined}");
+    }
 
     #[test]
     fn table_loads_both_streams() {

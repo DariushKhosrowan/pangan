@@ -65,8 +65,11 @@ impl AppState {
             settings: Mutex::new(settings),
             sound_theme: Mutex::new(sound_theme),
             last_sync: Mutex::new("همگام‌سازی ابری آماده است".into()),
+            // A cached table is only used when it is actually better than the
+            // copy compiled into the binary; a stale or damaged cache must not
+            // be able to show worse data than the app ships with.
             events: Mutex::new(match refresh::load_cached() {
-                Some(raw) => events::Events::from_str(&raw),
+                Some(raw) => events::Events::from_cache_or_embedded(&raw),
                 None => events::Events::load(),
             }),
             calendar_day: Mutex::new((0, 0, 0)),
