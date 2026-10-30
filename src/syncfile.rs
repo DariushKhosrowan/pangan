@@ -351,6 +351,14 @@ pub struct DeviceState {
     /// settings are a real choice and compete on stamps like any other.
     #[serde(default)]
     pub bootstrapped: bool,
+    /// Unix seconds of the last successful exchange, so the settings card can
+    /// say when sync last worked even after a restart.
+    ///
+    /// Without this the card could only report the current process's cycles,
+    /// and a user who reopened the app after a day of failures saw a blank
+    /// "last sync" and had no way to tell whether anything had ever worked.
+    #[serde(default)]
+    pub last_ok: i64,
 }
 
 fn state_path() -> std::path::PathBuf {

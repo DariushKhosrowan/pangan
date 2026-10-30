@@ -3108,6 +3108,20 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 }
                             }
 
+                            // What the last cycle actually moved, and when. The
+                            // status line is transient (it is overwritten by the
+                            // next message), so a user who looks away for a
+                            // minute has no way to tell whether sync is alive.
+                            // This line persists until the next cycle.
+                            Text {
+                                text: root.sync-detail;
+                                font-size: Type.caption;
+                                color: Palette.text-faint;
+                                wrap: word-wrap;
+                                line-height-factor: 1.55;
+                                visible: root.sync-signed-in && root.sync-detail != "";
+                            }
+
                             Text {
                                 text: Strings.sync-blurb;
                                 font-size: Type.caption;
@@ -3300,7 +3314,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                         }
                                     ]
                                     Text {
-                                        text: Strings.sync-last;
+                                        text: Strings.sync-now;
                                         font-size: Type.small;
                                         color: Palette.text;
                                         horizontal-alignment: center;

@@ -176,6 +176,11 @@ export global Strings {
     out property <string> sync-save-id: fa ? "ذخیرهٔ شناسه" : "Save id";
     out property <string> sync-client-placeholder: fa ? "شناسهٔ کلاینت…apps.googleusercontent.com" : "client id…apps.googleusercontent.com";
     out property <string> sync-last: fa ? "آخرین همگام‌سازی" : "Last sync";
+    // The button under this label does a sync right now; the label above the
+    // card says when the last one happened. Naming the button after the status
+    // made it read as a readout, and users pressed it expecting nothing to
+    // happen.
+    out property <string> sync-now: fa ? "همگام‌سازی همین حالا" : "Sync now";
     out property <string> sync-this-device: fa ? "این دستگاه" : "This device";
     out property <string> sync-settings-note: fa
         ? "تنظیمات ظاهری، زمان‌ها و صداها هم بین دستگاه‌ها همگام می‌شوند. کلیدهای میان‌بر، فرمان‌های خودکار و حالت فشرده مخصوص همین دستگاه می‌مانند."

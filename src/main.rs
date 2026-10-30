@@ -824,6 +824,57 @@ fn update_automation_summary(win: &slint::Weak<PanganWindow>, app: &AppState) {
     }
 }
 
+/// A one-line, human summary of when sync last succeeded.
+///
+/// Returns `None` when this device has never completed a cycle, so the card
+/// shows nothing rather than "never" — a fresh install is not a failure.
+fn last_sync_detail(app: &AppState, en: bool) -> Option<String> {
+    let last = app.device.lock().unwrap().last_ok;
+    describe_last_sync(last, chrono::Utc::now().timestamp(), en)
+}
+
+/// The formatting half of `last_sync_detail`, split out so it can be tested
+/// without an `AppState`.
+fn describe_last_sync(last: i64, now: i64, en: bool) -> Option<String> {
+    if last <= 0 {
+        return None;
+    }
+    let ago = (now - last).max(0);
+    let when = if ago < 60 {
+        if en {
+            "just now".to_string()
+        } else {
+            "همین حالا".to_string()
+        }
+    } else if ago < 3600 {
+        let m = ago / 60;
+        if en {
+            format!("{m} min ago")
+        } else {
+            format!("{m} دقیقه پیش")
+        }
+    } else if ago < 86_400 {
+        let h = ago / 3600;
+        if en {
+            format!("{h} h ago")
+        } else {
+            format!("{h} ساعت پیش")
+        }
+    } else {
+        let d = ago / 86_400;
+        if en {
+            format!("{d} d ago")
+        } else {
+            format!("{d} روز پیش")
+        }
+    };
+    Some(if en {
+        format!("Last successful sync: {when}")
+    } else {
+        format!("آخرین همگام‌سازی موفق: {when}")
+    })
+}
+
 /// Run one cloud sync on a background thread.
 ///
 /// The network call must not happen on the UI thread: a slow Drive request
@@ -856,12 +907,15 @@ fn do_sync(win: &slint::Weak<PanganWindow>, app: &Arc<AppState>) {
     let engine = Arc::clone(&app.cloud);
     let device_arc = Arc::clone(&app.device);
 
-    {
-        let mut st = engine.state.lock().unwrap();
-        if st.busy {
-            return; // one cycle at a time; the running one will report
-        }
-        st.busy = true;
+    // Claim the engine *before* the caller consumes the dirty flag, and put the
+    // flag back if the claim fails. Doing it the other way round lost edits: the
+    // timer cleared `dirty`, then found a cycle already running and returned,
+    // and the edit — made after that cycle snapshotted the data — was never
+    // pushed until the next interval, or until the next launch if the user
+    // closed the app first.
+    if !engine.try_begin() {
+        engine.mark_dirty();
+        return; // one cycle at a time; the running one will report
     }
 
     std::thread::spawn(move || {
@@ -893,8 +947,13 @@ fn do_sync(win: &slint::Weak<PanganWindow>, app: &Arc<AppState>) {
         }
         // Persist the device stamps: without them the next launch would treat
         // every setting as freshly edited and overwrite the other device.
+        // The last-success time is stamped here too, so the settings card can
+        // still say when sync last worked after a restart.
         {
-            let dev = device_arc.lock().unwrap();
+            let mut dev = device_arc.lock().unwrap();
+            if result.is_ok() {
+                dev.last_ok = chrono::Utc::now().timestamp();
+            }
             dev.save();
         }
 
@@ -993,10 +1052,15 @@ fn do_sync(win: &slint::Weak<PanganWindow>, app: &Arc<AppState>) {
         // This is the half of sync that is invisible when it works and obvious
         // when it does not.
         let settings_arrived = matches!(&result, Ok(out) if out.settings_pulled);
+        // Computed before the closure so the event loop does no file locking.
+        let detail = last_sync_detail(&app2, en);
 
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(w) = weak.upgrade() {
                 w.set_sync_status(SharedString::from(status));
+                if let Some(d) = detail {
+                    w.set_sync_detail(SharedString::from(d));
+                }
                 if settings_arrived {
                     push_settings_to_ui(&w, &app2);
                     // New durations have to reach the timer, not just the
@@ -1082,6 +1146,12 @@ fn apply_ui_settings(win: &PanganWindow, app: &AppState) -> Settings {
     s.save();
     *app.settings.lock().unwrap() = s.clone();
     *app.sound_theme.lock().unwrap() = s.sound_theme.clone();
+    // Settings are portable, so closing the settings screen is a sync event.
+    // Without this the other device kept the old durations until the next
+    // interval elapsed — the user changes 25 to 50, opens the laptop, and gets
+    // 25 minutes. The whole point of syncing settings is that this does not
+    // happen.
+    app.cloud.mark_dirty();
     s
 }
 
@@ -1127,6 +1197,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Which machine this is, so the card can say so once there are two.
         let device_name = app.device.lock().unwrap().device_name.clone();
         win.set_sync_device_name(SharedString::from(device_name));
+        // When the last successful exchange happened, if it ever did. A card
+        // that only says "Connected" cannot tell a user whether sync is
+        // actually running or whether it has been failing quietly for a day.
+        if let Some(detail) = last_sync_detail(&app, settings.lang == "en") {
+            win.set_sync_detail(SharedString::from(detail));
+        }
     }
 
     // Initial theme application.
@@ -1374,13 +1450,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ => "system".into(),
         };
         let label = s.theme_label();
+        let pref = s.theme.clone();
+        let era = s.era.clone();
         s.save();
-        let resolved = resolve_theme(&s.theme);
+        drop(s);
+        // The theme is a portable setting: cycle it here and the laptop follows.
+        theme_app.cloud.mark_dirty();
+        let resolved = resolve_theme(&pref);
         if let Some(w) = theme_weak.upgrade() {
             w.set_theme_label(SharedString::from(label));
-            w.set_theme_pref(SharedString::from(s.theme.clone()));
+            w.set_theme_pref(SharedString::from(pref));
             w.set_resolved_theme(SharedString::from(resolved));
-            apply_palette(&w, resolved, &s.era);
+            apply_palette(&w, resolved, &era);
         }
     });
 
@@ -1390,6 +1471,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut s = sound_app.settings.lock().unwrap();
         s.sound_enabled = !s.sound_enabled;
         s.save();
+        drop(s);
+        // `sound_enabled` is portable; a silent laptop after turning sound on
+        // at the desktop is exactly the surprise sync is supposed to remove.
+        sound_app.cloud.mark_dirty();
     });
 
     // Preview a sound theme (reads the currently-selected theme from the UI).
@@ -1621,6 +1706,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             s.save();
             (resolve_theme(&s.theme), s.era.clone())
         };
+        settheme_app.cloud.mark_dirty();
         if let Some(w) = settheme_weak.upgrade() {
             w.set_theme_pref(SharedString::from(pref));
             w.set_resolved_theme(SharedString::from(resolved));
@@ -1640,6 +1726,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             s.save();
             (resolve_theme(&s.theme), s.era_label(), s.era_blurb())
         };
+        era_app.cloud.mark_dirty();
         if let Some(w) = era_weak.upgrade() {
             w.set_era(SharedString::from(era.clone()));
             w.set_era_label(SharedString::from(label));
@@ -1698,6 +1785,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             s.save();
             (s.era_label(), s.era_blurb(), s.theme_label())
         };
+        lang_app.cloud.mark_dirty();
         if let Some(w) = lang_weak.upgrade() {
             let g = ui::Strings::get(&w);
             g.set_lang(SharedString::from(lang.clone()));
@@ -2422,5 +2510,41 @@ mod day_key_tests {
             let key = format!("{y:04}-{m:02}-{d:02}");
             assert_eq!(parse_day_key(&key), Some((y, m, d)), "key {key}");
         }
+    }
+}
+
+#[cfg(test)]
+mod sync_detail_tests {
+    use super::describe_last_sync;
+
+    #[test]
+    fn a_device_that_never_synced_says_nothing_rather_than_never() {
+        // A fresh install is not a failure. Showing "never" would read as one.
+        assert_eq!(describe_last_sync(0, 1_000_000, true), None);
+        assert_eq!(describe_last_sync(-5, 1_000_000, false), None);
+    }
+
+    #[test]
+    fn the_age_picks_the_right_unit() {
+        let now = 1_000_000;
+        assert!(describe_last_sync(now - 5, now, true).unwrap().contains("just now"));
+        assert!(describe_last_sync(now - 300, now, true).unwrap().contains("5 min ago"));
+        assert!(describe_last_sync(now - 7_200, now, true).unwrap().contains("2 h ago"));
+        assert!(describe_last_sync(now - 172_800, now, true).unwrap().contains("2 d ago"));
+    }
+
+    #[test]
+    fn a_clock_that_went_backwards_does_not_produce_a_negative_age() {
+        // NTP corrections and timezone edits happen; "in -3 minutes" is worse
+        // than saying "just now".
+        let detail = describe_last_sync(1_000_100, 1_000_000, true).unwrap();
+        assert!(detail.contains("just now"), "got {detail}");
+    }
+
+    #[test]
+    fn the_persian_copy_is_persian() {
+        let detail = describe_last_sync(1_000_000 - 300, 1_000_000, false).unwrap();
+        assert!(detail.contains("دقیقه پیش"), "got {detail}");
+        assert!(!detail.contains("min ago"), "got {detail}");
     }
 }

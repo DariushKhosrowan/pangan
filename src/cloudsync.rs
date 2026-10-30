@@ -82,6 +82,28 @@ impl Engine {
         self.dirty.store(true, Ordering::Relaxed);
     }
 
+    /// Claim the engine for one cycle.
+    ///
+    /// Returns false when a cycle is already running. Note what this does
+    /// *not* do: it does not touch the dirty flag. That ordering is the whole
+    /// point. A caller that clears `dirty` and then discovers the engine is
+    /// busy has already thrown away the only record that a change happened,
+    /// and the running cycle cannot carry it — it snapshotted the data before
+    /// the change existed. Claim first, then consume.
+    pub fn try_begin(&self) -> bool {
+        let mut st = self.state.lock().unwrap();
+        if st.busy {
+            return false;
+        }
+        st.busy = true;
+        true
+    }
+
+    /// Release the engine after a cycle, whether it succeeded or not.
+    pub fn finish(&self) {
+        self.state.lock().unwrap().busy = false;
+    }
+
     pub fn is_dirty(&self) -> bool {
         self.dirty.load(Ordering::Relaxed)
     }
@@ -1054,5 +1076,45 @@ mod recovery_tests {
             titles.contains(&"from desktop") && titles.contains(&"from laptop"),
             "a concurrent write dropped data: {titles:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod engine_tests {
+    use super::*;
+
+    #[test]
+    fn a_busy_engine_refuses_the_claim_instead_of_stealing_it() {
+        let e = Engine::new();
+        assert!(e.try_begin(), "the first claim must succeed");
+        assert!(!e.try_begin(), "a second concurrent claim must be refused");
+        e.finish();
+        assert!(e.try_begin(), "after finishing, the engine is claimable again");
+    }
+
+    #[test]
+    fn a_refused_claim_leaves_the_dirty_flag_for_the_next_tick() {
+        // This is the regression. The timer used to clear `dirty` first and
+        // then discover the engine was busy, so the change was dropped on the
+        // floor. A refused claim must not consume the flag.
+        let e = Engine::new();
+        e.mark_dirty();
+        assert!(e.try_begin(), "the first cycle takes the engine");
+
+        // A second caller arrives while the first cycle is still in flight.
+        assert!(!e.try_begin(), "the second claim must be refused");
+        assert!(e.is_dirty(), "the change must still be pending");
+
+        e.finish();
+        assert!(e.take_dirty(), "the next tick must still see the change");
+    }
+
+    #[test]
+    fn finishing_a_cycle_does_not_clear_pending_work() {
+        let e = Engine::new();
+        e.mark_dirty();
+        assert!(e.try_begin());
+        e.finish();
+        assert!(e.is_dirty(), "finish() is not a commit; the flag is separate");
     }
 }
