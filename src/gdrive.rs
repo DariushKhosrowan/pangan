@@ -41,11 +41,19 @@ const DEVICE_CODE_URL: &str = "https://oauth2.googleapis.com/device/code";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v3/userinfo";
 
-/// `drive.appdata` is the narrowest scope that can still store the sync file:
-/// it grants access to this app's own hidden folder and nothing else. The
-/// email scope is only used to show *which* account is connected.
+/// The scopes the **device flow** is allowed to ask for.
+///
+/// Note what is missing: `drive.appdata`. Google rejects it for this grant type
+/// outright (`Invalid device flow scope`), so a device-flow sign-in cannot
+/// reach the hidden app folder. It asks for `drive.file` instead, which is
+/// narrower than full Drive access in practice: the API then only exposes
+/// files this app itself created. The cost is that the file lives where the
+/// user can see it in Drive rather than in a hidden folder.
+///
+/// The loopback flow in `oauth` has no such restriction and uses
+/// `drive.appdata`, which is why it is the preferred path.
 const SCOPE: &str =
-    "https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.email";
+    "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email";
 
 /// Base URL for the Drive API.
 ///
@@ -67,6 +75,12 @@ fn drive_base() -> String {
 /// `busy` flag never clears and every later sync is silently skipped — the app
 /// looks like it is syncing and never is. A global budget turns that into a
 /// plain error the caller can report and retry.
+/// The shared HTTP agent, exposed so the loopback sign-in flow in `oauth`
+/// uses the same timeouts and connection pool rather than building its own.
+pub fn http_agent() -> ureq::Agent {
+    agent()
+}
+
 fn agent() -> ureq::Agent {
     static ONCE: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
     ONCE.get_or_init(|| {
@@ -347,6 +361,10 @@ pub struct RemoteFile {
     pub version: i64,
     /// The concurrency token used with `If-Match`.
     pub etag: String,
+    /// Which Drive space the file was found in: `appDataFolder` (hidden, needs
+    /// the `drive.appdata` scope) or `drive` (visible in the user's Drive,
+    /// which is all a `drive.file` token can reach).
+    pub space: String,
 }
 
 /// Find the sync file's id inside `appDataFolder`, if it exists.
@@ -354,30 +372,52 @@ fn find_file(token: &str, name: &str) -> Result<Option<String>, String> {
     Ok(find_file_meta(token, name)?.map(|f| f.id))
 }
 
+/// The spaces the sync file can live in, in order of preference.
+///
+/// `appDataFolder` is the hidden per-app folder and is the better home: it is
+/// invisible in the Drive UI, so it cannot be renamed, edited, or deleted by
+/// hand. But it needs the `drive.appdata` scope, which only the loopback
+/// sign-in can obtain. A device-flow token has `drive.file` instead, and for
+/// that token `appDataFolder` is not reachable at all — so the file has to go
+/// in the user's normal Drive. Listing `spaces=drive` under `drive.file`
+/// returns only files this app created, so the search stays narrow.
+const SPACES: [&str; 2] = ["appDataFolder", "drive"];
+
 /// Find the sync file and its concurrency metadata.
+///
+/// Searches both spaces, because a user who signed in with one flow and later
+/// with the other must still find their data rather than silently starting a
+/// second, empty file.
 fn find_file_meta(token: &str, name: &str) -> Result<Option<RemoteFile>, String> {
-    let url = format!(
-        "{}/drive/v3/files?spaces=appDataFolder&fields=files(id,name,version,etag)&q=name%20%3D%20%27{}%27",
-        drive_base(),
-        name
-    );
-    let resp = agent()
-        .get(&url)
-        .header("Authorization", &format!("Bearer {token}"))
-        .call();
-    let text = match resp {
-        Ok(r) => r.into_body().read_to_string().unwrap_or_default(),
-        Err(e) => return Err(format!("drive list failed: {e}")),
-    };
-    let v: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| format!("drive list json: {e}"))?;
-    Ok(v["files"].as_array().and_then(|a| a.first()).map(|f| {
-        RemoteFile {
-            id: f["id"].as_str().unwrap_or("").to_string(),
-            version: f["version"].as_i64().unwrap_or(0),
-            etag: f["etag"].as_str().unwrap_or("").to_string(),
+    for space in SPACES {
+        let url = format!(
+            "{}/drive/v3/files?spaces={}&fields=files(id,name,version,etag)&q=name%20%3D%20%27{}%27",
+            drive_base(),
+            space,
+            name
+        );
+        let resp = agent()
+            .get(&url)
+            .header("Authorization", &format!("Bearer {token}"))
+            .call();
+        let text = match resp {
+            Ok(r) => r.into_body().read_to_string().unwrap_or_default(),
+            // A space this token cannot see is not an error; try the next one.
+            Err(_) => continue,
+        };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        if let Some(f) = v["files"].as_array().and_then(|a| a.first()) {
+            return Ok(Some(RemoteFile {
+                id: f["id"].as_str().unwrap_or("").to_string(),
+                version: f["version"].as_i64().unwrap_or(0),
+                etag: f["etag"].as_str().unwrap_or("").to_string(),
+                space: space.to_string(),
+            }));
         }
-    }))
+    }
+    Ok(None)
 }
 
 /// Download the sync file. `Ok(None)` means no device has uploaded yet.
@@ -476,12 +516,23 @@ pub fn upload_conditional(
             }
         }
         None => {
-            // Multipart: metadata (name + parent appDataFolder) then content.
+            // Multipart: metadata (name + parent) then content. The parent has
+            // to match the space this token can actually write to. A
+            // `drive.file` token cannot create anything in `appDataFolder`, so
+            // it goes in the user's normal Drive; a `drive.appdata` token goes
+            // in the hidden folder. Getting this wrong fails the create with a
+            // 403 that says nothing useful about which scope was at fault.
             let boundary = "pangan-sync-boundary";
-            let meta = serde_json::json!({
-                "name": name,
-                "parents": ["appDataFolder"],
-            });
+            let parent = if expected.is_some_and(|e| e.space == "drive") {
+                "drive"
+            } else {
+                "appDataFolder"
+            };
+            let meta = if parent == "drive" {
+                serde_json::json!({ "name": name })
+            } else {
+                serde_json::json!({ "name": name, "parents": ["appDataFolder"] })
+            };
             let payload = format!(
                 "--{b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{m}\r\n--{b}\r\nContent-Type: application/json\r\n\r\n{body}\r\n--{b}--",
                 b = boundary,

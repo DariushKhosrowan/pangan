@@ -273,7 +273,13 @@ impl Shared {
         if let Some(finish) = s.finish_at {
             s.remaining = finish.saturating_duration_since(now);
             if s.remaining.is_zero() {
-                if s.phase == Phase::Work {
+                // Which phase just ended decides what comes next. Passing the
+                // wrong flag here is what makes a finished break start another
+                // break: `advance(true)` means "a focus session just
+                // completed", so it increments the counter and picks a break.
+                // A break ending must call `advance(false)` to go back to work.
+                let ended_work = s.phase == Phase::Work;
+                if ended_work {
                     let rec = SessionRecord {
                         at: chrono::Utc::now().timestamp(),
                         minutes: self.cfg.lock().unwrap().work_minutes,
@@ -283,7 +289,7 @@ impl Shared {
                     *self.pending_breaks.lock().unwrap() += 1;
                 }
                 drop(s);
-                return self.advance(true);
+                return self.advance(ended_work);
             }
         }
         None
@@ -499,6 +505,43 @@ mod tests {
         let msg2 = s.tick();
         assert!(msg2.is_none());
         assert_eq!(s.snapshot().session, "آسایش کوتاه");
+    }
+
+    #[test]
+    fn a_finished_break_returns_to_work_and_does_not_chain_another_break() {
+        // The bug this pins down: `tick` advanced with `advance(true)` no
+        // matter which phase ended. `true` means "a focus session completed",
+        // so a break that ran out incremented the work counter and started
+        // *another break* — the timer sat in an endless rest loop and the user
+        // never got back to work.
+        let s = Shared::new(config());
+
+        // Finish a work session: this legitimately starts a break.
+        s.state.lock().unwrap().finish_at = Some(Instant::now() - Duration::from_secs(1));
+        s.state.lock().unwrap().running = true;
+        assert!(s.tick().is_some());
+        assert_eq!(s.snapshot().session, "آسایش کوتاه", "work should lead to a break");
+
+        // Now let the break run out. It must go back to work.
+        s.state.lock().unwrap().finish_at = Some(Instant::now() - Duration::from_secs(1));
+        s.state.lock().unwrap().running = true;
+        assert!(s.tick().is_some());
+        assert_eq!(
+            s.snapshot().session,
+            "کار ژرف",
+            "a finished break must return to focus, not start another break"
+        );
+
+        // And the work counter must not have been bumped by the break ending:
+        // one work session completed, so the next break is still a short one.
+        s.state.lock().unwrap().finish_at = Some(Instant::now() - Duration::from_secs(1));
+        s.state.lock().unwrap().running = true;
+        assert!(s.tick().is_some());
+        assert_eq!(
+            s.snapshot().session,
+            "آسایش کوتاه",
+            "the second work session is still before the long-break interval"
+        );
     }
 
     #[test]

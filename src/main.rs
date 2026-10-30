@@ -18,6 +18,7 @@ mod cloudsync;
 mod events;
 mod gdrive;
 mod merge;
+mod oauth;
 mod platform;
 mod refresh;
 mod settings;
@@ -879,6 +880,66 @@ fn describe_last_sync(last: i64, now: i64, en: bool) -> Option<String> {
 ///
 /// The network call must not happen on the UI thread: a slow Drive request
 /// would freeze the countdown, which is the one thing this app cannot do.
+/// The device-code fallback sign-in.
+///
+/// Used only when the client id cannot do a loopback redirect, which means the
+/// user registered a "TVs and Limited Input devices" client. It is the same
+/// flow as before: show a code, open the page, poll until approved. The app
+/// still needs the user to type eight characters, which is why the loopback
+/// flow is preferred — but a working sign-in beats a blocked one.
+fn device_flow_sign_in(
+    _client_id: &str,
+    en: bool,
+    weak: &slint::Weak<PanganWindow>,
+) -> Result<oauth::SignedIn, String> {
+    let started = std::time::Instant::now();
+    let code = gdrive::request_device_code()?;
+
+    // Show the code before polling, so the user can start typing immediately.
+    {
+        let user_code = code.user_code.clone();
+        let url = code.verification_url.clone();
+        let w = weak.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(win) = w.upgrade() {
+                win.set_sync_device_code(SharedString::from(user_code));
+                win.set_sync_device_url(SharedString::from(url));
+            }
+        });
+        open_in_browser(&code.verification_url);
+    }
+
+    let deadline = std::time::Instant::now()
+        + std::time::Duration::from_secs(code.expires_in.min(1800));
+    let interval = gdrive::poll_interval(code.interval);
+    loop {
+        std::thread::sleep(interval);
+        if std::time::Instant::now() > deadline {
+            let w = weak.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(win) = w.upgrade() {
+                    win.set_sync_device_code(SharedString::new());
+                }
+            });
+            return Err(if en {
+                "the code expired".to_string()
+            } else {
+                "کد منقضی شد".to_string()
+            });
+        }
+        match gdrive::poll_token(&code.device_code) {
+            gdrive::PollOutcome::Pending => continue,
+            gdrive::PollOutcome::Failed(e) => return Err(e),
+            gdrive::PollOutcome::Approved(tokens) => {
+                return Ok(oauth::SignedIn {
+                    tokens,
+                    seconds: started.elapsed().as_secs(),
+                })
+            }
+        }
+    }
+}
+
 fn do_sync(win: &slint::Weak<PanganWindow>, app: &Arc<AppState>) {
     let en = app.settings.lock().unwrap().lang == "en";
     let tokens = app.tokens.lock().unwrap().clone();
@@ -1991,11 +2052,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // ── Google sign-in (device flow) ──
+    // ── Google sign-in (one click) ──
     //
-    // The button starts the flow, shows the code, and polls Google in the
-    // background until the user approves on their phone. The UI thread never
-    // blocks: it only receives the final result.
+    // Press the button, the browser opens on the account chooser, the user
+    // picks their account, and the app is signed in. No codes to copy. The
+    // loopback listener and token exchange run on a background thread, so the
+    // UI never blocks and the window keeps repainting while the browser is up.
     let conn_app = Arc::clone(&app);
     let conn_weak = weak.clone();
     win.on_sync_connect(move || {
@@ -2018,20 +2080,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(w) = conn_weak.upgrade() {
             w.set_sync_waiting(true);
             w.set_sync_status(SharedString::from(if en {
-                "Waiting for approval…".to_string()
+                "Finish signing in in your browser…".to_string()
             } else {
-                "در انتظار تأیید…".to_string()
+                "ورود را در مرورگر کامل کنید…".to_string()
             }));
         }
 
         std::thread::spawn(move || {
-            let code = match gdrive::request_device_code() {
-                Ok(c) => c,
+            let client_id = gdrive::client_id();
+            // Two flows, one button. A Desktop-app client gets the one-click
+            // loopback sign-in. A "TVs and Limited Input devices" client cannot
+            // use a loopback redirect at all, so it falls back to the device
+            // code — worse, but it works, and the user still only presses one
+            // button. Which one applies is a property of the client id, so it
+            // is detected rather than asked.
+            let signed = if oauth::supports_loopback(&client_id) {
+                oauth::sign_in(&client_id, en, |url| open_in_browser(url))
+            } else {
+                device_flow_sign_in(&client_id, en, &weak2)
+            };
+
+            let mut tokens = match signed {
+                Ok(s) => s.tokens,
                 Err(e) => {
                     let msg = if en {
-                        format!("Google refused the request: {e}")
+                        format!("Sign-in did not finish: {e}")
                     } else {
-                        format!("گوگل درخواست را رد کرد: {e}")
+                        format!("ورود کامل نشد: {e}")
                     };
                     let w3 = weak2.clone();
                     let _ = slint::invoke_from_event_loop(move || {
@@ -2044,109 +2119,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
-            // Show the code before polling, so the user can start typing.
+            // Name the account, so the card can say *which* Google account is
+            // connected — the only way to tell two of them apart.
+            if let Ok(tok) = gdrive::access_token(&mut tokens) {
+                tokens.email = gdrive::fetch_email(&tok).unwrap_or_default();
+            }
+            let _ = sync::save_tokens(&tokens);
+            *app2.tokens.lock().unwrap() = tokens.clone();
+
+            // Signing in *is* asking for sync. A second switch would be a
+            // puzzle, not a choice.
             {
-                let user_code = code.user_code.clone();
-                let url = code.verification_url.clone();
-                let url_for_ui = url.clone();
-                let w3 = weak2.clone();
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(w) = w3.upgrade() {
-                        w.set_sync_device_code(SharedString::from(user_code));
-                        w.set_sync_device_url(SharedString::from(url_for_ui));
-                    }
-                });
-                // Open the device page for the user. The device flow is
-                // unfamiliar and the whole point is to be easy: the code is on
-                // screen, the page is already open, they type four characters.
-                // A failure here is harmless — the card still shows the code
-                // and a button to retry the browser.
-                open_in_browser(&url);
+                let mut st = app2.settings.lock().unwrap();
+                st.sync_enabled = true;
+                st.save();
             }
 
-            // Poll until approved or expired. The deadline comes from Google,
-            // so this cannot spin forever.
-            let deadline = std::time::Instant::now()
-                + std::time::Duration::from_secs(code.expires_in.min(1800));
-            let interval = gdrive::poll_interval(code.interval);
-            loop {
-                std::thread::sleep(interval);
-                if std::time::Instant::now() > deadline {
-                    let msg = if en {
-                        "The code expired. Try again.".to_string()
+            let email = tokens.email.clone();
+            let w3 = weak2.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(w) = w3.upgrade() {
+                    w.set_sync_waiting(false);
+                    w.set_sync_device_code(SharedString::new());
+                    w.set_sync_signed_in(true);
+                    w.set_sync_auto_on(true);
+                    w.set_sync_account(SharedString::from(email));
+                    w.set_sync_status(SharedString::from(if en {
+                        "Connected".to_string()
                     } else {
-                        "کد منقضی شد. دوباره تلاش کنید.".to_string()
-                    };
-                    let w3 = weak2.clone();
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(w) = w3.upgrade() {
-                            w.set_sync_waiting(false);
-                            w.set_sync_device_code(SharedString::new());
-                            w.set_sync_status(SharedString::from(msg));
-                        }
-                    });
-                    return;
+                        "متصل شد".to_string()
+                    }));
                 }
-                match gdrive::poll_token(&code.device_code) {
-                    gdrive::PollOutcome::Pending => continue,
-                    gdrive::PollOutcome::Failed(e) => {
-                        let msg = if en {
-                            format!("Sign-in failed: {e}")
-                        } else {
-                            format!("ورود ناموفق بود: {e}")
-                        };
-                        let w3 = weak2.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(w) = w3.upgrade() {
-                                w.set_sync_waiting(false);
-                                w.set_sync_device_code(SharedString::new());
-                                w.set_sync_status(SharedString::from(msg));
-                            }
-                        });
-                        return;
-                    }
-                    gdrive::PollOutcome::Approved(mut tokens) => {
-                        // Name the account so the card can show who is signed
-                        // in, which is the only way the user can tell two
-                        // Google accounts apart.
-                        if let Ok(tok) = gdrive::access_token(&mut tokens) {
-                            tokens.email = gdrive::fetch_email(&tok).unwrap_or_default();
-                        }
-                        let _ = sync::save_tokens(&tokens);
-                        *app2.tokens.lock().unwrap() = tokens.clone();
-
-                        // Turn automatic sync on: the user just asked for sync
-                        // by signing in, so making them flip a second switch
-                        // would be a puzzle, not a choice.
-                        {
-                            let mut st = app2.settings.lock().unwrap();
-                            st.sync_enabled = true;
-                            st.save();
-                        }
-
-                        let email = tokens.email.clone();
-                        let w3 = weak2.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(w) = w3.upgrade() {
-                                w.set_sync_waiting(false);
-                                w.set_sync_device_code(SharedString::new());
-                                w.set_sync_signed_in(true);
-                                w.set_sync_auto_on(true);
-                                w.set_sync_account(SharedString::from(email));
-                                w.set_sync_status(SharedString::from(if en {
-                                    "Connected".to_string()
-                                } else {
-                                    "متصل شد".to_string()
-                                }));
-                            }
-                        });
-                        // First sync immediately, so the account card is not
-                        // the only thing that changed.
-                        do_sync(&weak2, &app2);
-                        return;
-                    }
-                }
-            }
+            });
+            // First sync immediately, so something visibly arrives.
+            do_sync(&weak2, &app2);
         });
     });
 
