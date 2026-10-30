@@ -21,7 +21,6 @@ pub const ERA_CYRUS: &str = "cyrus";
 pub const ERA_DARIUS: &str = "darius";
 pub const ERA_SASANID: &str = "sasanid";
 pub const ERA_PARTHIAN: &str = "parthian";
-pub const ERAS: [&str; 4] = [ERA_CYRUS, ERA_DARIUS, ERA_PARTHIAN, ERA_SASANID];
 
 pub const SOUND_SANTUR: &str = "santur";
 pub const SOUND_DAF: &str = "daf";

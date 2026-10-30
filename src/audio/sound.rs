@@ -124,11 +124,12 @@ fn sand_tick(gain: f32) -> Vec<i16> {
 
 fn mix(a: &[i16], b: &[i16], out: &mut Vec<i16>) {
     let len = a.len().max(b.len());
-    out.resize(len, 0);
+    out.clear();
+    out.reserve(len);
     for i in 0..len {
         let sa = a.get(i).copied().unwrap_or(0) as i32;
         let sb = b.get(i).copied().unwrap_or(0) as i32;
-        out[i] = ((sa + sb) >> 1).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+        out.push(((sa + sb) >> 1).clamp(i16::MIN as i32, i16::MAX as i32) as i16);
     }
 }
 
@@ -140,17 +141,15 @@ fn append_into(buf: &mut Vec<i16>, samples: &[i16]) {
 // Phrases (melodic contours tuned to Dastgah-e Mahur / Homayoun flavor)
 // ---------------------------------------------------------------------------
 
-/// Frequencies of a Mahur-ish phrase around C (step 1/2 in 12-edo).
-const MAHUR: [f32; 7] = [261.63, 293.66, 329.63, 369.99, 392.00, 440.00, 493.88]; // C D E F# G A B
 
 /// Place a note into `buf` at `start_sample`, summing overlaps.
 fn place_note(buf: &mut Vec<i16>, start_sample: usize, note: &[i16]) {
     if buf.len() < start_sample + note.len() {
         buf.resize(start_sample + note.len(), 0);
     }
-    for i in 0..note.len() {
-        let idx = start_sample + i;
-        let sum = buf[idx] as i32 + note[i] as i32;
+    for (offset, sample) in note.iter().enumerate() {
+        let idx = start_sample + offset;
+        let sum = buf[idx] as i32 + *sample as i32;
         buf[idx] = (sum >> 1).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
     }
 }

@@ -120,9 +120,6 @@ pub fn is_auth_error(msg: &str) -> bool {
         || m.contains("sign in again")
 }
 
-/// The file name inside `appDataFolder`.
-const REMOTE_FILE: &str = "pangan-sync.json";
-
 /// Client id baked into this build, if any.
 ///
 /// The point of compiling it in is that the user never sees a setup step: they
@@ -454,6 +451,10 @@ pub fn fetch_email(token: &str) -> Option<String> {
 /// arrive simply wins. Sending the etag back with `If-Match` turns that into a
 /// 412 the caller can retry, which is the difference between "sync" and "sync
 /// except when two machines are awake".
+// Fields below are part of an external format (Drive files API metadata (version, space)).
+// Nothing in this binary reads them yet; they are kept so the shape
+// stays documented and parsing does not silently drift.
+#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct RemoteFile {
     pub id: String,
@@ -465,11 +466,6 @@ pub struct RemoteFile {
     /// the `drive.appdata` scope) or `drive` (visible in the user's Drive,
     /// which is all a `drive.file` token can reach).
     pub space: String,
-}
-
-/// Find the sync file's id inside `appDataFolder`, if it exists.
-fn find_file(token: &str, name: &str) -> Result<Option<String>, String> {
-    Ok(find_file_meta(token, name)?.map(|f| f.id))
 }
 
 /// The spaces the sync file can live in, in order of preference.
@@ -540,14 +536,26 @@ fn find_file_meta(token: &str, name: &str) -> Result<Option<RemoteFile>, String>
     Ok(None)
 }
 
-/// Download the sync file. `Ok(None)` means no device has uploaded yet.
-pub fn download(token: &str) -> Result<Option<String>, String> {
-    download_named(token, REMOTE_FILE)
-}
-
 /// Download any file from `appDataFolder` by name.
 pub fn download_named(token: &str, name: &str) -> Result<Option<String>, String> {
     Ok(download_meta(token, name)?.map(|(text, _)| text))
+}
+
+/// Read the sync file. `Ok(None)` means no device has uploaded yet.
+///
+/// The engine itself goes through [`download_meta`], because it needs the
+/// concurrency token to write back safely. This is the plain read, kept for
+/// the round-trip tests that assert what a device would actually see.
+#[cfg(test)]
+pub fn download(token: &str) -> Result<Option<String>, String> {
+    download_named(token, "pangan-sync.json")
+}
+
+/// Write the sync file unconditionally, as a device with no metadata would.
+/// Test helper: the engine always goes through [`upload_conditional`].
+#[cfg(test)]
+pub fn upload(token: &str, body: &str) -> Result<(), String> {
+    upload_named(token, "pangan-sync.json", body)
 }
 
 /// Download a file together with the metadata needed to write it back safely.
@@ -571,11 +579,6 @@ pub fn download_meta(token: &str, name: &str) -> Result<Option<(String, RemoteFi
         ))),
         Err(e) => Err(format!("drive download failed: {e}")),
     }
-}
-
-/// Upload the sync file, creating it on first use and updating it after.
-pub fn upload(token: &str, body: &str) -> Result<(), String> {
-    upload_named(token, REMOTE_FILE, body)
 }
 
 /// Upload any file to `appDataFolder` by name, creating or updating it.
@@ -890,6 +893,8 @@ pub(crate) mod drive_roundtrip {
     /// conditional write is the whole defence against two devices clobbering
     /// each other. A fake that always says "yes" would pass while the real
     /// thing lost data.
+    #[allow(dead_code)] // shape of the fake Drive file; body is read by the
+    // fake server's own response builder
     struct FakeFile {
         body: String,
         version: u64,

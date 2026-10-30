@@ -99,22 +99,6 @@ pub fn load_client_secret() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Store the client secret, keeping every other key in the file.
-pub fn save_client_secret(secret: &str) -> Result<(), String> {
-    let path = sync_path();
-    let mut root: toml::Table = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|t| t.parse().ok())
-        .unwrap_or_default();
-    let secret = secret.trim();
-    if secret.is_empty() {
-        root.remove("client_secret");
-    } else {
-        root.insert("client_secret".into(), secret.to_string().into());
-    }
-    write_private(&path, &root)
-}
-
 /// Write the file with owner-only permissions.
 ///
 /// The refresh token and the client secret both live here. A world-readable

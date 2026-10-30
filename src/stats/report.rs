@@ -46,6 +46,7 @@ impl Period {
     }
 
     /// The full label, used in the report's own header line.
+    #[allow(dead_code)] // test support, not called from the app
     pub fn title(&self) -> &'static str {
         match self {
             Period::Day => "امروز",
@@ -56,6 +57,7 @@ impl Period {
         }
     }
 
+#[allow(dead_code)] // test support, not called from the app
     pub fn title_en(&self) -> &'static str {
         match self {
             Period::Day => "Today",
@@ -95,6 +97,7 @@ pub struct Range {
 }
 
 impl Range {
+    #[allow(dead_code)] // test support, not called from the app
     pub fn days(&self) -> u64 {
         (self.end - self.start).num_days().max(0) as u64 + 1
     }
@@ -159,6 +162,10 @@ pub fn bounds(period: Period, offset: i32, today: NaiveDate, earliest: Option<Na
 // ───────────────────────────────────────────────────────────────────────────
 
 /// One column of the report's chart.
+// Fields below are part of an external format (chart bucket; sessions is drawn by the report screen).
+// Nothing in this binary reads them yet; they are kept so the shape
+// stays documented and parsing does not silently drift.
+#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct Bucket {
     /// Short label under the column ("ش", "۱۲", "مهر").
@@ -174,6 +181,10 @@ pub struct Bucket {
     pub future: bool,
 }
 
+// Fields below are part of an external format (report payload; labels are read by the report screen).
+// Nothing in this binary reads them yet; they are kept so the shape
+// stays documented and parsing does not silently drift.
+#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct ReportStats {
     pub period_label: String,
@@ -441,6 +452,7 @@ fn build_buckets(
 /// `offset` is how many periods back to look: 0 is the current one. The
 /// previous period is always computed too, so the report can say whether the
 /// user is up or down without a second call.
+#[cfg(test)]
 pub fn report(sessions: &[SessionRecord], period: Period, offset: i32) -> ReportStats {
     let today = Local::now().date_naive(); let en = false; // caller re-labels; kept for internal formatting defaults
     let earliest = sessions.iter().filter_map(|s| date_of(s.at)).min(); report_at(sessions, period, offset, today, earliest, en)

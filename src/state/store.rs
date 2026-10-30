@@ -158,6 +158,7 @@ impl Store {
     }
 
     /// Move a task to another day, keeping its time.
+    #[cfg(test)]
     pub fn set_task_date(&mut self, id: u64, date: String) {
         if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
             t.date = date;

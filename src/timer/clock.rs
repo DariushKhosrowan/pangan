@@ -47,10 +47,6 @@ impl Default for Config {
     }
 }
 
-pub fn load_config() -> Config {
-    Config::from(&Settings::load())
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Phase {
     Work,
@@ -211,6 +207,8 @@ impl Shared {
     }
 
     /// The current durations, for callers that need to read them back.
+    #[cfg(test)]
+    #[allow(dead_code)] // test support, not called from the app
     pub fn config(&self) -> Config {
         self.cfg.lock().unwrap().clone()
     }

@@ -41,6 +41,10 @@ use std::sync::Mutex;
 const MAX_ATTEMPTS: usize = 3;
 
 /// What happened on the last sync, for the status line.
+// Fields below are part of an external format (sync status shown in Settings (connected/email)).
+// Nothing in this binary reads them yet; they are kept so the shape
+// stays documented and parsing does not silently drift.
+#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct SyncState {
     /// Human-readable status, already localised by the caller.
@@ -56,6 +60,10 @@ pub struct SyncState {
 }
 
 /// Shared sync engine, owned by the app and driven from a timer.
+// Fields below are part of an external format (enabled is set by the Settings toggle).
+// Nothing in this binary reads them yet; they are kept so the shape
+// stays documented and parsing does not silently drift.
+#[allow(dead_code)]
 pub struct Engine {
     pub state: Mutex<SyncState>,
     /// Set when the user turns automatic sync off.
@@ -100,10 +108,12 @@ impl Engine {
     }
 
     /// Release the engine after a cycle, whether it succeeded or not.
+    #[allow(dead_code)] // test support, not called from the app
     pub fn finish(&self) {
         self.state.lock().unwrap().busy = false;
     }
 
+    #[allow(dead_code)] // test support, not called from the app
     pub fn is_dirty(&self) -> bool {
         self.dirty.load(Ordering::Relaxed)
     }
@@ -114,10 +124,12 @@ impl Engine {
         self.dirty.swap(false, Ordering::Relaxed)
     }
 
+    #[allow(dead_code)] // test support, not called from the app
     pub fn set_status(&self, s: impl Into<String>) {
         self.state.lock().unwrap().status = s.into();
     }
 
+#[allow(dead_code)] // test support, not called from the app
     pub fn status(&self) -> String {
         self.state.lock().unwrap().status.clone()
     }
@@ -288,6 +300,10 @@ fn attempt_once(
 }
 
 /// What a sync cycle did, so the UI can say something true.
+// Fields below are part of an external format (what a cycle did; reported to the status line).
+// Nothing in this binary reads them yet; they are kept so the shape
+// stays documented and parsing does not silently drift.
+#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct Outcome {
     pub pulled: bool,

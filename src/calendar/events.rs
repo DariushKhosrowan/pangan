@@ -16,6 +16,10 @@
 use serde::Deserialize;
 
 /// The Iranian-heritage entry for one Jalali day.
+// Fields below are part of an external format (Wikipedia page title, carried by data/day_events.json).
+// Nothing in this binary reads them yet; they are kept so the shape
+// stays documented and parsing does not silently drift.
+#[allow(dead_code)]
 #[derive(Deserialize, Clone, Debug, Default)]
 pub struct IranDay {
     #[serde(default)]
@@ -133,6 +137,10 @@ pub enum Kind {
 }
 
 /// One display row.
+// Fields below are part of an external format (display row variant; kind decides the icon).
+// Nothing in this binary reads them yet; they are kept so the shape
+// stays documented and parsing does not silently drift.
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct Row {
     pub kind: Kind,
@@ -224,11 +232,13 @@ impl Events {
     }
 
     /// True when the embedded table has any Iranian data at all.
+    #[allow(dead_code)] // test support, not called from the app
     pub fn has_iran(&self) -> bool {
         !self.table.iran.is_empty()
     }
 
     /// (days with Iranian data, days with world data)
+#[allow(dead_code)] // test support, not called from the app
     pub fn coverage(&self) -> (usize, usize) {
         let iran = self
             .table

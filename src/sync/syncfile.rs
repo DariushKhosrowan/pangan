@@ -89,6 +89,7 @@ impl SyncSettings {
     /// Used to seed a fresh state file: the values are known, but nothing has
     /// been *changed* yet, so nothing should claim to be newer than the other
     /// device's copy.
+    #[cfg(test)]
     pub fn snapshot(settings: &Settings) -> Self {
         Self {
             values: portable_table(settings),
@@ -202,6 +203,7 @@ impl SyncSettings {
         }
     }
 
+    /// True when the other device has not sent any portable setting yet.
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
@@ -314,6 +316,7 @@ impl Envelope {
     }
 
     /// True when this envelope holds nothing worth uploading.
+    #[allow(dead_code)] // test support, not called from the app
     pub fn is_empty(&self) -> bool {
         self.data.sessions.is_empty()
             && self.data.tasks.is_empty()

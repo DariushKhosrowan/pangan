@@ -107,6 +107,8 @@ impl AppState {
         }
     }
 
+    #[cfg(test)]
+    #[allow(dead_code)] // test support, not called from the app
     fn save_settings(&self) {
         let s = self.settings.lock().unwrap().clone();
         s.save();

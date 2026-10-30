@@ -296,6 +296,7 @@ fn serve_one(listener: &TcpListener, lang_en: bool) -> Option<(Callback, String)
 
 /// What a completed sign-in produced, plus how long it took, for the status
 /// line.
+#[allow(dead_code)] // `seconds` is elapsed time; the UI shows the outcome only
 pub struct SignedIn {
     pub tokens: Tokens,
     pub seconds: u64,

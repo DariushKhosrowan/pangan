@@ -30,6 +30,7 @@ pub const MONTHS: [&str; 12] = [
 
 /// The modern New Persian spellings, used only to address Wikipedia pages,
 /// which are titled with the modern forms. Never shown to the user.
+#[allow(dead_code)] // test support, not called from the app
 pub const MONTHS_NEW_PERSIAN: [&str; 12] = [
     "فروردین",
     "اردیبهشت",
@@ -122,9 +123,6 @@ pub const DAY_NAMES: [&str; 30] = [
     "انارام",    // 30
 ];
 
-/// The five Gatha days (پنجه) that close the year, plus the leap-day name.
-pub const GATHA_DAYS: [&str; 5] = ["اهنود", "اشتود", "سپنتمد", "وهوخشتر", "وهشتواش"];
-pub const LEAP_DAY_NAME: &str = "اورداد";
 
 /// English transliterations of the thirty day-names, same order.
 pub const DAY_NAMES_EN: [&str; 30] = [
@@ -161,6 +159,10 @@ pub const DAY_NAMES_EN: [&str; 30] = [
 ];
 
 /// What the day is called in the old calendar.
+// Fields below are part of an external format (the day-name table; month/is_feast/feast are the feast test).
+// Nothing in this binary reads them yet; they are kept so the shape
+// stays documented and parsing does not silently drift.
+#[allow(dead_code)]
 pub struct DayName {
     /// The day-name itself, e.g. "مهر".
     pub name: &'static str,
