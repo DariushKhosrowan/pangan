@@ -1123,7 +1123,7 @@ mod engine_tests {
 #[cfg(test)]
 mod everything_syncs_tests {
     use super::*;
-    use crate::stats::stats::{self, Period};
+    use crate::stats::report::{self as stats, Period};
     use crate::state::store::{SessionRecord, Task};
 
     fn task(id: u64, title: &str, updated_at: i64) -> Task {

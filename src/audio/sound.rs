@@ -485,7 +485,7 @@ mod tests {
                 .work
                 .iter()
                 .chain(t.rest.iter())
-                .map(|s| s.abs() as u32)
+                .map(|s| s.unsigned_abs() as u32)
                 .max()
                 .unwrap_or(0);
             assert!(peak > 0, "{theme} silent");

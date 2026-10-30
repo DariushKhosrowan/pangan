@@ -325,7 +325,7 @@ const MONTH_NAME_DAY: [u32; 12] = [
 /// Is `year` a leap year in the Jalali calendar?
 pub fn is_leap(year: i32) -> bool {
     // 33-year cycle: years where (year % 33) is one of these have 366 days.
-    let r = ((year % 33) + 33) % 33;
+    let r = year.rem_euclid(33);
     matches!(r, 1 | 5 | 9 | 13 | 17 | 22 | 26 | 30)
 }
 
@@ -440,7 +440,7 @@ pub fn day_name(month: u32, day: u32) -> DayName {
 
     // Days 1..30 carry the thirty names; 31 is the extra day of the first six
     // months, which has no name of its own.
-    if day >= 1 && day <= 30 {
+    if (1..=30).contains(&day) {
         let name = DAY_NAMES[(day - 1) as usize];
         let name_en = DAY_NAMES_EN[(day - 1) as usize];
         let is_feast = MONTH_NAME_DAY
@@ -578,7 +578,7 @@ pub fn month_grid(jy: i32, jm: u32, today: (i32, u32, u32)) -> Vec<GridCell> {
     let jdn = jalali_to_jdn(jy, jm, 1);
     let lead = ((jdn + 2) % 7) as u32;
 
-    let mut cells = Vec::with_capacity(((lead + len + 6) / 7 * 7) as usize);
+    let mut cells = Vec::with_capacity(((lead + len).div_ceil(7) * 7) as usize);
     for _ in 0..lead {
         cells.push(GridCell {
             day: 0,

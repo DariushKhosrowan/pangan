@@ -11,7 +11,7 @@
 //! The old code used a Monday-first week with a Saturday-first calendar on the
 //! next screen, which is how the bar chart ended up labelling the wrong day.
 
-use crate::calendar::calendar;
+use crate::calendar::jalali as calendar;
 use crate::state::store::SessionRecord;
 use chrono::{Datelike, Duration, Local, NaiveDate};
 

@@ -12,9 +12,9 @@ use slint::{
 
 use crate::app::automation;
 use crate::audio::sound;
-use crate::calendar::{calendar, chronicle, events, refresh};
+use crate::calendar::{chronicle, events, jalali as calendar, refresh};
 use crate::state::{settings, store};
-use crate::stats::stats;
+use crate::stats::report as stats;
 use crate::sync::{backup as sync, cloudsync, gdrive, oauth, syncfile};
 use crate::timer::clock;
 
@@ -328,7 +328,7 @@ fn run_action(
         }
         TrayAction::Quit => {
             // Last chance to deliver anything still unsynced.
-            flush_on_quit(&app);
+            flush_on_quit(app);
             shared.quit.store(true, Ordering::Relaxed);
             let _ = slint::quit_event_loop();
             return;
@@ -1510,7 +1510,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             (420.0, 680.0)
         };
-        let _ = win
+        win
             .window()
             .set_size(slint::WindowSize::Logical(slint::LogicalSize::new(w0, h0)));
     }
@@ -1552,11 +1552,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             if tick_app.settings.lock().unwrap().sound_enabled {
                 sound::play(&tick_sounds_work, volume);
             }
-        } else if breaks > 0 {
-            if tick_app.settings.lock().unwrap().sound_enabled {
+        } else if breaks > 0
+            && tick_app.settings.lock().unwrap().sound_enabled {
                 sound::play(&tick_sounds_rest, volume);
             }
-        }
 
         if let Some(win) = tick_weak.upgrade() {
             apply_snapshot(&win, &tick_shared);
@@ -2075,7 +2074,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     win.on_refresh_events(move || {
         let Some(w) = ref_weak.upgrade() else { return };
         let g = crate::ui::Strings::get(&w);
-        w.set_refresh_status(SharedString::from(g.get_refreshing()));
+        w.set_refresh_status(g.get_refreshing());
         let app2 = Arc::clone(&ref_app);
         let weak2 = ref_weak.clone();
         std::thread::spawn(move || {
@@ -2180,7 +2179,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Open an external URL in the user's default browser (About / credits links).
     // Only http(s) is accepted, so a stray string can never launch a local binary.
     win.on_open_url(|url| {
-        open_in_browser(&url.to_string());
+        open_in_browser(url.as_ref());
     });
 
     // Frameless window drag: move the window with the pointer.
@@ -2189,7 +2188,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(w) = drag_weak.upgrade() {
             let x = w.get_drag_origin_x();
             let y = w.get_drag_origin_y();
-            let _ = w.window().set_position(slint::WindowPosition::Logical(
+            w.window().set_position(slint::WindowPosition::Logical(
                 slint::LogicalPosition::new(x, y),
             ));
         }
@@ -2210,7 +2209,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(w) = cm_weak.upgrade() {
             w.set_compact_mode(on);
             let (cw, ch) = if on { (320.0, 300.0) } else { (420.0, 680.0) };
-            let _ = w
+            w
                 .window()
                 .set_size(slint::WindowSize::Logical(slint::LogicalSize::new(cw, ch)));
         }
@@ -2307,7 +2306,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // button. Which one applies is a property of the client id, so it
             // is detected rather than asked.
             let signed = if oauth::supports_loopback(&client_id) {
-                oauth::sign_in(&client_id, en, |url| open_in_browser(url))
+                oauth::sign_in(&client_id, en, open_in_browser)
             } else {
                 device_flow_sign_in(&client_id, en, &weak2)
             };
@@ -2536,7 +2535,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 } else {
                                     (420.0, 680.0)
                                 };
-                                let _ = w.window().set_size(slint::WindowSize::Logical(
+                                w.window().set_size(slint::WindowSize::Logical(
                                     slint::LogicalSize::new(cw, ch),
                                 ));
                                 w.set_theme_pref(SharedString::from(s.theme.clone()));
