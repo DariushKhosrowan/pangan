@@ -406,6 +406,19 @@ impl Shared {
         let s = self.state.lock().unwrap();
         s.running && s.phase == Phase::Work
     }
+
+    /// True when the clock is sitting at the start of an untouched focus block.
+    ///
+    /// This is the condition the decree dialog is gated on, and it lives here
+    /// rather than in the UI so the definition cannot drift from the timer's:
+    /// work phase, paused, and not a single second consumed. Resuming a block
+    /// that is already part-way through is deliberately *not* this, because
+    /// asking what a half-finished block is for is a question with no useful
+    /// answer.
+    pub fn at_fresh_work_start(&self) -> bool {
+        let s = self.state.lock().unwrap();
+        s.phase == Phase::Work && !s.running && s.remaining == s.total
+    }
 }
 
 #[cfg(test)]
@@ -424,7 +437,11 @@ mod tests {
         longer.work_minutes = 50;
         shared.set_config(longer);
 
-        assert_eq!(shared.snapshot().time, "50:00", "paused dial must follow the new duration");
+        assert_eq!(
+            shared.snapshot().time,
+            "50:00",
+            "paused dial must follow the new duration"
+        );
     }
 
     /// A running countdown keeps its own total: the user started a 25-minute
@@ -590,7 +607,11 @@ mod tests {
         s.state.lock().unwrap().finish_at = Some(Instant::now() - Duration::from_secs(1));
         s.state.lock().unwrap().running = true;
         assert!(s.tick().is_some());
-        assert_eq!(s.snapshot().session, "آسایش کوتاه", "work should lead to a break");
+        assert_eq!(
+            s.snapshot().session,
+            "آسایش کوتاه",
+            "work should lead to a break"
+        );
 
         // Now let the break run out. It must go back to work.
         s.state.lock().unwrap().finish_at = Some(Instant::now() - Duration::from_secs(1));

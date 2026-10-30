@@ -294,6 +294,28 @@ export global Strings {
         ? "برون‌بری انجام نشد."
         : "Export failed.";
     out property <string> ins-delete: fa ? "دور انداختن" : "Discard";
+    out property <string> ins-none-written: fa ? "بی‌نوشته ماند" : "nothing written";
+
+    // ── Decrees: the intention written before the block ────────────────────
+    // An inscription records what was achieved; a decree records what the block
+    // was *for*. The pair is the point: a decree still facing an empty
+    // inscription is a block that was spoken for and did not deliver.
+    out property <string> dec-title: fa ? "فرمان" : "Decree";
+    out property <string> dec-prompt: fa
+        ? "این نشست برای چه کاری است؟"
+        : "What is this session for?";
+    out property <string> dec-placeholder: fa
+        ? "یک کار، در یک جمله…"
+        : "One task, in one sentence…";
+    out property <string> dec-issue: fa ? "صادر کن" : "Issue";
+    out property <string> dec-skip: fa ? "بی‌فرمان آغاز کن" : "Start without";
+    out property <string> dec-strip: fa ? "فرمان" : "Decree";
+    out property <string> dec-kept: fa ? "فرمانی که انجام شد" : "what was decreed";
+    out property <string> dec-archive: fa ? "فرمان‌ها" : "Decrees";
+    out property <string> dec-count: fa ? "فرمان" : "decrees";
+    out property <string> dec-empty: fa
+        ? "هنوز فرمانی صادر نشده است. پیش از آغاز هر نشست، یک خط بنویسید."
+        : "No decrees yet. Write one line before a session begins.";
     out property <string> chron-title: fa ? "گاه‌شمار پادشاهی ایران" : "Chronicle of the Iranian Kingdom";
     out property <string> chron-sub: fa
         ? "دو هزار و پانصد سال فرمانروایی، از کوروش تا امروز"

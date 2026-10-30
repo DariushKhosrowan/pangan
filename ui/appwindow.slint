@@ -220,6 +220,9 @@ export struct InscriptionItem {
     /// Which focus session it belongs to (Unix seconds), used to attach a
     /// deletion to the right row.
     session: int,
+    /// The intention this inscription answers, "" when the block had none.
+    /// Shown above the written line so the pair reads as promise then outcome.
+    decree: string,
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -1573,10 +1576,33 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in-out property <string> inscription-search: "";
     in property <[InscriptionItem]> inscriptions: [];
     in property <string> archive-empty: "";
+    /// "N of your sessions began with a stated intention", "" when none have.
+    /// The proportion the pair exists to make visible.
+    in property <string> archive-decree-count: "";
     /// The session the open dialog belongs to (Unix seconds, 0 = none).
     in property <int> inscription-session: 0;
     /// Set by Rust when the last write succeeded, so the dialog can close.
     in-out property <bool> inscription-saved: false;
+
+    // ---- The decree (what this session is for) ----
+    //
+    // Asked *before* the block, not after. The dialog appears when the user
+    // starts a focus session from a paused state — the only moment the app knows
+    // a block is about to begin and the user is still at the keyboard. A block
+    // started from the tray or a hotkey simply begins without one, because
+    // interrupting an already-started countdown to ask a question is worse than
+    // an unwritten intention.
+    in-out property <bool> decree-open: false;
+    in-out property <string> decree-text: "";
+    in property <string> decree-prompt: "";
+    in property <string> decree-placeholder: "";
+    in property <int> decree-limit: 120;
+    in property <string> decree-error: "";
+    in property <string> decree-count: "";
+    in property <bool> can-issue: false;
+    /// The intention currently governing the running block, "" when none.
+    /// Pushed from Rust so the 300 ms tick never has to reach into the store.
+    in property <string> current-decree: "";
 
     // ---- Callbacks to Rust ----
     callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-chronicle; callback close-chronicle; callback copy-code(string); callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback sync-connect; callback sync-disconnect; callback set-client-id(string); callback set-sync-auto(bool); callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback refresh-events; callback open-url(string); callback window-drag-start; callback set-compact-mode(bool); callback set-animations(bool); callback pick-day(string); callback shift-month(int); callback goto-today; callback add-task-on(string); callback delete-task(int); callback rename-task(int, string); callback move-task(int, int); callback step-day(int); callback set-report-period(int); callback step-report(int); callback report-today;
@@ -1591,6 +1617,15 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     callback close-inscriptions;
     callback export-inscriptions;
     callback copy-inscriptions;
+    // ---- Decree callbacks ----
+    /// The user stated an intention and pressed Issue. Rust starts the block.
+    callback issue-decree(string);
+    /// The user chose to start without one. Rust starts the block anyway.
+    callback skip-decree;
+    /// Dismissed without starting — the countdown stays paused.
+    callback dismiss-decree;
+    /// The field's text, so Rust can decide whether Issue is enabled.
+    callback decree-text-changed(string);
 
     // Resize: the edge/corner grab zones report the pointer's screen position
     // and which edge is being dragged; Rust turns that into a new window size.
@@ -1951,6 +1986,48 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     }
                     Text {
                         text: Digits.num(root.goal-done-minutes) + " / " + Digits.num(root.goal-minutes) + " " + Strings.minutes-short; font-size: Type.caption; color: Palette.text-faint; horizontal-alignment: center; }
+                }
+            }
+
+            // ---- the decree strip ----
+            // One line under the clock saying what this block is for. It sits
+            // above the session dots rather than in a card because it is not a
+            // statistic: it is the sentence the user is working against, and it
+            // should be readable in a glance without leaving the ring.
+            //
+            // Collapses entirely when no decree governs the block, so a user who
+            // never writes one sees the timer exactly as before.
+            if root.current-decree != "" : Rectangle {
+                height: 30px;
+                x: 22px;
+                width: parent.width - 22px - 22px;
+                border-radius: Radius.tile;
+                background: Palette.accent-soft;
+                border-width: 1px;
+                border-color: Palette.accent;
+
+                HorizontalLayout {
+                    padding-left: Space.tight;
+                    padding-right: Space.tight;
+                    spacing: 6px;
+                    alignment: center;
+
+                    Text {
+                        text: Strings.dec-strip + ":";
+                        font-size: Type.caption;
+                        font-weight: 600;
+                        color: Palette.accent;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: root.current-decree;
+                        font-family: "Vazirmatn";
+                        font-size: Type.caption;
+                        color: Palette.text;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
                 }
             }
 
@@ -2901,6 +2978,14 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         }
                     }
 
+                    if root.archive-decree-count != "" : Text {
+                        text: root.archive-decree-count;
+                        font-family: "Vazirmatn";
+                        font-size: Type.caption;
+                        color: Palette.accent;
+                        horizontal-alignment: Strings.fa ? right : left;
+                    }
+
                     if root.inscriptions.length == 0 : Card {
                         height: self.preferred-height;
                         VerticalLayout {
@@ -2932,32 +3017,77 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                         Card {
 
-                            row-card := HorizontalLayout {
+                            row-card := VerticalLayout {
                                 padding: 14px;
-                                spacing: Space.gap;
+                                spacing: 6px;
 
-                                Text {
-                                    text: row.time;
-                                    font-size: Type.caption;
-                                    color: Palette.text-faint;
+                                // The promise first, then the outcome. Only
+                                // shown when a decree was actually issued, so a
+                                // block written about without one still reads as
+                                // a single clean line rather than a labelled
+                                // blank.
+                                if row.decree != "" : HorizontalLayout {
+                                    spacing: 6px;
+                                    alignment: start;
+                                    Text {
+                                        text: "↳";
+                                        font-size: Type.caption;
+                                        color: Palette.accent;
+                                        vertical-alignment: top;
+                                    }
+                                    Text {
+                                        text: row.decree;
+                                        font-family: "Vazirmatn";
+                                        font-size: Type.caption;
+                                        color: Palette.text-dim;
+                                        wrap: word-wrap;
+                                        line-height-factor: 1.4;
+                                        horizontal-stretch: 1;
+                                        horizontal-alignment: Strings.fa ? right : left;
+                                    }
                                 }
 
-                                Text {
-                                    text: row.text;
-                                    font-family: "Vazirmatn";
-                                    font-size: Type.small;
-                                    color: Palette.text;
-                                    wrap: word-wrap;
-                                    line-height-factor: 1.5;
-                                    horizontal-stretch: 1;
-                                    horizontal-alignment: Strings.fa ? right : left;
-                                }
+                                HorizontalLayout {
+                                    spacing: Space.gap;
+                                    alignment: start;
 
-                                IconButton {
-                                    icon: "trash";
-                                    size: 24px;
-                                    icon-size: 12px;
-                                    clicked => { root.delete-inscription(row.id); }
+                                    Text {
+                                        text: row.time;
+                                        font-size: Type.caption;
+                                        color: Palette.text-faint;
+                                        vertical-alignment: top;
+                                    }
+
+                                    Text {
+                                        text: row.text;
+                                        font-family: "Vazirmatn";
+                                        font-size: Type.small;
+                                        color: row.text == "" ? Palette.text-faint : Palette.text;
+                                        wrap: word-wrap;
+                                        line-height-factor: 1.5;
+                                        horizontal-stretch: 1;
+                                        horizontal-alignment: Strings.fa ? right : left;
+                                    }
+
+                                    // A decree with no inscription: the block
+                                    // was spoken for and nothing was written
+                                    // against it. Said in the row rather than
+                                    // left as a blank, because a blank reads as
+                                    // a rendering fault.
+                                    if row.text == "" : Text {
+                                        text: Strings.ins-none-written;
+                                        font-size: Type.caption;
+                                        color: Palette.text-faint;
+                                        font-italic: true;
+                                        vertical-alignment: center;
+                                    }
+
+                                    IconButton {
+                                        icon: "trash";
+                                        size: 24px;
+                                        icon-size: 12px;
+                                        clicked => { root.delete-inscription(row.id); }
+                                    }
                                 }
                             }
                         }
@@ -4510,6 +4640,154 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             font-size: Type.small;
                             font-weight: 600;
                             color: root.can-inscribe ? Palette.on-accent : Palette.text-faint;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // The decree dialog — asked *before* a block, never after it.
+    //
+    // Sits here rather than at the top of the file because it is the same kind
+    // of surface as the inscription dialog: a scrim, one card, one field, two
+    // ways out. The difference is when it fires and what it costs to skip. An
+    // inscription skipped leaves a gap in a record; a decree skipped leaves the
+    // block unspoken for, which is a perfectly ordinary way to work.
+    // ─────────────────────────────────────────────────────────────────────
+    if root.decree-open : Rectangle {
+        width: parent.width; height: parent.height;
+        background: Palette.scrim;
+
+        TouchArea { }
+
+        Rectangle {
+            width: parent.width - Space.gutter * 2;
+            height: dec-dialog.preferred-height;
+            x: (parent.width - self.width) / 2;
+            y: Math.max(Space.gutter, (parent.height - self.height) / 2);
+            border-radius: Radius.panel;
+            background: Palette.surface;
+            border-width: 1px;
+            border-color: Palette.hairline;
+            drop-shadow-blur: Elev.card-blur;
+            drop-shadow-offset-y: Elev.card-y;
+            drop-shadow-color: Elev.card-shadow;
+
+            dec-dialog := VerticalLayout {
+                padding: 18px;
+                spacing: 12px;
+
+                Text {
+                    text: Strings.dec-prompt;
+                    font-family: "Vazirmatn";
+                    font-size: Type.body;
+                    font-weight: 600;
+                    color: Palette.text;
+                    wrap: word-wrap;
+                    horizontal-alignment: Strings.fa ? right : left;
+                }
+
+                Rectangle {
+                    height: 46px;
+                    border-radius: Radius.tile;
+                    background: Palette.surface-2;
+                    border-width: 1px;
+                    border-color: root.decree-error != "" ? Palette.danger : Palette.hairline;
+
+                    // One line, not a wrapping box: a decree must fit on the
+                    // strip under the clock, so the field refuses the shape that
+                    // could not survive there.
+                    LineEdit {
+                        x: Space.tight; y: Space.tight;
+                        width: parent.width - Space.tight * 2;
+                        height: parent.height - Space.tight * 2;
+                        text <=> root.decree-text;
+                        placeholder-text: root.decree-placeholder;
+                        font-family: "Vazirmatn";
+                        font-size: Type.small;
+                        edited(v) => { root.decree-text-changed(v); }
+                        accepted(v) => {
+                            if (root.can-issue) { root.issue-decree(v); }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    height: 16px;
+                    spacing: 6px;
+                    alignment: space-between;
+
+                    Text {
+                        text: root.decree-error;
+                        font-size: Type.caption;
+                        color: Palette.danger;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.decree-count;
+                        font-size: Type.caption;
+                        color: Palette.text-faint;
+                        vertical-alignment: center;
+                    }
+                }
+
+                HorizontalLayout {
+                    height: 38px;
+                    spacing: 8px;
+
+                    // Starts the block with no stated intention. Not a refusal —
+                    // an ordinary way to work — so it is a normal-weight button
+                    // and it does not warn.
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 38px;
+                        border-radius: Radius.tile;
+                        background: Palette.surface-2;
+                        ta-decskip := TouchArea { clicked => { root.skip-decree(); } }
+                        states [
+                            h when ta-decskip.has-hover : {
+                                background: Palette.surface-3;
+                                in { animate background { duration: Motion.quick; } }
+                            }
+                        ]
+                        Text {
+                            text: Strings.dec-skip;
+                            font-size: Type.caption;
+                            color: Palette.text-dim;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 38px;
+                        border-radius: Radius.tile;
+                        background: root.can-issue ? Palette.accent : Palette.surface-3;
+                        ta-issue := TouchArea {
+                            clicked => {
+                                if (root.can-issue) {
+                                    root.issue-decree(root.decree-text);
+                                }
+                            }
+                        }
+                        states [
+                            h when ta-issue.has-hover && root.can-issue : {
+                                background: Palette.accent-strong;
+                                in { animate background { duration: Motion.quick; } }
+                            }
+                        ]
+                        Text {
+                            text: Strings.dec-issue;
+                            font-size: Type.small;
+                            font-weight: 600;
+                            color: root.can-issue ? Palette.on-accent : Palette.text-faint;
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }

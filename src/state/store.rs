@@ -1,7 +1,7 @@
 //! Persistence layer: JSON store for session history, tasks, and app state.
 //! Data lives under the config dir (`~/.config/pangan/data.json` on Linux).
 
-use crate::journal::Inscription;
+use crate::journal::{Decree, Inscription};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -51,6 +51,12 @@ pub struct Data {
     /// the record of what was done is never edited away.
     #[serde(default)]
     pub inscriptions: Vec<Inscription>,
+    /// One intended line per focus session — what the block was *for*, written
+    /// before it ran. Paired with `inscriptions` by `session_at`, so a session
+    /// that promised something and produced nothing is visible as a decree
+    /// with no inscription facing it.
+    #[serde(default)]
+    pub decrees: Vec<Decree>,
 }
 
 impl Data {
@@ -319,6 +325,81 @@ impl Store {
             _ => false,
         }
     }
+
+    // ── decrees ───────────────────────────────────────────────────────────
+    //
+    // The other half of the pair. A decree is written before its block runs and
+    // only becomes a row once that block ends, so there is no "pending decree"
+    // in the store — see `journal::decree` for why.
+
+    /// Keep a decree. Returns false when it was already present.
+    ///
+    /// `(session, text)` ids make a retry or a re-delivered sync a no-op rather
+    /// than a second row for one intention.
+    pub fn add_decree(&mut self, dec: Decree) -> bool {
+        if self.data.decrees.iter().any(|d| d.id == dec.id) {
+            return false;
+        }
+        self.data.decrees.push(dec);
+        self.save();
+        true
+    }
+
+    /// The decree written for one session, if any.
+    ///
+    /// This is the pair lookup the archive uses: given the session an
+    /// inscription belongs to, find the intention that opened it.
+    pub fn decree_for_session(&self, session_at: i64) -> Option<&Decree> {
+        self.data
+            .decrees
+            .iter()
+            .find(|d| d.session_at == session_at && !d.deleted)
+    }
+
+    /// Every live decree, newest first.
+    ///
+    /// Tombstones stay in the store so a discard can sync, so every read path
+    /// filters them — through this one method, so no screen can forget to.
+    pub fn decrees_newest_first(&self) -> Vec<Decree> {
+        let mut out: Vec<Decree> = self
+            .data
+            .decrees
+            .iter()
+            .filter(|d| !d.deleted)
+            .cloned()
+            .collect();
+        out.sort_by(|a, b| b.session_at.cmp(&a.session_at));
+        out
+    }
+
+    /// Discard a decree by marking it. A wrong intention is not rewritten.
+    pub fn remove_decree(&mut self, id: &str) -> bool {
+        match self.data.decrees.iter_mut().find(|d| d.id == id) {
+            Some(d) if !d.deleted => {
+                d.deleted = true;
+                self.save();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// How many finished sessions carried a stated intention.
+    ///
+    /// The pair is what makes this answerable: an intention on its own proves
+    /// nothing, so only decrees whose session actually completed and still has
+    /// a live decree are counted. Sessions from before decrees existed are
+    /// simply not in the denominator, which keeps the number honest instead of
+    /// reporting a low rate the user never had a chance to earn.
+    pub fn decreed_session_count(&self) -> usize {
+        let completed: std::collections::HashSet<i64> =
+            self.data.sessions.iter().map(|s| s.at).collect();
+        self.data
+            .decrees
+            .iter()
+            .filter(|d| !d.deleted && completed.contains(&d.session_at))
+            .count()
+    }
 }
 
 #[cfg(test)]
@@ -579,5 +660,80 @@ mod manage_tests {
         assert_eq!(back[0].time, "09:30");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── decrees ──────────────────────────────────────────────────────────
+
+    fn temp_store() -> (Store, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "pangan-decree-test-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store {
+            path: dir.join("data.json"),
+            data: Data::default(),
+        };
+        (store, dir)
+    }
+
+    #[test]
+    fn a_decree_is_found_by_the_session_it_opened() {
+        let (mut s, dir) = temp_store();
+        let d = crate::journal::decree::create(1000, 400, "write the report").unwrap();
+        assert!(s.add_decree(d.clone()));
+        let found = s.decree_for_session(1000).expect("must pair");
+        assert_eq!(found.text, "write the report");
+        assert!(s.decree_for_session(2000).is_none(), "no false pairing");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn adding_the_same_decree_twice_keeps_one() {
+        let (mut s, dir) = temp_store();
+        let d = crate::journal::decree::create(1000, 400, "one intention").unwrap();
+        assert!(s.add_decree(d.clone()), "first insert");
+        assert!(!s.add_decree(d), "second is a no-op, not an error");
+        assert_eq!(s.decrees_newest_first().len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_discarded_decree_is_hidden_but_kept_for_sync() {
+        let (mut s, dir) = temp_store();
+        let d = crate::journal::decree::create(1000, 400, "withdrawn").unwrap();
+        let id = d.id.clone();
+        s.add_decree(d);
+        assert!(s.remove_decree(&id));
+        assert!(
+            s.decrees_newest_first().is_empty(),
+            "a discard must not be shown"
+        );
+        assert!(
+            s.data.decrees.iter().any(|d| d.id == id && d.deleted),
+            "the tombstone stays so the discard can reach the other device"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn only_sessions_that_actually_finished_count_as_decreed() {
+        let (mut s, dir) = temp_store();
+        // One session finished, one decree issued for it; a second decree
+        // exists for a session the timer never completed (the user backed out
+        // after the block was reset, so no SessionRecord was ever written).
+        s.add_sessions(&[SessionRecord {
+            at: 1000,
+            minutes: 25,
+        }]);
+        s.add_decree(crate::journal::decree::create(1000, 400, "counted").unwrap());
+        s.add_decree(crate::journal::decree::create(2000, 1400, "not counted").unwrap());
+        assert_eq!(
+            s.decreed_session_count(),
+            1,
+            "an intention for work that never completed proves nothing"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

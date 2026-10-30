@@ -14,21 +14,40 @@
 //!   without a tombstone a delete on one device would be resurrected by the
 //!   other device's copy on the next sync.
 //!
+//! * **Inscriptions and decrees** are append-only writings about a session —
+//!   what was promised before the block and what was produced after it. They
+//!   merge as sets keyed by a content-derived id, with tombstones for discards.
+//!   Their order is sorted on the way out, so two devices holding the same
+//!   writings produce byte-identical stores and stop exchanging deltas.
+//!
 //! The merge is commutative and idempotent: merging A with B gives the same
 //! result as B with A, and merging a result with itself changes nothing. That
 //! is what makes it safe to run on every sync tick without drift.
 
-use crate::journal::Inscription;
+use crate::journal::{Decree, Inscription};
 use crate::state::store::{Data, SessionRecord, Task};
 use std::collections::BTreeMap;
 
-/// Merge two snapshots into one. Neither input is modified.
+/// Merge two stores into one.
+///
+/// Every collection is a union keyed by a stable id, so:
+///
+/// * the result contains everything either side had;
+/// * merging the result with itself changes nothing — the property that makes
+///   it safe to run on every sync tick without drift;
+/// * a tombstone (deleted row) always beats a live one, because a deletion that
+///   loses to a stale copy is a deletion that silently comes back.
+///
+/// The ordering of the output is sorted rather than preserved, so two devices
+/// that hold the same set produce byte-identical stores and a later sync sees
+/// no difference to push.
 pub fn merge(local: &Data, remote: &Data) -> Data {
     let mut out = Data {
         sessions: merge_sessions(&local.sessions, &remote.sessions),
         tasks: merge_tasks(&local.tasks, &remote.tasks),
         next_task_id: local.next_task_id.max(remote.next_task_id),
         inscriptions: merge_inscriptions(&local.inscriptions, &remote.inscriptions),
+        decrees: merge_decrees(&local.decrees, &remote.decrees),
     };
     // Keep the id counter ahead of every id actually in use, so a merge can
     // never hand out an id that already belongs to a task.
@@ -105,14 +124,54 @@ fn merge_inscriptions(a: &[Inscription], b: &[Inscription]) -> Vec<Inscription> 
                 // earlier `written_at` is enough to make the result stable.
                 if ins.deleted && !existing.deleted {
                     map.insert(ins.id.clone(), ins.clone());
-                } else if !ins.deleted && !existing.deleted && ins.written_at < existing.written_at {
+                } else if !ins.deleted && !existing.deleted && ins.written_at < existing.written_at
+                {
                     map.insert(ins.id.clone(), ins.clone());
                 }
             }
         }
     }
     let mut out: Vec<Inscription> = map.into_values().collect();
-    out.sort_by(|x, y| x.session_at.cmp(&y.session_at).then_with(|| x.id.cmp(&y.id)));
+    out.sort_by(|x, y| {
+        x.session_at
+            .cmp(&y.session_at)
+            .then_with(|| x.id.cmp(&y.id))
+    });
+    out
+}
+
+/// Union of both decree sets, keyed by id — the same rule as inscriptions.
+///
+/// Kept as its own function rather than made generic over a "written record"
+/// trait: the two types differ in their length limit and in *when* they are
+/// written, and a shared abstraction over two fields would cost more in
+/// indirection than the twenty lines it would save.
+fn merge_decrees(a: &[Decree], b: &[Decree]) -> Vec<Decree> {
+    let mut map: BTreeMap<String, Decree> = BTreeMap::new();
+    for dec in a.iter().chain(b.iter()) {
+        match map.get(&dec.id) {
+            None => {
+                map.insert(dec.id.clone(), dec.clone());
+            }
+            Some(existing) => {
+                // A tombstone always wins; between two live copies the text is
+                // identical by construction, so the earlier `written_at` gives a
+                // deterministic answer on both devices.
+                if dec.deleted && !existing.deleted {
+                    map.insert(dec.id.clone(), dec.clone());
+                } else if !dec.deleted && !existing.deleted && dec.written_at < existing.written_at
+                {
+                    map.insert(dec.id.clone(), dec.clone());
+                }
+            }
+        }
+    }
+    let mut out: Vec<Decree> = map.into_values().collect();
+    out.sort_by(|x, y| {
+        x.session_at
+            .cmp(&y.session_at)
+            .then_with(|| x.id.cmp(&y.id))
+    });
     out
 }
 
@@ -213,6 +272,7 @@ mod tests {
             tasks: vec![task(1, "x", 5)],
             next_task_id: 2,
             inscriptions: vec![],
+            decrees: vec![],
         };
         let once = merge(&a, &a);
         let twice = merge(&once, &once);
@@ -233,5 +293,82 @@ mod tests {
             merge(&a, &b).next_task_id > 7,
             "a stale counter must not hand out a live id"
         );
+    }
+
+    // ── decrees ──────────────────────────────────────────────────────────
+
+    fn decree(session_at: i64, text: &str) -> crate::journal::Decree {
+        crate::journal::decree::create(session_at, session_at - 600, text).unwrap()
+    }
+
+    #[test]
+    fn decrees_from_both_devices_both_survive() {
+        let a = Data {
+            decrees: vec![decree(1000, "from desktop")],
+            ..Default::default()
+        };
+        let b = Data {
+            decrees: vec![decree(2000, "from laptop")],
+            ..Default::default()
+        };
+        let out = merge(&a, &b);
+        let texts: Vec<&str> = out.decrees.iter().map(|d| d.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            vec!["from desktop", "from laptop"],
+            "ordered by session"
+        );
+    }
+
+    #[test]
+    fn the_same_decree_on_both_devices_merges_to_one() {
+        let d = decree(1000, "the same intention");
+        let a = Data {
+            decrees: vec![d.clone()],
+            ..Default::default()
+        };
+        let b = Data {
+            decrees: vec![d],
+            ..Default::default()
+        };
+        assert_eq!(merge(&a, &b).decrees.len(), 1, "a content id cannot double");
+    }
+
+    #[test]
+    fn a_discarded_decree_is_not_resurrected_by_the_other_device() {
+        let live = decree(1000, "withdraw me");
+        let mut dead = live.clone();
+        dead.deleted = true;
+
+        // The discard on one side, the stale live copy on the other — in both
+        // orders, because the merge has to be commutative.
+        let a = Data {
+            decrees: vec![dead.clone()],
+            ..Default::default()
+        };
+        let b = Data {
+            decrees: vec![live.clone()],
+            ..Default::default()
+        };
+        assert!(merge(&a, &b).decrees[0].deleted, "tombstone wins: a then b");
+        assert!(merge(&b, &a).decrees[0].deleted, "tombstone wins: b then a");
+    }
+
+    #[test]
+    fn merging_decrees_repeatedly_does_not_drift() {
+        let a = Data {
+            decrees: vec![decree(1000, "one"), decree(3000, "three")],
+            ..Default::default()
+        };
+        let b = Data {
+            decrees: vec![decree(2000, "two")],
+            ..Default::default()
+        };
+        let once = merge(&a, &b);
+        let twice = merge(&once, &b);
+        let again = merge(&twice, &twice);
+        assert_eq!(once.decrees.len(), 3);
+        assert_eq!(twice.decrees, once.decrees, "merging again changes nothing");
+        assert_eq!(again.decrees, once.decrees, "and is idempotent on itself");
     }
 }

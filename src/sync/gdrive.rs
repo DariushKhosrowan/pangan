@@ -255,7 +255,11 @@ pub enum PollOutcome {
 /// single line and nothing that looks like a credential is useful here: this
 /// exists to make a protocol surprise readable, not to record the payload.
 fn preview(body: &str) -> String {
-    let one_line: String = body.chars().take(200).collect::<String>().replace('\n', " ");
+    let one_line: String = body
+        .chars()
+        .take(200)
+        .collect::<String>()
+        .replace('\n', " ");
     one_line.trim().to_string()
 }
 
@@ -500,7 +504,10 @@ fn find_file_meta(token: &str, name: &str) -> Result<Option<RemoteFile>, String>
             .build()
             .call();
         let (status, text) = match resp {
-            Ok(r) => (r.status(), r.into_body().read_to_string().unwrap_or_default()),
+            Ok(r) => (
+                r.status(),
+                r.into_body().read_to_string().unwrap_or_default(),
+            ),
             // A transport failure is a real failure, not "the file is absent".
             Err(e) => return Err(format!("drive list failed: {e}")),
         };
@@ -734,13 +741,15 @@ pub fn google_reason(body: &str) -> String {
         {
             // The API-disabled message is long and ends with a console link.
             // Keep it whole: the link is the fix.
-            return msg.trim().to_string(); }
+            return msg.trim().to_string();
+        }
         if let Some(msg) = v
             .get("error_description")
             .and_then(|m| m.as_str())
-            .or_else( || v.get("error").and_then(|e| e.as_str()))
+            .or_else(|| v.get("error").and_then(|e| e.as_str()))
         {
-            return msg.trim().to_string(); }
+            return msg.trim().to_string();
+        }
     }
     preview(body)
 }
@@ -838,8 +847,12 @@ mod auth_tests {
         // happened to contain those digits was read as a dead credential, and
         // the app cleared the tokens — which looked exactly like the account
         // being forgotten at random.
-        assert!(!is_auth_error("drive list failed: quota exceeded for project 4012"));
-        assert!(!is_auth_error("drive update HTTP 403 (request id 9f401c2a)"));
+        assert!(!is_auth_error(
+            "drive list failed: quota exceeded for project 4012"
+        ));
+        assert!(!is_auth_error(
+            "drive update HTTP 403 (request id 9f401c2a)"
+        ));
         assert!(!is_auth_error("rate limited, retry after 401 seconds"));
         // A real auth failure still matches, by its own words.
         assert!(is_auth_error("drive list failed: HTTP 401 Unauthorized"));
@@ -894,7 +907,7 @@ pub(crate) mod drive_roundtrip {
     /// each other. A fake that always says "yes" would pass while the real
     /// thing lost data.
     #[allow(dead_code)] // shape of the fake Drive file; body is read by the
-    // fake server's own response builder
+                        // fake server's own response builder
     struct FakeFile {
         body: String,
         version: u64,

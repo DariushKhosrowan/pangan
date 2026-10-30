@@ -123,7 +123,6 @@ pub const DAY_NAMES: [&str; 30] = [
     "انارام",    // 30
 ];
 
-
 /// English transliterations of the thirty day-names, same order.
 pub const DAY_NAMES_EN: [&str; 30] = [
     "Ohrmazd",

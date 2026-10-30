@@ -238,7 +238,7 @@ impl Events {
     }
 
     /// (days with Iranian data, days with world data)
-#[allow(dead_code)] // test support, not called from the app
+    #[allow(dead_code)] // test support, not called from the app
     pub fn coverage(&self) -> (usize, usize) {
         let iran = self
             .table

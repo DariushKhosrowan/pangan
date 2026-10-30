@@ -141,7 +141,6 @@ fn append_into(buf: &mut Vec<i16>, samples: &[i16]) {
 // Phrases (melodic contours tuned to Dastgah-e Mahur / Homayoun flavor)
 // ---------------------------------------------------------------------------
 
-
 /// Place a note into `buf` at `start_sample`, summing overlaps.
 fn place_note(buf: &mut Vec<i16>, start_sample: usize, note: &[i16]) {
     if buf.len() < start_sample + note.len() {

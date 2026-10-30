@@ -82,6 +82,18 @@ struct AppState {
     /// write something. One remembered timestamp is enough: only the newest
     /// session is ever offered.
     ins_skipped: Mutex<Option<i64>>,
+    /// The intention stated for the block that is running right now, waiting
+    /// for the block to finish so it can be paired with its session.
+    ///
+    /// It cannot be written to the store yet: a session is keyed by the instant
+    /// it *ended*, and that instant does not exist until the block is over. So
+    /// the text and the moment it was typed are held here, and the tick that
+    /// drains completed sessions turns the pair into a `Decree`.
+    ///
+    /// Plain `Option<(String, i64)>` and not a `Decree`: everything in the
+    /// journal module is a finished record, and a record with no session yet
+    /// would be a lie told in a struct. The conversion happens in one place.
+    pending_decree: Mutex<Option<(String, i64)>>,
 }
 
 impl AppState {
@@ -118,6 +130,7 @@ impl AppState {
             shared,
             ins_query: Mutex::new(String::new()),
             ins_skipped: Mutex::new(None),
+            pending_decree: Mutex::new(None),
         }
     }
 
@@ -166,10 +179,14 @@ fn theme_from_portal() -> Option<&'static str> {
             "color-scheme",
         ])
         .output()
-        .ok()?; let s = String::from_utf8_lossy(&out.stdout); if s.contains("uint32 2") {
-        return Some("light"); }
+        .ok()?;
+    let s = String::from_utf8_lossy(&out.stdout);
+    if s.contains("uint32 2") {
+        return Some("light");
+    }
     if s.contains("uint32 1") {
-        return Some("dark"); }
+        return Some("dark");
+    }
     None
 }
 
@@ -179,18 +196,26 @@ fn theme_from_gsettings() -> Option<&'static str> {
     let out = std::process::Command::new("gsettings")
         .args(["get", "org.gnome.desktop.interface", "color-scheme"])
         .output()
-        .ok()?; let s = String::from_utf8_lossy(&out.stdout); if s.contains("prefer-dark") {
-        return Some("dark"); }
+        .ok()?;
+    let s = String::from_utf8_lossy(&out.stdout);
+    if s.contains("prefer-dark") {
+        return Some("dark");
+    }
     if s.contains("prefer-light") {
-        return Some("light"); }
+        return Some("light");
+    }
     // Older desktops encode the preference in the theme name instead.
     let theme = std::process::Command::new("gsettings")
         .args(["get", "org.gnome.desktop.interface", "gtk-theme"])
         .output()
-        .ok()?; let t = String::from_utf8_lossy(&theme.stdout).to_lowercase(); if t.contains("dark") {
-        return Some("dark"); }
+        .ok()?;
+    let t = String::from_utf8_lossy(&theme.stdout).to_lowercase();
+    if t.contains("dark") {
+        return Some("dark");
+    }
     if t.contains("light") {
-        return Some("light"); }
+        return Some("light");
+    }
     None
 }
 
@@ -720,12 +745,51 @@ fn refresh_day_view(win: &PanganWindow, app: &AppState) {
     refresh_calendar(win, app, (sy, sm, sd));
 }
 
-/// Recompute and set report + task text on the window.
+/// Push the decree's static labels and the strip's current text.
 ///
-/// The Stats screen is driven entirely from here: the period and offset live in
-/// `AppState`, this builds the report for that span and pushes every number the
-/// screen shows. Nothing on that screen computes its own figures, so the chart,
-/// the cards and the narrative can never disagree with each other.
+/// Kept separate from `push_inscriptions` because the two are read at different
+/// moments: the archive is only worth rebuilding when the archive screen is
+/// open, but the strip under the clock is on the main screen and has to be right
+/// on every tick.
+///
+/// The strip's text comes from `AppState`, not from the store. A decree exists
+/// in the store only after its session has ended, so during the block the only
+/// copy of the intention is the pending one — and looking it up by session
+/// timestamp would find nothing for the precise reason that the session is
+/// still running.
+fn push_decree_state(win: &PanganWindow, app: &AppState, st: &Store) {
+    let en = app.settings.lock().unwrap().lang == "en";
+
+    win.set_decree_prompt(SharedString::from(if en {
+        "What is this session for?"
+    } else {
+        "این نشست برای چه کاری است؟"
+    }));
+    win.set_decree_placeholder(SharedString::from(if en {
+        "One task, in one sentence…"
+    } else {
+        "یک کار، در یک جمله…"
+    }));
+    win.set_decree_limit(journal::decree::MAX_CHARS as i32);
+
+    // The strip: the pending intention if a block is running under one, else
+    // the most recent decree so the clock does not go blank the instant a
+    // session ends and its inscription is being written.
+    let pending = app
+        .pending_decree
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|(text, _)| text.clone());
+    let text = pending.unwrap_or_else(|| {
+        st.decrees_newest_first()
+            .first()
+            .map(|d| d.text.clone())
+            .unwrap_or_default()
+    });
+    win.set_current_decree(SharedString::from(text));
+}
+
 /// Push the inscription archive into the window, honouring the search box.
 ///
 /// The archive is rebuilt from the store on every tick rather than being edited
@@ -733,6 +797,12 @@ fn refresh_day_view(win: &PanganWindow, app: &AppState) {
 /// the truth, and a second copy in the window would be one more thing that can
 /// disagree with it. The list is small (one line per focus session), so the
 /// cost is a sort and a dozen allocations every 300 ms.
+///
+/// Rows come from *both* halves of the record, which is the point of keeping
+/// them: every inscription gets a row, and so does every decree whose session
+/// produced no inscription. That second kind is the most useful row in the list
+/// — a block that was spoken for and did not deliver — and it would be invisible
+/// if the archive were built from inscriptions alone.
 fn push_inscriptions(win: &PanganWindow, app: &AppState, st: &Store) {
     let en = app.settings.lock().unwrap().lang == "en";
     let query = app.ins_query.lock().unwrap().clone();
@@ -742,10 +812,54 @@ fn push_inscriptions(win: &PanganWindow, app: &AppState, st: &Store) {
         .cloned()
         .collect();
 
-    let mut items: Vec<InscriptionItem> = Vec::with_capacity(hits.len());
+    // A search filters the written lines only. Decree-only rows have no text to
+    // match, so including them in a search would put a row in the results for a
+    // reason the user cannot see.
+    let decree_only: Vec<journal::Decree> = if query.trim().is_empty() {
+        st.decrees_newest_first()
+            .into_iter()
+            .filter(|d| st.inscription_for_session(d.session_at).is_none())
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let mut items: Vec<InscriptionItem> = Vec::with_capacity(hits.len() + decree_only.len());
+    // One pass over a merged, newest-first key list so a decree-only row lands
+    // in its proper place in time rather than being appended at the end.
+    let mut keys: Vec<i64> = hits.iter().map(|i| i.session_at).collect();
+    keys.extend(decree_only.iter().map(|d| d.session_at));
+    keys.sort_unstable_by(|a, b| b.cmp(a));
+    keys.dedup();
+
+    let by_session: std::collections::HashMap<i64, &journal::Inscription> =
+        hits.iter().map(|i| (i.session_at, i)).collect();
+    let decree_by_session: std::collections::HashMap<i64, &journal::Decree> =
+        decree_only.iter().map(|d| (d.session_at, d)).collect();
+
     let mut last_day = String::new();
-    for ins in &hits {
-        let day_key = journal::day_of(ins);
+    for session_at in keys {
+        let text = by_session
+            .get(&session_at)
+            .map(|i| i.text.clone())
+            .unwrap_or_default();
+        let (id, decree) = match by_session.get(&session_at) {
+            Some(ins) => (
+                ins.id.clone(),
+                st.decree_for_session(ins.session_at)
+                    .map(|d| d.text.clone())
+                    .unwrap_or_default(),
+            ),
+            None => match decree_by_session.get(&session_at) {
+                // A decree with no inscription is addressed by its own id, and
+                // the row shows nothing in the `text` field: there was no
+                // written outcome, and inventing one would be a lie.
+                Some(dec) => (dec.id.clone(), dec.text.clone()),
+                None => continue,
+            },
+        };
+
+        let day_key = journal::day_key(session_at);
         // The heading only appears on the first row of each day, so the archive
         // reads as day groups instead of repeating the date on every line.
         let day = if day_key == last_day {
@@ -754,12 +868,14 @@ fn push_inscriptions(win: &PanganWindow, app: &AppState, st: &Store) {
             last_day = day_key.clone();
             jalali_day_heading(&day_key, en)
         };
+
         items.push(InscriptionItem {
-            id: SharedString::from(ins.id.clone()),
-            text: SharedString::from(ins.text.clone()),
-            time: SharedString::from(local_time(ins.session_at)),
+            id: SharedString::from(id),
+            text: SharedString::from(text),
+            time: SharedString::from(local_time(session_at)),
             day: SharedString::from(day),
-            session: ins.session_at as i32,
+            session: session_at as i32,
+            decree: SharedString::from(decree),
         });
     }
 
@@ -771,6 +887,22 @@ fn push_inscriptions(win: &PanganWindow, app: &AppState, st: &Store) {
         "در این نشست چه کردید؟"
     }));
     win.set_inscription_limit(journal::MAX_CHARS as i32);
+
+    // How many finished blocks were actually spoken for. The one number that
+    // makes the pair worth keeping: without an intention, an inscription says
+    // what happened but not whether it was what you meant to happen.
+    let decreed = st.decreed_session_count();
+    win.set_archive_decree_count(SharedString::from(if decreed == 0 {
+        String::new()
+    } else if en {
+        format!("{decreed} of your sessions began with a stated intention")
+    } else {
+        format!(
+            "{} نشست با فرمانی روشن آغاز شد",
+            calendar::fa_num(decreed as i64)
+        )
+    }));
+
     win.set_archive_empty(SharedString::from(if query.trim().is_empty() {
         if en {
             "Nothing written yet. It begins when your first focus session ends."
@@ -787,11 +919,7 @@ fn push_inscriptions(win: &PanganWindow, app: &AppState, st: &Store) {
 /// `HH:MM` for a Unix timestamp, in local time.
 fn local_time(at: i64) -> String {
     chrono::DateTime::from_timestamp(at, 0)
-        .map(|u| {
-            u.with_timezone(&chrono::Local)
-                .format("%H:%M")
-                .to_string()
-        })
+        .map(|u| u.with_timezone(&chrono::Local).format("%H:%M").to_string())
         .unwrap_or_else(|| "--:--".to_string())
 }
 
@@ -828,13 +956,25 @@ fn jalali_day_heading(day_key: &str, en: bool) -> String {
     if en {
         format!("{jd} {month} {jy}")
     } else {
-        format!("{} {} {}", calendar::fa_num(jd as i64), month, calendar::fa_num(jy as i64))
+        format!(
+            "{} {} {}",
+            calendar::fa_num(jd as i64),
+            month,
+            calendar::fa_num(jy as i64)
+        )
     }
 }
 
+/// Rebuild every screen from the store. The one entry point the tick calls.
+///
+/// The Stats screen is driven entirely from here: the period and offset live in
+/// `AppState`, this builds the report for that span and pushes every number the
+/// screen shows. Nothing on that screen computes its own figures, so the chart,
+/// the cards and the narrative can never disagree with each other.
 fn refresh_screens(win: &PanganWindow, app: &AppState) {
     let st = app.store.lock().unwrap();
     push_inscriptions(win, app, &st);
+    push_decree_state(win, app, &st);
     let en = app.settings.lock().unwrap().lang == "en";
     let period = *app.report_period.lock().unwrap();
     let offset = *app.report_offset.lock().unwrap();
@@ -853,7 +993,11 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
 
     win.set_report_period_index(period.index());
     win.set_report_offset(offset);
-    win.set_report_title(SharedString::from(if en { r.title_en.clone() } else { r.title.clone() }));
+    win.set_report_title(SharedString::from(if en {
+        r.title_en.clone()
+    } else {
+        r.title.clone()
+    }));
     win.set_report_span(SharedString::from(r.span.clone()));
     win.set_report_narrative(SharedString::from(stats::narrative(&r, en)));
 
@@ -881,7 +1025,13 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
     // The chart. Bars are normalised to the peak so a quiet week still reads as
     // a shape rather than as seven invisible stubs; an all-zero span keeps a
     // floor so the baseline is still visible.
-    let peak = r.buckets.iter().map(|b| b.minutes).max().unwrap_or(0).max(1);
+    let peak = r
+        .buckets
+        .iter()
+        .map(|b| b.minutes)
+        .max()
+        .unwrap_or(0)
+        .max(1);
     let bars: Vec<f32> = r
         .buckets
         .iter()
@@ -897,7 +1047,12 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
         .iter()
         .map(|b| SharedString::from(b.detail.clone()))
         .collect();
-    let current = r.buckets.iter().position(|b| b.current).map(|i| i as i32).unwrap_or(-1);
+    let current = r
+        .buckets
+        .iter()
+        .position(|b| b.current)
+        .map(|i| i as i32)
+        .unwrap_or(-1);
     let future_from = r
         .buckets
         .iter()
@@ -925,7 +1080,37 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
 
     // The old single-blob report text is still fed, because the main screen's
     // compact summary reads it.
-    let t = stats::report_at(&st.data.sessions, stats::Period::Day, 0, today, earliest, en); let w = stats::report_at(&st.data.sessions, stats::Period::Week, 0, today, earliest, en); let m = stats::report_at(&st.data.sessions, stats::Period::Month, 0, today, earliest, en); let mut report = String::new(); report.push_str(&stats::narrative(&t, en)); report.push_str("\n\n"); report.push_str(&stats::narrative(&w, en)); report.push_str("\n\n"); report.push_str(&stats::narrative(&m, en)); win.set_report_text(SharedString::from(report));
+    let t = stats::report_at(
+        &st.data.sessions,
+        stats::Period::Day,
+        0,
+        today,
+        earliest,
+        en,
+    );
+    let w = stats::report_at(
+        &st.data.sessions,
+        stats::Period::Week,
+        0,
+        today,
+        earliest,
+        en,
+    );
+    let m = stats::report_at(
+        &st.data.sessions,
+        stats::Period::Month,
+        0,
+        today,
+        earliest,
+        en,
+    );
+    let mut report = String::new();
+    report.push_str(&stats::narrative(&t, en));
+    report.push_str("\n\n");
+    report.push_str(&stats::narrative(&w, en));
+    report.push_str("\n\n");
+    report.push_str(&stats::narrative(&m, en));
+    win.set_report_text(SharedString::from(report));
 
     let mut tasks_line = String::new();
     let open = st.live_tasks().filter(|t| !t.done).count();
@@ -974,8 +1159,21 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
     // The main screen's compact week strip. Saturday-first, taken from the
     // same week report the Stats screen uses, so the two can never disagree
     // about which day a bar belongs to.
-    let wb = stats::report_at(&st.data.sessions, stats::Period::Week, 0, today, earliest, en);
-    let week_peak = wb.buckets.iter().map(|b| b.minutes).max().unwrap_or(0).max(1);
+    let wb = stats::report_at(
+        &st.data.sessions,
+        stats::Period::Week,
+        0,
+        today,
+        earliest,
+        en,
+    );
+    let week_peak = wb
+        .buckets
+        .iter()
+        .map(|b| b.minutes)
+        .max()
+        .unwrap_or(0)
+        .max(1);
     let week_bars: Vec<f32> = wb
         .buckets
         .iter()
@@ -988,7 +1186,13 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
         .map(|b| SharedString::from(b.label.clone()))
         .collect();
     win.set_week_labels(ModelRc::new(VecModel::from(week_labels)));
-    win.set_week_current(wb.buckets.iter().position(|b| b.current).map(|i| i as i32).unwrap_or(-1));
+    win.set_week_current(
+        wb.buckets
+            .iter()
+            .position(|b| b.current)
+            .map(|i| i as i32)
+            .unwrap_or(-1),
+    );
 
     // Task list for the redesigned panel: open tasks first, then done.
     let mut items: Vec<crate::ui::TaskItem> = st
@@ -1115,7 +1319,8 @@ fn copy_to_clipboard(text: &str) -> bool {
         // what wl-copy/xclip do, minus the dependency.
         if let Ok(mut cb) = arboard::Clipboard::new() {
             if cb.set_text(text.to_string()).is_ok() {
-                return true; }
+                return true;
+            }
         }
         // Fall back to the command-line tools for Wayland and odd setups.
         for (prog, args) in [
@@ -1130,13 +1335,17 @@ fn copy_to_clipboard(text: &str) -> bool {
                 .stderr(std::process::Stdio::null())
                 .spawn()
                 .and_then(|mut c| {
-                    use std::io::Write; if let Some(stdin) = c.stdin.as_mut() {
-                        let _ = stdin.write_all(text.as_bytes()); }
+                    use std::io::Write;
+                    if let Some(stdin) = c.stdin.as_mut() {
+                        let _ = stdin.write_all(text.as_bytes());
+                    }
                     c.wait()
                 })
                 .map(|st| st.success())
-                .unwrap_or(false); if ok {
-                return true; }
+                .unwrap_or(false);
+            if ok {
+                return true;
+            }
         }
         false
     }
@@ -1146,8 +1355,10 @@ fn copy_to_clipboard(text: &str) -> bool {
             .stdin(std::process::Stdio::piped())
             .spawn()
             .and_then(|mut c| {
-                use std::io::Write; if let Some(stdin) = c.stdin.as_mut() {
-                    let _ = stdin.write_all(text.as_bytes()); }
+                use std::io::Write;
+                if let Some(stdin) = c.stdin.as_mut() {
+                    let _ = stdin.write_all(text.as_bytes());
+                }
                 c.wait()
             })
             .map(|st| st.success())
@@ -1160,8 +1371,10 @@ fn copy_to_clipboard(text: &str) -> bool {
             .stdin(std::process::Stdio::piped())
             .spawn()
             .and_then(|mut c| {
-                use std::io::Write; if let Some(stdin) = c.stdin.as_mut() {
-                    let _ = stdin.write_all(text.as_bytes()); }
+                use std::io::Write;
+                if let Some(stdin) = c.stdin.as_mut() {
+                    let _ = stdin.write_all(text.as_bytes());
+                }
                 c.wait()
             })
             .map(|st| st.success())
@@ -1227,8 +1440,8 @@ fn device_flow_sign_in(
         open_in_browser(&code.verification_url);
     }
 
-    let deadline = std::time::Instant::now()
-        + std::time::Duration::from_secs(code.expires_in.min(1800));
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_secs(code.expires_in.min(1800));
     let interval = gdrive::poll_interval(code.interval);
     loop {
         std::thread::sleep(interval);
@@ -1633,8 +1846,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             (420.0, 680.0)
         };
-        win
-            .window()
+        win.window()
             .set_size(slint::WindowSize::Logical(slint::LogicalSize::new(w0, h0)));
     }
 
@@ -1675,6 +1887,21 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 // unwritten session is not resurrected, because by then the user
                 // has lost the thread of what it was.
                 if let Some(newest) = recs.iter().map(|r| r.at).max() {
+                    // Pair the intention with the session that just ended. This
+                    // is the only instant both timestamps exist: `written_at`
+                    // was captured when the user pressed Issue, `newest` is now.
+                    // The pending slot is taken rather than read, so one decree
+                    // can never be attached to two sessions — a stale one left
+                    // behind by a skipped block would otherwise be waiting here
+                    // for the next session and would answer for work it never
+                    // described.
+                    let pending = tick_app.pending_decree.lock().unwrap().take();
+                    if let Some((text, written_at)) = pending {
+                        if let Ok(dec) = journal::decree::create(newest, written_at, &text) {
+                            st.add_decree(dec);
+                        }
+                    }
+
                     let already_written = st.inscription_for_session(newest).is_some();
                     let skipped = *tick_app.ins_skipped.lock().unwrap() == Some(newest);
                     if !already_written && !skipped {
@@ -1693,10 +1920,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             if tick_app.settings.lock().unwrap().sound_enabled {
                 sound::play(&tick_sounds_work, volume);
             }
-        } else if breaks > 0
-            && tick_app.settings.lock().unwrap().sound_enabled {
-                sound::play(&tick_sounds_rest, volume);
-            }
+        } else if breaks > 0 && tick_app.settings.lock().unwrap().sound_enabled {
+            sound::play(&tick_sounds_rest, volume);
+        }
 
         if let Some(win) = tick_weak.upgrade() {
             apply_snapshot(&win, &tick_shared);
@@ -1783,6 +2009,25 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let toggle_app = Arc::clone(&app);
     let toggle_weak = weak.clone();
     win.on_start_pause(move || {
+        // Starting a focus block from rest is the one moment worth asking what
+        // the block is for: the user is at the keyboard, and the answer is still
+        // in their head. Resuming a block already in flight is not — it would
+        // ask the same question twice and interrupt a running countdown.
+        //
+        // The tray and hotkey paths go through `run_action` and deliberately do
+        // not ask: a global hotkey exists to start work without touching the
+        // window, and a dialog appearing over whatever app you were in would
+        // defeat that entirely.
+        if toggle_shared.at_fresh_work_start() {
+            if let Some(w) = toggle_weak.upgrade() {
+                w.set_decree_text(SharedString::from(""));
+                w.set_decree_error(SharedString::from(""));
+                w.set_decree_count(SharedString::from(String::new()));
+                w.set_can_issue(false);
+                w.set_decree_open(true);
+            }
+            return;
+        }
         run_action(
             TrayAction::Toggle,
             &toggle_shared,
@@ -2097,7 +2342,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let id = id.to_string();
         {
             let mut st = delins_app.store.lock().unwrap();
-            st.remove_inscription(&id);
+            // A row can be an inscription, a decree-only entry, or both. Both
+            // are tried rather than being told apart by a type field on the row:
+            // the ids live in different collections, an id can only be in one,
+            // and asking twice is cheaper than carrying a discriminator through
+            // the UI for this one purpose.
+            if !st.remove_inscription(&id) {
+                st.remove_decree(&id);
+            }
         }
         delins_app.cloud.mark_dirty();
         if let Some(w) = delins_weak.upgrade() {
@@ -2126,7 +2378,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let md = {
             let st = exp_app.store.lock().unwrap();
             let all = st.inscriptions_newest_first();
-            journal::export_markdown(&all, !en)
+            let decs = st.decrees_newest_first();
+            journal::export_record(&all, &decs, !en)
         };
         let path = Store::data_dir().join("inscriptions.md");
         if let Some(dir) = path.parent() {
@@ -2156,18 +2409,114 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let md = {
             let st = copy_app.store.lock().unwrap();
             let all = st.inscriptions_newest_first();
-            journal::export_markdown(&all, !en)
+            let decs = st.decrees_newest_first();
+            journal::export_record(&all, &decs, !en)
         };
         let ok = copy_to_clipboard(&md);
         if let Some(w) = copy_weak.upgrade() {
             let msg = if ok {
-                if en { "Copied".to_string() } else { "رونوشت شد".to_string() }
+                if en {
+                    "Copied".to_string()
+                } else {
+                    "رونوشت شد".to_string()
+                }
             } else if en {
                 "Not copied: no clipboard tool found.".to_string()
             } else {
                 "رونوشت نشد: ابزار تخته‌گیره‌ای یافت نشد.".to_string()
             };
             w.set_sync_status(SharedString::from(msg));
+        }
+    });
+
+    // ── decrees: the intention stated before a block ──
+    //
+    // The dialog is opened by `on_start_pause` and these three handlers decide
+    // what happens next. All of them end by starting the clock, except dismiss,
+    // which leaves it paused — the user changed their mind about working, and
+    // silently starting a countdown they just backed out of is the worse error.
+    {
+        let dec_text_app = Arc::clone(&app);
+        let dec_text_weak = weak.clone();
+        win.on_decree_text_changed(move |text| {
+            let t = text.to_string();
+            let trimmed = t.trim();
+            let count = trimmed.chars().count() as i32;
+            let over = count > journal::decree::MAX_CHARS as i32;
+            if let Some(w) = dec_text_weak.upgrade() {
+                w.set_can_issue(!trimmed.is_empty() && !over);
+                w.set_decree_count(SharedString::from(format!(
+                    "{}{} / {}",
+                    count,
+                    if over { "  ⚠" } else { "" },
+                    journal::decree::MAX_CHARS
+                )));
+            }
+            let _ = &dec_text_app;
+        });
+    }
+
+    // Issue: hold the text against the block that is about to start, then start
+    // it. The record cannot be written yet — see `pending_decree` — so this only
+    // parks the intention and lets the tick finish the job when the session ends.
+    let issue_app = Arc::clone(&app);
+    let issue_shared = Arc::clone(&shared);
+    let issue_weak = weak.clone();
+    win.on_issue_decree(move |text| {
+        let raw = text.to_string();
+        // Validate with the same function that will judge it at session end, so
+        // a line the dialog accepted cannot be refused later by surprise.
+        match journal::decree::validate_text(&raw) {
+            Ok(clean) => {
+                *issue_app.pending_decree.lock().unwrap() =
+                    Some((clean, chrono::Utc::now().timestamp()));
+                if let Some(w) = issue_weak.upgrade() {
+                    w.set_decree_open(false);
+                    w.set_decree_text(SharedString::from(""));
+                    w.set_decree_error(SharedString::from(""));
+                    w.set_can_issue(false);
+                }
+                run_action(TrayAction::Toggle, &issue_shared, &issue_app, &issue_weak);
+            }
+            Err(e) => {
+                if let Some(w) = issue_weak.upgrade() {
+                    w.set_decree_error(SharedString::from(format!("{e}")));
+                }
+            }
+        }
+    });
+
+    // Start without: the block runs unspoken for. Any decree still parked is
+    // cleared, so an intention written for an earlier block cannot silently
+    // attach itself to this one.
+    let dec_skip_app = Arc::clone(&app);
+    let dec_skip_shared = Arc::clone(&shared);
+    let dec_skip_weak = weak.clone();
+    win.on_skip_decree(move || {
+        *dec_skip_app.pending_decree.lock().unwrap() = None;
+        if let Some(w) = dec_skip_weak.upgrade() {
+            w.set_decree_open(false);
+            w.set_decree_text(SharedString::from(""));
+            w.set_decree_error(SharedString::from(""));
+            w.set_can_issue(false);
+            w.set_current_decree(SharedString::from(String::new()));
+        }
+        run_action(
+            TrayAction::Toggle,
+            &dec_skip_shared,
+            &dec_skip_app,
+            &dec_skip_weak,
+        );
+    });
+
+    // Dismiss: back out entirely. The clock stays paused where it was.
+    let dec_dismiss_weak = weak.clone();
+    win.on_dismiss_decree(move || {
+        if let Some(w) = dec_dismiss_weak.upgrade() {
+            w.set_decree_open(false);
+            w.set_decree_text(SharedString::from(""));
+            w.set_decree_error(SharedString::from(""));
+            w.set_can_issue(false);
         }
     });
 
@@ -2491,9 +2840,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         // version flipped the label to "Copied" before trying, so on a machine
         // with no clipboard tool it said "Copied" and pasted nothing — which is
         // exactly the kind of lie that wastes a user's afternoon.
-        let copied = copy_to_clipboard(&code); if let Some(w) = copy_weak.upgrade() {
-            w.set_code_copied(copied); }
-    }); 
+        let copied = copy_to_clipboard(&code);
+        if let Some(w) = copy_weak.upgrade() {
+            w.set_code_copied(copied);
+        }
+    });
 
     // Open an external URL in the user's default browser (About / credits links).
     // Only http(s) is accepted, so a stray string can never launch a local binary.
@@ -2507,9 +2858,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(w) = drag_weak.upgrade() {
             let x = w.get_drag_origin_x();
             let y = w.get_drag_origin_y();
-            w.window().set_position(slint::WindowPosition::Logical(
-                slint::LogicalPosition::new(x, y),
-            ));
+            w.window()
+                .set_position(slint::WindowPosition::Logical(slint::LogicalPosition::new(
+                    x, y,
+                )));
         }
     });
     // Motion on/off takes effect immediately: the global drives every
@@ -2528,8 +2880,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(w) = cm_weak.upgrade() {
             w.set_compact_mode(on);
             let (cw, ch) = if on { (320.0, 300.0) } else { (420.0, 680.0) };
-            w
-                .window()
+            w.window()
                 .set_size(slint::WindowSize::Logical(slint::LogicalSize::new(cw, ch)));
         }
     });
@@ -3091,10 +3442,18 @@ mod sync_detail_tests {
     #[test]
     fn the_age_picks_the_right_unit() {
         let now = 1_000_000;
-        assert!(describe_last_sync(now - 5, now, true).unwrap().contains("just now"));
-        assert!(describe_last_sync(now - 300, now, true).unwrap().contains("5 min ago"));
-        assert!(describe_last_sync(now - 7_200, now, true).unwrap().contains("2 h ago"));
-        assert!(describe_last_sync(now - 172_800, now, true).unwrap().contains("2 d ago"));
+        assert!(describe_last_sync(now - 5, now, true)
+            .unwrap()
+            .contains("just now"));
+        assert!(describe_last_sync(now - 300, now, true)
+            .unwrap()
+            .contains("5 min ago"));
+        assert!(describe_last_sync(now - 7_200, now, true)
+            .unwrap()
+            .contains("2 h ago"));
+        assert!(describe_last_sync(now - 172_800, now, true)
+            .unwrap()
+            .contains("2 d ago"));
     }
 
     #[test]

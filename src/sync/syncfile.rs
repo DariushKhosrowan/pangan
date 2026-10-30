@@ -318,9 +318,7 @@ impl Envelope {
     /// True when this envelope holds nothing worth uploading.
     #[allow(dead_code)] // test support, not called from the app
     pub fn is_empty(&self) -> bool {
-        self.data.sessions.is_empty()
-            && self.data.tasks.is_empty()
-            && self.settings.is_empty()
+        self.data.sessions.is_empty() && self.data.tasks.is_empty() && self.settings.is_empty()
     }
 }
 

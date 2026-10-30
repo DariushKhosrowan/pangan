@@ -146,7 +146,11 @@ pub enum Callback {
 fn done_page(ok: bool, lang_en: bool) -> String {
     let (title, body, accent) = if ok {
         (
-            if lang_en { "Pangan is connected" } else { "پنگان متصل شد" },
+            if lang_en {
+                "Pangan is connected"
+            } else {
+                "پنگان متصل شد"
+            },
             if lang_en {
                 "You can close this tab and go back to Pangan. Your focus history and settings now sync on their own."
             } else {
@@ -156,7 +160,11 @@ fn done_page(ok: bool, lang_en: bool) -> String {
         )
     } else {
         (
-            if lang_en { "Sign-in did not finish" } else { "ورود کامل نشد" },
+            if lang_en {
+                "Sign-in did not finish"
+            } else {
+                "ورود کامل نشد"
+            },
             if lang_en {
                 "Nothing was changed. Close this tab and try again from Pangan."
             } else {
@@ -252,7 +260,9 @@ fn urldecode(s: &str) -> String {
 /// browsers show a connection error instead of the page.
 fn serve_one(listener: &TcpListener, lang_en: bool) -> Option<(Callback, String)> {
     let (mut stream, _) = listener.accept().ok()?;
-    stream.set_read_timeout(Some(Duration::from_secs(10))).ok()?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .ok()?;
     let mut reader = BufReader::new(stream.try_clone().ok()?);
     let mut line = String::new();
     reader.read_line(&mut line).ok()?;
@@ -278,7 +288,12 @@ fn serve_one(listener: &TcpListener, lang_en: bool) -> Option<(Callback, String)
         return None;
     }
 
-    let body = done_page(parsed.as_ref().is_some_and(|(c, _)| matches!(c, Callback::Code(_))), lang_en);
+    let body = done_page(
+        parsed
+            .as_ref()
+            .is_some_and(|(c, _)| matches!(c, Callback::Code(_))),
+        lang_en,
+    );
     let resp = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\
          Content-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n{}",
@@ -360,20 +375,15 @@ pub fn supports_loopback(client_id: &str) -> bool {
 /// `open` is injected rather than called directly so the flow can be exercised
 /// in tests without launching anything, and so the caller decides how a URL
 /// reaches the desktop's browser on each platform.
-pub fn sign_in<F>(
-    client_id: &str,
-    lang_en: bool,
-    open: F,
-) -> Result<SignedIn, String>
+pub fn sign_in<F>(client_id: &str, lang_en: bool, open: F) -> Result<SignedIn, String>
 where
     F: FnOnce(&str),
 {
     let started = Instant::now();
     // Port 0 lets the OS pick a free port. Google accepts any port on a
     // desktop client, so there is no need to pin one and risk a collision.
-    let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| {
-        format!("could not open a local sign-in port: {e}")
-    })?;
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|e| format!("could not open a local sign-in port: {e}"))?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
 
     let verifier = random_verifier();
@@ -452,7 +462,10 @@ fn exchange(client_id: &str, code: &str, verifier: &str, port: u16) -> Result<To
     let v: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| format!("token response was not JSON: {e}"))?;
     if let Some(err) = v.get("error").and_then(|x| x.as_str()) {
-        let desc = v.get("error_description").and_then(|x| x.as_str()).unwrap_or("");
+        let desc = v
+            .get("error_description")
+            .and_then(|x| x.as_str())
+            .unwrap_or("");
         return Err(format!("{err}: {desc}"));
     }
     let access = v["access_token"].as_str().unwrap_or("");
@@ -515,7 +528,10 @@ mod tests {
             "a raw space would truncate the scope list at the query string"
         );
         // The state must be its own parameter, not glued to the one before it.
-        assert!(url.contains("&state=st&") || url.ends_with("&state=st"), "got {url}");
+        assert!(
+            url.contains("&state=st&") || url.ends_with("&state=st"),
+            "got {url}"
+        );
     }
 
     #[test]
@@ -556,7 +572,10 @@ mod tests {
         assert!(ok.contains("close this tab"));
         let bad = done_page(false, true);
         assert!(bad.contains("did not finish"));
-        assert!(!bad.contains("connected"), "a failure must not read as success");
+        assert!(
+            !bad.contains("connected"),
+            "a failure must not read as success"
+        );
     }
 
     #[test]
@@ -577,7 +596,9 @@ mod tests {
         assert!(!location_means_blocked(
             "https://accounts.google.com/o/oauth2/v2/auth?flowName=GeneralOAuth"
         ));
-        assert!(!location_means_blocked("http://127.0.0.1:53682/?code=abc&state=s"));
+        assert!(!location_means_blocked(
+            "http://127.0.0.1:53682/?code=abc&state=s"
+        ));
         // No redirect at all is not evidence of success.
         assert!(!location_means_blocked(""));
     }

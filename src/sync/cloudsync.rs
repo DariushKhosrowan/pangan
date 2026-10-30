@@ -29,10 +29,10 @@
 //! Three attempts, then an honest error: a device that keeps losing the race is
 //! not going to win it by trying harder.
 
-use crate::sync::gdrive::{self, Tokens};
-use crate::sync::merge;
 use crate::state::settings::Settings;
 use crate::state::store::Data;
+use crate::sync::gdrive::{self, Tokens};
+use crate::sync::merge;
 use crate::sync::syncfile::{DeviceState, Envelope};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -129,7 +129,7 @@ impl Engine {
         self.state.lock().unwrap().status = s.into();
     }
 
-#[allow(dead_code)] // test support, not called from the app
+    #[allow(dead_code)] // test support, not called from the app
     pub fn status(&self) -> String {
         self.state.lock().unwrap().status.clone()
     }
@@ -175,9 +175,7 @@ pub fn sync_once(
                 last_err = e;
                 // A short pause so two devices that collided do not collide
                 // again in lockstep on the next attempt.
-                std::thread::sleep(std::time::Duration::from_millis(
-                    120 * (attempt as u64 + 1),
-                ));
+                std::thread::sleep(std::time::Duration::from_millis(120 * (attempt as u64 + 1)));
             }
             Err(e) => return Err(e),
         }
@@ -222,10 +220,12 @@ fn attempt_once(
     // would push 25-minute defaults over the 50 minutes the user set on their
     // desktop. This is a one-time bootstrap; after it, stamps decide.
     let merged_settings = if !device.bootstrapped && !remote.settings.is_empty() {
-        device.bootstrapped = true; remote.settings.clone()
+        device.bootstrapped = true;
+        remote.settings.clone()
     } else {
-        device.bootstrapped = true; device.settings.merge(&remote.settings)
-    }; 
+        device.bootstrapped = true;
+        device.settings.merge(&remote.settings)
+    };
 
     // What the remote already holds, for the cheap "did anything move" test.
     let remote_data_json = serde_json::to_string(&remote.data).unwrap_or_default();
@@ -278,8 +278,8 @@ fn attempt_once(
     let mut next_settings = local.settings.clone();
     merged_settings.apply(&mut next_settings);
     next_settings.sanitize_mut();
-    let settings_changed_locally = toml::to_string(&next_settings).ok()
-        != toml::to_string(&local.settings).ok();
+    let settings_changed_locally =
+        toml::to_string(&next_settings).ok() != toml::to_string(&local.settings).ok();
 
     // Adopt the merged settings as the baseline, so the next cycle does not
     // mistake values that just arrived from the other device for local edits.
@@ -385,12 +385,14 @@ mod tests {
             tasks: vec![task(1, "write", 10)],
             next_task_id: 2,
             inscriptions: vec![],
+            decrees: vec![],
         };
         let b = Data {
             sessions: vec![SessionRecord { at: 2, minutes: 25 }],
             tasks: vec![task(2, "read", 20)],
             next_task_id: 3,
             inscriptions: vec![],
+            decrees: vec![],
         };
         let first = merge::merge(&a, &b);
         let second = merge::merge(&first, &b);
@@ -446,6 +448,7 @@ mod tests {
             tasks: vec![task(1, "write the report", 10)],
             next_task_id: 2,
             inscriptions: vec![],
+            decrees: vec![],
         };
         let mut dev_a = device("desktop");
         let out_a = sync_once(&mut tokens, &local(a.clone()), &mut dev_a, &mut |_, _| {}).unwrap();
@@ -830,6 +833,7 @@ mod recovery_tests {
             tasks: vec![task(1, "write the report", 10), task(2, "review", 20)],
             next_task_id: 3,
             inscriptions: vec![],
+            decrees: vec![],
         };
         let mut dev = device("desktop");
         sync_once(&mut tokens, &local(good), &mut dev, &mut |_, _| {}).unwrap();
@@ -955,7 +959,13 @@ mod recovery_tests {
             inscriptions: vec![],
             ..Default::default()
         };
-        sync_once(&mut tokens, &local(before.clone()), &mut dev, &mut |_, _| {}).unwrap();
+        sync_once(
+            &mut tokens,
+            &local(before.clone()),
+            &mut dev,
+            &mut |_, _| {},
+        )
+        .unwrap();
 
         // Delete it locally: the tombstone carries a newer stamp.
         let mut deleted = before.clone();
@@ -966,12 +976,9 @@ mod recovery_tests {
         // A device that still has the old copy syncs; it must not bring the
         // task back for everyone.
         let mut after = Data::default();
-        sync_once(
-            &mut tokens,
-            &local(before),
-            &mut dev,
-            &mut |m, _| after = m.clone(),
-        )
+        sync_once(&mut tokens, &local(before), &mut dev, &mut |m, _| {
+            after = m.clone()
+        })
         .unwrap();
         let live: Vec<&Task> = after.tasks.iter().filter(|t| !t.deleted).collect();
         assert!(
@@ -990,22 +997,22 @@ mod recovery_tests {
     #[test]
     fn a_corrupt_remote_file_is_refused_rather_than_overwritten() {
         let (_guard, mut tokens) = fake(); // Something that is not valid JSON at all.
-        crate::sync::gdrive::upload("tok", "{ this is not json").unwrap(); let mut dev = device("desktop"); let local_data = Data {
+        crate::sync::gdrive::upload("tok", "{ this is not json").unwrap();
+        let mut dev = device("desktop");
+        let local_data = Data {
             tasks: vec![task(1, "mine", 10)],
             next_task_id: 2,
             inscriptions: vec![],
             ..Default::default()
-        }; let err = sync_once(
-            &mut tokens,
-            &local(local_data),
-            &mut dev,
-            &mut |_, _| {},
-        )
-        .unwrap_err(); assert!(
+        };
+        let err = sync_once(&mut tokens, &local(local_data), &mut dev, &mut |_, _| {}).unwrap_err();
+        assert!(
             err.contains("not valid JSON"),
             "the error must say what is wrong: {err}"
         ); // And the file is untouched, so the user can inspect or restore it.
-        let raw = crate::sync::gdrive::download("tok").unwrap().unwrap(); assert_eq!(raw, "{ this is not json"); }
+        let raw = crate::sync::gdrive::download("tok").unwrap().unwrap();
+        assert_eq!(raw, "{ this is not json");
+    }
 
     /// The race the merge cannot fix, end to end: two devices read the same
     /// version, both write, and the second write must be retried against the
@@ -1038,8 +1045,13 @@ mod recovery_tests {
         b_env.device_name = "laptop".into();
         b_env.data.tasks.push(task(2, "from laptop", 20));
         b_env.data.next_task_id = 3;
-        crate::sync::gdrive::upload_conditional("tok", "pangan-sync.json", &b_env.to_json().unwrap(), Some(&meta))
-            .unwrap();
+        crate::sync::gdrive::upload_conditional(
+            "tok",
+            "pangan-sync.json",
+            &b_env.to_json().unwrap(),
+            Some(&meta),
+        )
+        .unwrap();
 
         // A now tries to write against the version it read. It must be told
         // the file moved, not silently allowed to overwrite the laptop's task.
@@ -1077,8 +1089,20 @@ mod recovery_tests {
             inscriptions: vec![],
             ..Default::default()
         };
-        sync_once(&mut tokens, &local(seed.clone()), &mut dev_a, &mut |_, _| {}).unwrap();
-        sync_once(&mut tokens, &local(seed.clone()), &mut dev_b, &mut |_, _| {}).unwrap();
+        sync_once(
+            &mut tokens,
+            &local(seed.clone()),
+            &mut dev_a,
+            &mut |_, _| {},
+        )
+        .unwrap();
+        sync_once(
+            &mut tokens,
+            &local(seed.clone()),
+            &mut dev_b,
+            &mut |_, _| {},
+        )
+        .unwrap();
 
         // Each adds its own task and pushes. The second push is against a file
         // the first one changed, which is exactly the race.
@@ -1119,7 +1143,10 @@ mod engine_tests {
         assert!(e.try_begin(), "the first claim must succeed");
         assert!(!e.try_begin(), "a second concurrent claim must be refused");
         e.finish();
-        assert!(e.try_begin(), "after finishing, the engine is claimable again");
+        assert!(
+            e.try_begin(),
+            "after finishing, the engine is claimable again"
+        );
     }
 
     #[test]
@@ -1145,16 +1172,18 @@ mod engine_tests {
         e.mark_dirty();
         assert!(e.try_begin());
         e.finish();
-        assert!(e.is_dirty(), "finish() is not a commit; the flag is separate");
+        assert!(
+            e.is_dirty(),
+            "finish() is not a commit; the flag is separate"
+        );
     }
 }
-
 
 #[cfg(test)]
 mod everything_syncs_tests {
     use super::*;
-    use crate::stats::report::{self as stats, Period};
     use crate::state::store::{SessionRecord, Task};
+    use crate::stats::report::{self as stats, Period};
 
     fn task(id: u64, title: &str, updated_at: i64) -> Task {
         Task {
@@ -1187,12 +1216,16 @@ mod everything_syncs_tests {
     fn fake() -> (std::sync::MutexGuard<'static, ()>, Tokens) {
         let guard = crate::sync::gdrive::drive_roundtrip::DRIVE_ENV_LOCK
             .lock()
-            .unwrap_or_else(|e| e.into_inner()); let (base, _store) = crate::sync::gdrive::drive_roundtrip::fake_drive_for_tests(); std::env::set_var("PANGAN_DRIVE_BASE", &base); let tokens = Tokens {
+            .unwrap_or_else(|e| e.into_inner());
+        let (base, _store) = crate::sync::gdrive::drive_roundtrip::fake_drive_for_tests();
+        std::env::set_var("PANGAN_DRIVE_BASE", &base);
+        let tokens = Tokens {
             access_token: "tok".into(),
             refresh_token: "refresh".into(),
             expires_at: chrono::Utc::now().timestamp() + 3600,
             email: "a@example.com".into(),
-        }; (guard, tokens)
+        };
+        (guard, tokens)
     }
 
     /// The question the user actually asked: if I set this up on one machine,
@@ -1205,15 +1238,29 @@ mod everything_syncs_tests {
     #[test]
     fn a_fresh_device_receives_tasks_history_settings_and_the_same_stats() {
         let (_guard, mut tokens) = fake(); // ── Machine 1: the user has been working for a while ──
-        // Statistics are per period, so these stamps must be recent: sessions
-        // from 1970 would fall outside "this month" for a reason that has
-        // nothing to do with syncing.
+                                           // Statistics are per period, so these stamps must be recent: sessions
+                                           // from 1970 would fall outside "this month" for a reason that has
+                                           // nothing to do with syncing.
         let now = chrono::Utc::now().timestamp();
-        let mut settings_a = Settings::default(); settings_a.work_minutes = 50; settings_a.daily_goal_minutes = 240; settings_a.sound_theme = "santur".into(); settings_a.lang = "en".into(); let data_a = Data {
+        let mut settings_a = Settings::default();
+        settings_a.work_minutes = 50;
+        settings_a.daily_goal_minutes = 240;
+        settings_a.sound_theme = "santur".into();
+        settings_a.lang = "en".into();
+        let data_a = Data {
             sessions: vec![
-                SessionRecord { at: now - 3_600, minutes: 50 },
-                SessionRecord { at: now - 1_800, minutes: 50 },
-                SessionRecord { at: now - 600, minutes: 50 },
+                SessionRecord {
+                    at: now - 3_600,
+                    minutes: 50,
+                },
+                SessionRecord {
+                    at: now - 1_800,
+                    minutes: 50,
+                },
+                SessionRecord {
+                    at: now - 600,
+                    minutes: 50,
+                },
             ],
             tasks: vec![
                 task(1, "write the quarterly report", 100),
@@ -1221,7 +1268,10 @@ mod everything_syncs_tests {
             ],
             next_task_id: 3,
             inscriptions: vec![],
-        }; let mut dev_a = device("desktop"); let out_a = sync_once(
+            decrees: vec![],
+        };
+        let mut dev_a = device("desktop");
+        let out_a = sync_once(
             &mut tokens,
             &Local {
                 data: data_a.clone(),
@@ -1230,99 +1280,195 @@ mod everything_syncs_tests {
             &mut dev_a,
             &mut |_, _| {},
         )
-        .unwrap(); assert!(out_a.pushed, "the first machine must push everything up"); // ── Machine 2: brand new, empty, same Google account ──
-        let mut data_b = Data::default(); let mut settings_b = Settings::default(); let mut dev_b = device("laptop"); let out_b = sync_once(
+        .unwrap();
+        assert!(out_a.pushed, "the first machine must push everything up"); // ── Machine 2: brand new, empty, same Google account ──
+        let mut data_b = Data::default();
+        let mut settings_b = Settings::default();
+        let mut dev_b = device("laptop");
+        let out_b = sync_once(
             &mut tokens,
             &local(Data::default()),
             &mut dev_b,
             &mut |d, s| {
-                data_b = d.clone(); settings_b = s.clone(); },
+                data_b = d.clone();
+                settings_b = s.clone();
+            },
         )
         .unwrap(); // Tasks.
-        assert!(out_b.changed_locally, "the new machine must be rewritten"); assert_eq!(data_b.tasks.len(), 2, "every task must arrive"); let titles: Vec<&str> = data_b.tasks.iter().map(|t| t.title.as_str()).collect(); assert!(titles.contains(&"write the quarterly report")); assert!(titles.contains(&"review the contract")); // The due date and time must survive, or the task shows up undated.
-        assert_eq!(data_b.tasks[0].date, "1405-08-07"); assert_eq!(data_b.tasks[0].time, "09:30"); // Focus history.
+        assert!(out_b.changed_locally, "the new machine must be rewritten");
+        assert_eq!(data_b.tasks.len(), 2, "every task must arrive");
+        let titles: Vec<&str> = data_b.tasks.iter().map(|t| t.title.as_str()).collect();
+        assert!(titles.contains(&"write the quarterly report"));
+        assert!(titles.contains(&"review the contract")); // The due date and time must survive, or the task shows up undated.
+        assert_eq!(data_b.tasks[0].date, "1405-08-07");
+        assert_eq!(data_b.tasks[0].time, "09:30"); // Focus history.
         assert_eq!(data_b.sessions.len(), 3, "every focus session must arrive"); // Settings, the portable ones.
-        assert_eq!(settings_b.work_minutes, 50, "durations must travel"); assert_eq!(settings_b.daily_goal_minutes, 240, "the goal must travel"); assert_eq!(settings_b.sound_theme, "santur", "the chime must travel"); assert_eq!(settings_b.lang, "en", "the language must travel"); // Statistics: the whole point of syncing history is that the numbers
-        // are the same on both machines. Comparing a report computed from A's
-        // sessions with one computed from B's proves the *derived* view matches,
-        // not just the raw rows.
-        let report_a = stats::report(&data_a.sessions, Period::Month, 0); let report_b = stats::report(&data_b.sessions, Period::Month, 0); assert_eq!(
+        assert_eq!(settings_b.work_minutes, 50, "durations must travel");
+        assert_eq!(settings_b.daily_goal_minutes, 240, "the goal must travel");
+        assert_eq!(settings_b.sound_theme, "santur", "the chime must travel");
+        assert_eq!(settings_b.lang, "en", "the language must travel"); // Statistics: the whole point of syncing history is that the numbers
+                                                                       // are the same on both machines. Comparing a report computed from A's
+                                                                       // sessions with one computed from B's proves the *derived* view matches,
+                                                                       // not just the raw rows.
+        let report_a = stats::report(&data_a.sessions, Period::Month, 0);
+        let report_b = stats::report(&data_b.sessions, Period::Month, 0);
+        assert_eq!(
             report_a.sessions, report_b.sessions,
             "session counts must agree across devices"
-        ); assert_eq!(
+        );
+        assert_eq!(
             report_a.minutes, report_b.minutes,
             "focus minutes must agree across devices"
-        ); assert_eq!(
+        );
+        assert_eq!(
             report_a.sessions, 3,
             "the count must be the sessions the user actually did"
-        ); assert_eq!(report_b.minutes, 150, "3 x 50 minutes"); }
+        );
+        assert_eq!(report_b.minutes, 150, "3 x 50 minutes");
+    }
 
     /// A task completed on the laptop has to come back to the desktop, and the
     /// id counter must stay ahead so the next task on either machine does not
     /// collide with an existing one.
     #[test]
     fn a_task_added_and_completed_on_the_second_machine_returns_to_the_first() {
-        let (_guard, mut tokens) = fake(); let mut dev_a = device("desktop"); let mut data_a = Data {
+        let (_guard, mut tokens) = fake();
+        let mut dev_a = device("desktop");
+        let mut data_a = Data {
             tasks: vec![task(1, "first", 10)],
             next_task_id: 2,
             inscriptions: vec![],
             ..Default::default()
-        }; sync_once(&mut tokens, &local(data_a.clone()), &mut dev_a, &mut |_, _| {}).unwrap(); // Laptop pulls, adds a task, marks the first one done.
-        let mut dev_b = device("laptop"); let mut data_b = Data::default(); sync_once(
+        };
+        sync_once(
+            &mut tokens,
+            &local(data_a.clone()),
+            &mut dev_a,
+            &mut |_, _| {},
+        )
+        .unwrap(); // Laptop pulls, adds a task, marks the first one done.
+        let mut dev_b = device("laptop");
+        let mut data_b = Data::default();
+        sync_once(
             &mut tokens,
             &local(Data::default()),
             &mut dev_b,
             &mut |d, _| data_b = d.clone(),
         )
-        .unwrap(); data_b.tasks[0].done = true; data_b.tasks[0].updated_at = 500; let mut new_task = task(2, "added on the laptop", 600); new_task.date = String::new(); new_task.time = String::new(); data_b.tasks.push(new_task); data_b.next_task_id = 3; let out_b = sync_once(&mut tokens, &local(data_b.clone()), &mut dev_b, &mut |_, _| {})
-            .unwrap(); assert!(out_b.pushed, "the laptop's work must go up"); // Desktop pulls again: it must see both the completion and the new task.
-        let mut merged_a = Data::default(); sync_once(
+        .unwrap();
+        data_b.tasks[0].done = true;
+        data_b.tasks[0].updated_at = 500;
+        let mut new_task = task(2, "added on the laptop", 600);
+        new_task.date = String::new();
+        new_task.time = String::new();
+        data_b.tasks.push(new_task);
+        data_b.next_task_id = 3;
+        let out_b = sync_once(
+            &mut tokens,
+            &local(data_b.clone()),
+            &mut dev_b,
+            &mut |_, _| {},
+        )
+        .unwrap();
+        assert!(out_b.pushed, "the laptop's work must go up"); // Desktop pulls again: it must see both the completion and the new task.
+        let mut merged_a = Data::default();
+        sync_once(
             &mut tokens,
             &local(data_a.clone()),
             &mut dev_a,
             &mut |d, _| merged_a = d.clone(),
         )
-        .unwrap(); assert_eq!(merged_a.tasks.len(), 2, "the laptop's task must arrive"); let first = merged_a.tasks.iter().find(|t| t.id == 1).unwrap(); assert!(first.done, "the completion must travel back"); let second = merged_a.tasks.iter().find(|t| t.id == 2).unwrap(); assert_eq!(second.title, "added on the laptop"); assert!(
+        .unwrap();
+        assert_eq!(merged_a.tasks.len(), 2, "the laptop's task must arrive");
+        let first = merged_a.tasks.iter().find(|t| t.id == 1).unwrap();
+        assert!(first.done, "the completion must travel back");
+        let second = merged_a.tasks.iter().find(|t| t.id == 2).unwrap();
+        assert_eq!(second.title, "added on the laptop");
+        assert!(
             merged_a.next_task_id > 2,
             "the id counter must stay ahead of every task in use"
-        ); data_a = merged_a; assert_eq!(data_a.tasks.len(), 2); }
+        );
+        data_a = merged_a;
+        assert_eq!(data_a.tasks.len(), 2);
+    }
 
     /// Deleting a task must not be undone by the other machine still holding
     /// the old copy. This is the failure people notice most: a task they
     /// deleted comes back.
     #[test]
     fn a_deleted_task_stays_deleted_after_the_other_machine_syncs() {
-        let (_guard, mut tokens) = fake(); let mut dev_a = device("desktop"); let mut dev_b = device("laptop"); let data_a = Data {
+        let (_guard, mut tokens) = fake();
+        let mut dev_a = device("desktop");
+        let mut dev_b = device("laptop");
+        let data_a = Data {
             tasks: vec![task(1, "delete me", 10)],
             next_task_id: 2,
             inscriptions: vec![],
             ..Default::default()
-        }; let mut on_b = Data::default(); sync_once(&mut tokens, &local(data_a.clone()), &mut dev_a, &mut |_, _| {}).unwrap(); sync_once(
+        };
+        let mut on_b = Data::default();
+        sync_once(
+            &mut tokens,
+            &local(data_a.clone()),
+            &mut dev_a,
+            &mut |_, _| {},
+        )
+        .unwrap();
+        sync_once(
             &mut tokens,
             &local(Data::default()),
             &mut dev_b,
             &mut |d, _| on_b = d.clone(),
         )
-        .unwrap(); assert_eq!(on_b.tasks.len(), 1, "the laptop has the task to start with"); // Desktop deletes it.
-        let mut deleted = data_a.clone(); deleted.tasks[0].deleted = true; deleted.tasks[0].updated_at = 900; sync_once(&mut tokens, &local(deleted), &mut dev_a, &mut |_, _| {}).unwrap(); // Laptop syncs again. It still has the live copy locally, but the sync
-        // must come back with the tombstone rather than resurrecting it.
-        let mut after_b = Data::default(); sync_once(&mut tokens, &local(on_b.clone()), &mut dev_b, &mut |d, _| after_b = d.clone())
-            .unwrap(); let t = after_b.tasks.iter().find(|t| t.id == 1).unwrap(); assert!(t.deleted, "the deletion must not be undone by the other device"); }
+        .unwrap();
+        assert_eq!(on_b.tasks.len(), 1, "the laptop has the task to start with"); // Desktop deletes it.
+        let mut deleted = data_a.clone();
+        deleted.tasks[0].deleted = true;
+        deleted.tasks[0].updated_at = 900;
+        sync_once(&mut tokens, &local(deleted), &mut dev_a, &mut |_, _| {}).unwrap(); // Laptop syncs again. It still has the live copy locally, but the sync
+                                                                                      // must come back with the tombstone rather than resurrecting it.
+        let mut after_b = Data::default();
+        sync_once(
+            &mut tokens,
+            &local(on_b.clone()),
+            &mut dev_b,
+            &mut |d, _| after_b = d.clone(),
+        )
+        .unwrap();
+        let t = after_b.tasks.iter().find(|t| t.id == 1).unwrap();
+        assert!(
+            t.deleted,
+            "the deletion must not be undone by the other device"
+        );
+    }
 
     /// Syncing repeatedly must change nothing. Without this, every tick could
     /// add another copy of the same session or flip a setting back and forth.
     #[test]
     fn syncing_many_times_does_not_create_duplicates_or_drift() {
-        let (_guard, mut tokens) = fake(); let data = Data {
-            sessions: vec![SessionRecord { at: 1_000, minutes: 25 }],
+        let (_guard, mut tokens) = fake();
+        let data = Data {
+            sessions: vec![SessionRecord {
+                at: 1_000,
+                minutes: 25,
+            }],
             tasks: vec![task(1, "stable", 10)],
             next_task_id: 2,
             inscriptions: vec![],
-        }; let mut dev = device("desktop"); let mut settled = data.clone(); sync_once(&mut tokens, &local(data.clone()), &mut dev, &mut |_, _| {}).unwrap(); for _ in 0..5 {
+            decrees: vec![],
+        };
+        let mut dev = device("desktop");
+        let mut settled = data.clone();
+        sync_once(&mut tokens, &local(data.clone()), &mut dev, &mut |_, _| {}).unwrap();
+        for _ in 0..5 {
             sync_once(&mut tokens, &local(data.clone()), &mut dev, &mut |d, _| {
                 settled = d.clone()
             })
-            .unwrap(); }
+            .unwrap();
+        }
 
-        assert_eq!(settled.tasks.len(), 1, "no duplicate tasks"); assert_eq!(settled.sessions.len(), 1, "no duplicate sessions"); assert_eq!(settled.next_task_id, 2, "the id counter must not climb"); }
+        assert_eq!(settled.tasks.len(), 1, "no duplicate tasks");
+        assert_eq!(settled.sessions.len(), 1, "no duplicate sessions");
+        assert_eq!(settled.next_task_id, 2, "the id counter must not climb");
+    }
 }

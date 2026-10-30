@@ -146,19 +146,15 @@ fn id_for(session_at: i64, text: &str) -> String {
     let digest = h.finalize();
     // 16 hex chars is 64 bits: collisions across a lifetime of inscriptions are
     // not a realistic concern, and a short id keeps the JSON readable.
-    digest
-        .iter()
-        .take(8)
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    digest.iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
 
-/// The calendar day an inscription belongs to, as `YYYY-MM-DD` in local time.
+/// The calendar day a Unix timestamp falls on, as `YYYY-MM-DD` in local time.
 ///
 /// A focus session that ends at 00:10 belongs to the new day, which is the day
 /// the user would look for it on.
-pub fn day_of(ins: &Inscription) -> String {
-    match chrono::DateTime::from_timestamp(ins.session_at, 0) {
+pub fn day_key(at: i64) -> String {
+    match chrono::DateTime::from_timestamp(at, 0) {
         Some(utc) => utc
             .with_timezone(&chrono::Local)
             .format("%Y-%m-%d")
@@ -184,41 +180,6 @@ pub fn search<'a>(all: &'a [Inscription], needle: &str) -> Vec<&'a Inscription> 
         .filter(|i| i.text.to_lowercase().contains(&needle))
         .collect();
     out.sort_by(|a, b| b.session_at.cmp(&a.session_at));
-    out
-}
-
-/// Render the archive as Markdown, oldest first, grouped by day.
-///
-/// Oldest first because an export is a document to read top to bottom, the way
-/// a day actually happened.
-pub fn export_markdown(all: &[Inscription], lang_fa: bool) -> String {
-    let mut sorted: Vec<&Inscription> = all.iter().collect();
-    sorted.sort_by(|a, b| a.session_at.cmp(&b.session_at));
-
-    let mut out = String::new();
-    let title = if lang_fa {
-        "# سنگ‌نوشته‌های پنگان"
-    } else {
-        "# Pangan inscriptions"
-    };
-    out.push_str(title);
-    out.push_str("\n\n");
-
-    let mut current_day = String::new();
-    for ins in sorted {
-        let day = day_of(ins);
-        if day != current_day {
-            if !current_day.is_empty() {
-                out.push('\n');
-            }
-            out.push_str(&format!("## {day}\n\n"));
-            current_day = day;
-        }
-        let time = chrono::DateTime::from_timestamp(ins.session_at, 0)
-            .map(|u| u.with_timezone(&chrono::Local).format("%H:%M").to_string())
-            .unwrap_or_else(|| "--:--".to_string());
-        out.push_str(&format!("- {time} — {}\n", ins.text));
-    }
     out
 }
 
@@ -248,12 +209,13 @@ mod tests {
         let long: String = std::iter::repeat('ا').take(MAX_CHARS + 1).collect();
         assert_eq!(
             validate_text(&long),
-            Err(InscriptionError::TooLong {
-                len: MAX_CHARS + 1
-            })
+            Err(InscriptionError::TooLong { len: MAX_CHARS + 1 })
         );
         let at_limit: String = std::iter::repeat('ا').take(MAX_CHARS).collect();
-        assert!(validate_text(&at_limit).is_ok(), "exactly at the limit is fine");
+        assert!(
+            validate_text(&at_limit).is_ok(),
+            "exactly at the limit is fine"
+        );
     }
 
     #[test]
@@ -278,7 +240,10 @@ mod tests {
             validate_text("a\u{1b}b"),
             Err(InscriptionError::ControlChars)
         );
-        assert_eq!(validate_text("a\u{7}b"), Err(InscriptionError::ControlChars));
+        assert_eq!(
+            validate_text("a\u{7}b"),
+            Err(InscriptionError::ControlChars)
+        );
     }
 
     #[test]
@@ -298,7 +263,7 @@ mod tests {
         let all = vec![
             create(T, T, "Wrote the Report").unwrap(),
             create(T + 100, T + 100, "read papers").unwrap(),
-    ];
+        ];
         let hits = search(&all, "report");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].text, "Wrote the Report");
@@ -324,22 +289,6 @@ mod tests {
         let hits = search(&all, "   ");
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].text, "second", "newest first");
-    }
-
-    #[test]
-    fn export_is_chronological_and_grouped_by_day() {
-        let all = vec![
-            create(T, T, "second").unwrap(),
-            create(T + 3 * 86_400, T + 3 * 86_400, "third day").unwrap(),
-            create(T - 7_200, T - 7_200, "first").unwrap(),
-        ];
-        let md = export_markdown(&all, false);
-        let first = md.find("first").unwrap();
-        let second = md.find("second").unwrap();
-        let third = md.find("third day").unwrap();
-        assert!(first < second, "oldest first");
-        assert!(second < third);
-        assert_eq!(md.matches("## ").count(), 2, "two distinct days");
     }
 
     #[test]
