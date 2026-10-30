@@ -112,19 +112,56 @@ pub fn is_auth_error(msg: &str) -> bool {
 /// The file name inside `appDataFolder`.
 const REMOTE_FILE: &str = "pangan-sync.json";
 
+/// Client id baked into this build, if any.
+///
+/// The point of compiling it in is that the user never sees a setup step: they
+/// press Connect and it works. `option_env!` keeps the source honest for forks
+/// and CI builds that do not supply one — those fall back to the placeholder
+/// and the Settings field, exactly as before.
+const BUILT_IN_CLIENT_ID: Option<&str> = option_env!("PANGAN_GOOGLE_CLIENT_ID");
+
+/// Client secret baked into this build, if any.
+///
+/// A device-flow client cannot exchange a code without presenting this, so
+/// without it the sign-in is approved on the phone and then silently fails.
+/// It is not a real secret for this client type (the flow targets TVs and
+/// printers that cannot keep one), but it must be sent.
+const BUILT_IN_CLIENT_SECRET: Option<&str> = option_env!("PANGAN_GOOGLE_CLIENT_SECRET");
+
 /// Client id of the Pangan desktop app. Overridable for forks and for local
 /// testing without a rebuild.
 pub fn client_id() -> String {
     // Precedence: a value the user pasted in Settings, then the build-time
-    // environment variable, then the placeholder. Settings wins because it is
-    // the only one an end user can change without a compiler.
+    // value, then the environment, then the placeholder. Settings wins because
+    // it is the only one an end user can change without a compiler.
     if let Some(id) = crate::sync::load_client_id() {
         return id;
+    }
+    if let Some(id) = BUILT_IN_CLIENT_ID.filter(|s| !s.trim().is_empty()) {
+        return id.to_string();
     }
     std::env::var("PANGAN_GOOGLE_CLIENT_ID")
         .ok()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "PANGAN_DESKTOP_CLIENT_ID.apps.googleusercontent.com".to_string())
+}
+
+/// The client secret to present when exchanging a token.
+///
+/// Same precedence as the id: a value the user configured, then the build-time
+/// value, then the environment. Empty means "send nothing", which is correct
+/// for a Desktop-app client where PKCE replaces the secret.
+pub fn client_secret() -> String {
+    if let Some(s) = crate::sync::load_client_secret() {
+        return s;
+    }
+    if let Some(s) = BUILT_IN_CLIENT_SECRET.filter(|s| !s.trim().is_empty()) {
+        return s.to_string();
+    }
+    std::env::var("PANGAN_GOOGLE_CLIENT_SECRET")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_default()
 }
 
 /// True when a real client id is configured. Without one, device flow cannot
@@ -207,8 +244,13 @@ pub enum PollOutcome {
 /// Poll the token endpoint once. Call this every `interval` seconds until it
 /// returns `Approved` or `Failed`.
 pub fn poll_token(device_code: &str) -> PollOutcome {
+    // The device-code grant requires the client secret. Google is explicit
+    // about it: without one it answers `Missing required parameter:
+    // client_secret` and never issues a token, which is why a sign-in could be
+    // approved on the phone and still leave the app disconnected.
     let body = serde_json::json!({
         "client_id": client_id(),
+        "client_secret": client_secret(),
         "device_code": device_code,
         "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
     });
@@ -290,6 +332,7 @@ pub fn refresh(tokens: &Tokens) -> Result<Tokens, String> {
     }
     let body = serde_json::json!({
         "client_id": client_id(),
+        "client_secret": client_secret(),
         "refresh_token": tokens.refresh_token,
         "grant_type": "refresh_token",
     });

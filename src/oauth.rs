@@ -422,12 +422,23 @@ where
 /// refuses the exchange if it does not match, which is what makes PKCE work
 /// without a client secret.
 fn exchange(client_id: &str, code: &str, verifier: &str, port: u16) -> Result<Tokens, String> {
+    // PKCE replaces the client secret for a Desktop-app client, so this is
+    // normally empty and correctly omitted. It is sent when configured because
+    // some client types still demand it, and sending an empty string would be
+    // worse than sending nothing.
+    let secret = crate::gdrive::client_secret();
+    let secret_part = if secret.is_empty() {
+        String::new()
+    } else {
+        format!("&client_secret={}", urlencode(&secret))
+    };
     let body = format!(
-        "client_id={}&code={}&code_verifier={}&grant_type=authorization_code&redirect_uri={}",
+        "client_id={}&code={}&code_verifier={}&grant_type=authorization_code&redirect_uri={}{}",
         urlencode(client_id),
         urlencode(code),
         urlencode(verifier),
         urlencode(&redirect_uri(port)),
+        secret_part,
     );
     let resp = crate::gdrive::http_agent()
         .post(TOKEN_URL)

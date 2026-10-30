@@ -78,6 +78,58 @@ pub fn load_client_id() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// The OAuth client secret, if one is configured.
+///
+/// A **device-flow** client cannot exchange a device code without it: Google
+/// answers `Missing required parameter: client_secret`. For that client type the
+/// secret is not actually confidential — the flow is designed for TVs and
+/// printers that cannot keep one — but Google still insists it be presented, so
+/// the app has to hold it.
+///
+/// It lives next to the token in `sync.toml` (mode 0600) rather than in the
+/// binary, so a build handed to someone else carries no credential, and a fork
+/// can supply its own without a recompile. A Desktop-app client using the
+/// loopback + PKCE flow never needs this: PKCE replaces the secret entirely.
+pub fn load_client_secret() -> Option<String> {
+    let text = std::fs::read_to_string(sync_path()).ok()?;
+    let v: toml::Value = text.parse().ok()?;
+    v.get("client_secret")?
+        .as_str()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Store the client secret, keeping every other key in the file.
+pub fn save_client_secret(secret: &str) -> Result<(), String> {
+    let path = sync_path();
+    let mut root: toml::Table = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| t.parse().ok())
+        .unwrap_or_default();
+    let secret = secret.trim();
+    if secret.is_empty() {
+        root.remove("client_secret");
+    } else {
+        root.insert("client_secret".into(), secret.to_string().into());
+    }
+    write_private(&path, &root)
+}
+
+/// Write the file with owner-only permissions.
+///
+/// The refresh token and the client secret both live here. A world-readable
+/// config directory would hand a long-lived credential to every account on a
+/// shared machine.
+fn write_private(path: &std::path::Path, root: &toml::Table) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let text = toml::to_string_pretty(root).map_err(|e| format!("encode: {e}"))?;
+    std::fs::write(path, text).map_err(|e| format!("write: {e}"))?;
+    restrict_permissions(path);
+    Ok(())
+}
+
 /// Store the client id, keeping the tokens already in the file.
 pub fn save_client_id(id: &str) -> Result<(), String> {
     let path = sync_path();
@@ -91,13 +143,7 @@ pub fn save_client_id(id: &str) -> Result<(), String> {
     } else {
         root.insert("client_id".into(), id.to_string().into());
     }
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let text = toml::to_string_pretty(&root).map_err(|e| format!("encode: {e}"))?;
-    std::fs::write(&path, text).map_err(|e| format!("write: {e}"))?;
-    restrict_permissions(&path);
-    Ok(())
+    write_private(&path, &root)
 }
 
 /// Load stored Google tokens, if the user has signed in.
