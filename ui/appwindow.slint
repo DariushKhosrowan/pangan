@@ -53,6 +53,35 @@ export global Type {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// Space — one spacing scale, so nothing has to guess.
+//
+// The layout used to carry its own numbers: screen gutters were 24px on the
+// footer, 18px on the header, 18px on the Today screen and 14px on the other
+// screens, and card padding was 13/15 in one place and 12/14 in another. Each
+// value was defensible alone; together they meant no two screens lined up, and
+// a card's text sat a pixel or two off-centre inside its own box. That is the
+// "untidy" that is hard to point at and easy to feel.
+//
+// Four steps, used everywhere:
+//   gutter  — the outer margin of a screen. One value, all screens.
+//   pad     — inside a card.
+//   gap     — between cards and between rows.
+//   tight   — inside a row, between a label and its value.
+//
+// Asymmetric padding is reserved for one real case: a control that has a
+// leading icon and a trailing chevron genuinely needs different ends. Every
+// other left/right pair is equal.
+// ───────────────────────────────────────────────────────────────────────────
+export global Space {
+    out property <length> gutter: 18px;
+    out property <length> pad: 14px;
+    out property <length> gap: 10px;
+    out property <length> tight: 6px;
+    // A screen's own header is shorter than a card header.
+    out property <length> header-height: 44px;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // Palette — one source of truth for both themes.
 // ───────────────────────────────────────────────────────────────────────────
 export global Palette {
@@ -174,6 +203,75 @@ export struct DayRow {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// Radius — one corner scale for the whole app.
+//
+// The cards used to carry eleven different corner values (9, 10, 12, 13, 14,
+// 15, 16, …). Each was chosen in isolation for the box of the moment, so a
+// 14px task card could sit directly above a 16px date card and neither read as
+// more important than the other. A rounded corner is the strongest "this is a
+// container" signal the app has; spending eleven shades of it means the signal
+// carries no information.
+//
+// Three steps is enough: tile, card, panel.
+// ───────────────────────────────────────────────────────────────────────────
+export global Radius {
+    out property <length> tile: 10px;
+    out property <length> card: 14px;
+    out property <length> panel: 18px;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Elevation — how far a surface sits above the page.
+//
+// Before this the app had exactly one shadow, on the play button, and every
+// other surface — the date card, the task list, the settings cards, the
+// report's headline — was a flat fill behind a 1px hairline. Flat-and-outlined
+// is legible but it is also the look of a form, not of an app: nothing says
+// which layer is in front, so a window full of cards reads as a grid of boxes.
+//
+// Two levels, and the rule is simple: anything that floats over the page gets a
+// shadow, anything that is part of the page does not. The blur/offset values
+// are deliberately small — on a 420px-wide window a 24px blur reads as a
+// smudge, not as depth.
+// ───────────────────────────────────────────────────────────────────────────
+export global Elev {
+    in-out property <bool> dark: true;
+
+    // A raised card: present, but sitting close to the page.
+    out property <length> card-blur: dark ? 10px : 8px;
+    out property <length> card-y: dark ? 3px : 2px;
+    out property <color> card-shadow: dark ? #00000055 : #2A21141F;
+
+    // A floating surface: the hero date stepper and the primary control.
+    out property <length> lift-blur: dark ? 18px : 14px;
+    out property <length> lift-y: dark ? 6px : 4px;
+    out property <color> lift-shadow: dark ? #00000070 : #2A211428;
+
+    // The sheen that makes a flat fill read as a lit surface.
+    //
+    // A card painted one solid colour has no light on it, which is why the
+    // cards looked like cut paper. This is a gradient overlay drawn on top of
+    // the card's own fill: in the dark theme the top edge catches a little
+    // light and fades out by the middle, and in the light theme the bottom
+    // edge settles into a faint tint. Both are alpha-only, so they layer over
+    // whichever era's surface colour is underneath without knowing what it is.
+    out property <brush> sheen: dark
+        ? @linear-gradient(180deg, #FFFFFF10 0%, #FFFFFF00 58%)
+        : @linear-gradient(180deg, #FFFFFF00 42%, #0000000A 100%);
+
+    // The page's own light: a wide, very faint radial wash behind the timer,
+    // as if the room were lit from above the clock. Without it the background
+    // is one flat rectangle of colour and the hero has nothing to sit in front
+    // of. Kept under 6% so it never becomes a visible blob.
+    //
+    // Slint's radial gradient takes no `at` position, so it is centred by the
+    // element that draws it rather than by the gradient itself.
+    out property <brush> page-light: dark
+        ? @radial-gradient(circle, #FFFFFF12 0%, #FFFFFF00 60%)
+        : @radial-gradient(circle, #FFFFFFC0 0%, #FFFFFF00 60%);
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // Icons — drawn, not glyphs, so they stay crisp and identical everywhere.
 // ───────────────────────────────────────────────────────────────────────────
 component Icon {
@@ -230,7 +328,7 @@ component Icon {
         width: size; height: size;
         viewbox-width: 24; viewbox-height: 24;
         stroke: color;
-        stroke-width: 2px;
+        stroke-width: 1.8px;
         stroke-line-cap: round;
         fill: transparent;
         commands: "M 12 5 v 14 M 5 12 h 14";
@@ -239,7 +337,7 @@ component Icon {
         width: size; height: size;
         viewbox-width: 24; viewbox-height: 24;
         stroke: color;
-        stroke-width: 2.2px;
+        stroke-width: 1.8px;
         stroke-line-cap: round;
         stroke-line-join: round;
         fill: transparent;
@@ -258,7 +356,7 @@ component Icon {
         width: size; height: size;
         viewbox-width: 24; viewbox-height: 24;
         stroke: color;
-        stroke-width: 2px;
+        stroke-width: 1.8px;
         stroke-line-cap: round;
         fill: transparent;
         commands: "M 6 19 v -5 M 12 19 v -11 M 18 19 v -8";
@@ -267,7 +365,7 @@ component Icon {
         width: size; height: size;
         viewbox-width: 24; viewbox-height: 24;
         stroke: color;
-        stroke-width: 2px;
+        stroke-width: 1.8px;
         stroke-line-cap: round;
         stroke-line-join: round;
         fill: transparent;
@@ -277,7 +375,7 @@ component Icon {
         width: size; height: size;
         viewbox-width: 24; viewbox-height: 24;
         stroke: color;
-        stroke-width: 2px;
+        stroke-width: 1.8px;
         stroke-line-cap: round;
         stroke-line-join: round;
         fill: transparent;
@@ -407,6 +505,11 @@ component IconButton inherits Rectangle {
     in property <length> icon-size: 17px;
     in property <brush> fg: Palette.text-dim;
     in property <brush> hover-bg: Palette.surface-2;
+    // A disabled button still occupies its slot — the layout must not jump
+    // when an arrow becomes unavailable — but it stops responding and its
+    // glyph fades, so "there is nothing further this way" is visible rather
+    // than something the user discovers by pressing a dead control.
+    in property <bool> enabled: true;
     callback clicked;
 
     width: size;
@@ -415,19 +518,20 @@ component IconButton inherits Rectangle {
     background: transparent;
 
     ta1 := TouchArea {
-        clicked => { root.clicked(); }
+        clicked => { if (root.enabled) { root.clicked(); } }
     }
 
     Icon {
         kind: root.icon;
         size: root.icon-size;
-        color: root.fg;
+        color: root.enabled ? root.fg : Palette.text-faint;
+        opacity: root.enabled ? 1.0 : 0.35;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
     }
 
     states [
-        hovered when ta1.has-hover : {
+        hovered when ta1.has-hover && root.enabled : {
             background: root.hover-bg;
             in {
                 animate background { duration: Motion.quick; easing: ease-out; }
@@ -520,7 +624,11 @@ component Segmented inherits Rectangle {
 
     height: item-height + 8px;
     width: self.preferred-width;
-    preferred-width: (options.length * 62px) + 8px;
+    // 62px per item is comfortable for the Latin labels and tight for the
+    // Persian ones, which are wider at the same point size. 70px is headroom
+    // rather than a measurement, and the label below elides instead of
+    // spilling if a translation ever outgrows it.
+    preferred-width: (options.length * 70px) + 8px;
     border-radius: (item-height + 8px) / 2;
     background: Palette.surface-2;
 
@@ -559,6 +667,10 @@ component Segmented inherits Rectangle {
                 horizontal-alignment: center;
                 width: parent.width;
                 height: parent.height;
+                // A label that outgrows its cell elides rather than spilling
+                // over its neighbour; the switch keeps its even columns either
+                // way.
+                overflow: elide;
                 animate color { duration: Motion.quick; }
             }
         }
@@ -608,7 +720,13 @@ component Stepper inherits Rectangle {
     callback changed(int);
 
     height: 30px;
-    width: 124px;
+    // Width follows the widest value the control can show, not a guess.
+    //
+    // It was a hard 124px with a 66px value box inside, which fitted "25 min"
+    // and clipped "180 دقیقه" — the longest value the timer card can produce —
+    // so the right-hand end of the number sat under the plus button.
+    width: self.preferred-width;
+    preferred-width: 26px + 26px + Math.max(66px, value-text.preferred-width + 12px) + 6px;
     border-radius: 15px;
     background: Palette.surface-2;
 
@@ -639,7 +757,9 @@ component Stepper inherits Rectangle {
             ]
             Text {
                 text: "−";
-                font-size: Type.title;
+                // Matched to the plus below. These were 15px and 13px, so the
+                // two ends of one control were visibly different sizes.
+                font-size: Type.body;
                 color: root.value > root.min ? Palette.text : Palette.text-faint;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -648,7 +768,7 @@ component Stepper inherits Rectangle {
             }
         }
 
-        Text {
+        value-text := Text {
             text: Digits.num(root.value) + root.suffix;
             font-size: Type.small;
             font-weight: 600;
@@ -658,7 +778,9 @@ component Stepper inherits Rectangle {
             // Text that pinned "25 دقیقه" to the top of the pill instead of
             // sitting it in the middle, which read as "the numbers drifted up".
             vertical-alignment: center;
-            width: 66px;
+            // Grows with the value instead of being pinned at 66px, which is
+            // what cut off the longest suffix.
+            width: Math.max(66px, self.preferred-width + 12px);
             height: parent.height;
         }
 
@@ -703,17 +825,23 @@ component StatCard inherits Rectangle {
     in property <string> value: "";
     in property <string> hint: "";
 
-    height: 78px;
-    border-radius: 14px;
+    // Measures itself rather than holding 78px. A fixed height was fine while
+    // every label was one short word; the moment one wraps, or a value carries
+    // a unit, the text ran past the bottom edge and was clipped by the card.
+    height: self.preferred-height;
+    border-radius: Radius.card;
     background: Palette.surface;
     border-width: 1px;
     border-color: Palette.hairline;
+    drop-shadow-blur: Elev.card-blur;
+    drop-shadow-offset-y: Elev.card-y;
+    drop-shadow-color: Elev.card-shadow;
 
     VerticalLayout {
-        padding-left: 13px;
-        padding-right: 15px;
-        padding-top: 13px;
-        padding-bottom: 15px;
+        // Equal on all four sides. It used to be 13/15, which put the label a
+        // pixel high and a pixel left of centre — the kind of offset that reads
+        // as "sloppy" without anyone being able to say why.
+        padding: Space.pad;
         spacing: 3px;
         alignment: start;
 
@@ -721,67 +849,167 @@ component StatCard inherits Rectangle {
             text: root.label;
             font-size: Type.caption;
             font-weight: 700;
-            letter-spacing: 1.1px;
+            // Tracking is a Latin-only device here. It was applied to every
+            // label unconditionally, so each Persian label on the report —
+            // "نشست‌ها", "پیوستگی" — had its joins pulled apart and read as
+            // broken text rather than as a heading.
+            letter-spacing: Strings.fa ? 0px : Type.tracking;
             color: Palette.text-faint;
+            overflow: elide;
         }
         Text {
             text: root.value;
             font-size: Type.display;
             font-weight: 400;
             color: Palette.text;
+            overflow: elide;
         }
         Text {
             text: root.hint;
             font-size: Type.caption;
             color: Palette.text-faint;
             visible: root.hint != "";
+            wrap: word-wrap;
         }
     }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// BarChart — seven days of focus minutes.
+// BarChart — the report's column chart.
+//
+// It used to be hard-wired to seven values and seven labels, which is why the
+// Stats screen could only ever show a week. It now takes whatever the report
+// produced: 24 hours for a day, 28–31 days for a Jalali month, 12 months for a
+// year. Columns are equal-width and self-measuring so the same component works
+// at every count without a special case.
+//
+// Two states carry meaning rather than decoration: the column containing today
+// is drawn in the accent, and columns in the future are drawn as a faint floor
+// so a half-finished week does not look like a week of failures.
 // ───────────────────────────────────────────────────────────────────────────
 component BarChart {
-    in property <[float]> values: [0, 0, 0, 0, 0, 0, 0];
-    in property <[string]> labels: ["ش", "ی", "د", "س", "چ", "پ", "ج"];
-    in property <int> highlight: 6;
+    in property <[float]> values: [];
+    in property <[string]> labels: [];
+    in property <int> current: -1;
+    in property <int> future-from: 999;
+    in property <int> label-every: 1;
+    in property <length> bar-gap: 3px;
 
-    height: 132px;
+    // The plot height is a constant, not `parent.height`: reading the parent
+    // inside a layout whose height comes from its children is a binding loop,
+    // and Slint resolves that loop to zero.
+    property <length> plot-height: 108px;
+
+    height: plot-height + 30px;
 
     VerticalLayout {
-        spacing: 8px;
+        spacing: 6px;
 
+        // No HorizontalLayout here. A horizontal layout with `alignment: end`
+        // gives each child its preferred height and pushes it to the bottom,
+        // and a Rectangle whose height is a binding has no preferred height —
+        // so every column was laid out at zero and the chart drew nothing but
+        // its labels. Positioning each column explicitly against a known plot
+        // height is both simpler and immune to that.
         Rectangle {
-            height: 96px;
+            height: root.plot-height;
             background: transparent;
 
-            HorizontalLayout {
-                spacing: 8px;
-                alignment: end;
-
-                for v[i] in root.values : Rectangle {
-                    // reserve a hairline so an empty day still reads as a day
-                    height: max(3px, (parent.height - 4px) * v);
-                    horizontal-stretch: 1;
-                    border-radius: 5px;
-                    background: i == root.highlight ? Palette.accent : Palette.surface-3;
-                    animate height { duration: Motion.slow; easing: ease-out; }
-                    animate background { duration: Motion.normal; }
-                }
+            for v[i] in root.values : Rectangle {
+                x: i * ((root.width - (root.values.length - 1) * root.bar-gap) / root.values.length + root.bar-gap);
+                width: (root.width - (root.values.length - 1) * root.bar-gap) / root.values.length;
+                // Anchored to the bottom of the plot: top = plot − bar height.
+                y: root.plot-height - max(3px, (root.plot-height - 4px) * v);
+                height: max(3px, (root.plot-height - 4px) * v);
+                border-radius: 4px;
+                background: i == root.current
+                    ? Palette.accent
+                    : (i >= root.future-from ? Palette.hairline : Palette.surface-3);
+                animate height { duration: Motion.slow; easing: ease-out; }
+                animate y { duration: Motion.slow; easing: ease-out; }
+                animate background { duration: Motion.normal; }
             }
         }
 
-        HorizontalLayout {
-            spacing: 8px;
+        Rectangle {
+            height: 18px;
+            background: transparent;
+
             for l[i] in root.labels : Text {
-                horizontal-stretch: 1;
-                text: l;
+                x: i * ((root.width - (root.labels.length - 1) * root.bar-gap) / root.labels.length + root.bar-gap);
+                width: (root.width - (root.labels.length - 1) * root.bar-gap) / root.labels.length;
+                height: 18px;
+                text: Math.mod(i, root.label-every) == 0 ? l : "";
                 font-size: Type.caption;
-                font-weight: i == root.highlight ? 700 : 400;
-                color: i == root.highlight ? Palette.text-dim : Palette.text-faint;
+                font-weight: i == root.current ? 700 : 400;
+                color: i == root.current ? Palette.text : Palette.text-faint;
                 horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: elide;
             }
+        }
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// HourStrip — the 24-hour profile.
+//
+// A single row of thin columns, no labels. It answers a different question
+// from the main chart: not "which day" but "what time of day do I actually
+// work", which is the one thing a daily total can never show.
+// ───────────────────────────────────────────────────────────────────────────
+component HourStrip {
+    in property <[float]> values: [];
+
+    property <length> plot-height: 38px;
+    height: plot-height;
+
+    Rectangle {
+        height: root.plot-height;
+        background: transparent;
+
+        for v[i] in root.values : Rectangle {
+            x: i * ((root.width - (root.values.length - 1) * 2px) / root.values.length + 2px);
+            width: (root.width - (root.values.length - 1) * 2px) / root.values.length;
+            y: root.plot-height - max(2px, (root.plot-height - 2px) * v);
+            height: max(2px, (root.plot-height - 2px) * v);
+            border-radius: 2px;
+            // Dawn, day, dusk, night: the accent fades as the hour gets later,
+            // so the strip reads as a clock rather than as 24 identical bars.
+            background: i < 6 ? Palette.surface-3
+                : i < 18 ? Palette.accent
+                : Palette.surface-3;
+            opacity: i < 6 || i >= 18 ? 0.55 : 1.0;
+            animate height { duration: Motion.slow; easing: ease-out; }
+            animate y { duration: Motion.slow; easing: ease-out; }
+        }
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// PeriodPicker — the Stats screen's five-way period switch.
+//
+// Five mutually exclusive choices in one control. A row of separate buttons
+// would read as five actions; a segmented control reads as one choice, which
+// is what it is. Separate from `Segmented` above because that one sizes itself
+// to a fixed 70px per item for the two-item nav switch, while this one has to
+// share the full card width evenly across five labels.
+// ───────────────────────────────────────────────────────────────────────────
+component PeriodPicker inherits Rectangle {
+    in property <[string]> options: []; in property <int> current: 0; callback selected(int); height: 32px; border-radius: 16px; background: Palette.surface-2; border-width: 1px; border-color: Palette.hairline; HorizontalLayout {
+        padding: 3px; spacing: 2px; for o[i] in root.options : Rectangle {
+            horizontal-stretch: 1; border-radius: 13px; background: i == root.current ? Palette.surface : transparent; border-width: i == root.current ? 1px : 0px; border-color: Palette.hairline; seg-ta := TouchArea {
+                clicked => { root.selected(i); }
+            }
+
+            Text {
+                text: o; font-size: Type.small; font-weight: i == root.current ? 700 : 400; color: i == root.current ? Palette.text : Palette.text-dim; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+
+            states [
+                hovered when seg-ta.has-hover && i != root.current : {
+                    background: Palette.surface-3; in { animate background { duration: Motion.quick; } }
+                }
+            ]
         }
     }
 }
@@ -972,16 +1200,41 @@ component SectionLabel {
 // ───────────────────────────────────────────────────────────────────────────
 component Card inherits Rectangle {
     in property <length> pad: 0px;
-    border-radius: 14px;
+    // Cards float above the page now: a corner from the Radius scale, a real
+    // shadow, and a sheen across the fill. The hairline stays, but at a lower
+    // contrast, because the shadow is doing the separating work now — keeping
+    // both at full strength double-outlined every card.
+    border-radius: Radius.card;
     background: Palette.surface;
     border-width: 1px;
     border-color: Palette.hairline;
+    drop-shadow-blur: Elev.card-blur;
+    drop-shadow-offset-y: Elev.card-y;
+    drop-shadow-color: Elev.card-shadow;
     // Size to the content. Every settings card used to carry a hand-measured
     // pixel height, so adding a row silently clipped the card and the number
     // went stale the moment a label wrapped. A card that measures itself
     // cannot be wrong, and it is what lets the whole screen reflow when the
     // window changes size.
     height: self.preferred-height;
+    // Fill the column. Without this a Card sizes to its own preferred width,
+    // which is the width of its widest row — so the settings cards came out
+    // 260px wide inside a 384px column and every one of them stopped short of
+    // the right gutter. The sheen overlay below has no preferred width of its
+    // own, so nothing was pulling the card out to full width either.
+    horizontal-stretch: 1;
+
+    // The sheen sits on top of the fill and is pinned to the card's own
+    // top and bottom edges, so it never affects the height the card measures.
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        border-radius: Radius.card;
+        background: Elev.sheen;
+    }
+
     @children
 }
 
@@ -993,7 +1246,7 @@ component Card inherits Rectangle {
 // Selecting one repaints the entire app through the Palette global.
 // ───────────────────────────────────────────────────────────────────────────
 component EraCard inherits Rectangle {
-    in property <string> era-id: "cyrus"; in property <string> name: "Cyrus"; in property <string> blurb: "Achaemenid gold on lapis"; in property <brush> swatch: #D6A84E; in property <bool> active: false; callback picked(); height: 88px; border-radius: 12px; background: active ? Palette.accent-soft : Palette.surface-2; border-width: active ? 1.5px : 1px; border-color: active ? Palette.accent : Palette.hairline; ta := TouchArea {
+    in property <string> era-id: "cyrus"; in property <string> name: "Cyrus"; in property <string> blurb: "Achaemenid gold on lapis"; in property <brush> swatch: #D6A84E; in property <bool> active: false; callback picked(); height: 88px; border-radius: Radius.card; background: active ? Palette.accent-soft : Palette.surface-2; border-width: active ? 1.5px : 1px; border-color: active ? Palette.accent : Palette.hairline; ta := TouchArea {
         clicked => { root.picked(); }
         mouse-cursor: pointer; }
 
@@ -1063,7 +1316,7 @@ component DynastyRow inherits Rectangle {
     animate reveal { duration: 420ms; easing: ease-out; delay: root.index * 55ms; }
 
     height: row-col.preferred-height + 26px;
-    border-radius: 12px;
+    border-radius: Radius.card;
     background: row-ta.has-hover ? Palette.surface-2 : transparent;
 
     row-ta := TouchArea { }
@@ -1243,8 +1496,45 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in property <string> day-subline: "";
     in property <bool> day-is-today: true;
     in-out property <string> edit-text: "";
-    in property <[float]> week-bars: [0, 0, 0, 0, 0, 0, 0]; in property <[string]> week-labels: ["ش", "ی", "د", "س", "چ", "پ", "ج"]; in property <int> today-sessions: 0; in property <int> today-minutes: 0; in property <int> today-score: 0; in property <int> today-streak: 0; in property <int> today-consistency: 0; in property <int> today-best: 0; in property <int> session-total: 4; in property <int> session-done: 0; in property <int> goal-minutes: 120; in property <int> goal-done-minutes: 0; // ---- Callbacks to Rust ----
-    callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-chronicle; callback close-chronicle; callback copy-code(string); callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback sync-connect; callback sync-disconnect; callback set-client-id(string); callback set-sync-auto(bool); callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback refresh-events; callback open-url(string); callback window-drag-start; callback set-compact-mode(bool); callback set-animations(bool); callback pick-day(string); callback shift-month(int); callback goto-today; callback add-task-on(string); callback delete-task(int); callback rename-task(int, string); callback move-task(int, int); callback step-day(int);
+    in property <[float]> week-bars: [0, 0, 0, 0, 0, 0, 0]; in property <[string]> week-labels: ["ش", "ی", "د", "س", "چ", "پ", "ج"]; in property <int> week-current: -1; in property <int> today-sessions: 0; in property <int> today-minutes: 0; in property <int> today-score: 0; in property <int> today-streak: 0; in property <int> today-consistency: 0; in property <int> today-best: 0; in property <int> session-total: 4; in property <int> session-done: 0; in property <int> goal-minutes: 120; in property <int> goal-done-minutes: 0;
+
+    // ---- The Stats screen ----
+    //
+    // Every figure here is computed in Rust and pushed in; the screen never
+    // derives a number of its own. `report-period-index` is the selected shape
+    // (0 day, 1 week, 2 month, 3 year, 4 all) and `report-offset` is how many
+    // periods back it is looking — 0 is the current one, −1 the previous.
+    in property <int> report-period-index: 1;
+    in property <int> report-offset: 0;
+    in property <string> report-title: "";
+    in property <string> report-span: "";
+    in property <string> report-narrative: "";
+    in property <int> report-score: 0;
+    in property <int> report-prev-score: 0;
+    in property <int> report-minutes: 0;
+    in property <int> report-sessions: 0;
+    in property <int> report-avg: 0;
+    in property <int> report-active-days: 0;
+    in property <int> report-days: 0;
+    in property <int> report-consistency: 0;
+    in property <int> report-best: 0;
+    in property <string> report-best-label: "";
+    in property <int> report-streak: 0;
+    in property <int> report-longest: 0;
+    in property <int> report-prev-minutes: 0;
+    in property <int> report-delta: 0;
+    in property <bool> report-has-prev: false;
+    in property <bool> report-empty: true;
+    in property <[float]> chart-bars: [];
+    in property <[string]> chart-labels: [];
+    in property <[string]> chart-details: [];
+    in property <int> chart-current: -1;
+    in property <int> chart-future-from: 999;
+    in property <[float]> hour-bars: [];
+    in property <bool> has-hour-profile: false;
+
+    // ---- Callbacks to Rust ----
+    callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-chronicle; callback close-chronicle; callback copy-code(string); callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback sync-connect; callback sync-disconnect; callback set-client-id(string); callback set-sync-auto(bool); callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback refresh-events; callback open-url(string); callback window-drag-start; callback set-compact-mode(bool); callback set-animations(bool); callback pick-day(string); callback shift-month(int); callback goto-today; callback add-task-on(string); callback delete-task(int); callback rename-task(int, string); callback move-task(int, int); callback step-day(int); callback set-report-period(int); callback step-report(int); callback report-today;
     // Resize: the edge/corner grab zones report the pointer's screen position
     // and which edge is being dragged; Rust turns that into a new window size.
 
@@ -1273,18 +1563,35 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     // With motion off the transition never runs, so the screens must not be
     // left transparent: both derived properties fall back to the settled
     // state when `Motion.enabled` is false.
-    private property <float> view-opacity: Motion.enabled ? root.view-enter : 1.0;
+    // `view-enter` is the animation progress. It must be a real 0 -> 1 ramp
+    // even when motion is off, because *opacity* is bound to it too: leaving it
+    // at 0 with Motion disabled made every screen after the first fully
+    // transparent and therefore invisible. Motion only shortens the ramp, it
+    // never skips it.
+    animate view-enter { duration: Motion.enabled ? Motion.normal : 1ms; }
+    private property <float> view-opacity: root.view-enter;
+    // With motion off the view must sit exactly where it belongs. `enter-rise`
+    // is 0 in that case, so the offset is 0 whatever `view-enter` holds — but
+    // the offset is also *frozen* at whatever it was when motion was switched
+    // off, because the timer below stops running. Binding it to the settled
+    // state when motion is off is what makes the screen actually appear.
     private property <length> view-offset: Motion.enter-rise * (1 - root.view-enter);
     changed show-view => {
+        // Only start the entrance when there is an entrance to run. Leaving
+        // `view-enter` at 0 with motion off left the incoming screen offset by
+        // a full `enter-rise` and never advanced it, so every screen after the
+        // first rendered shifted down and clipped — the settings panel looked
+        // blank.
         root.view-enter = 0;
     }
     enter-timer := Timer {
         interval: 16ms;
-        running: root.view-enter < 1 && Motion.enabled;
+        running: root.view-enter < 1;
         triggered => {
             root.view-enter = Math.min(1, root.view-enter + 0.062);
         }
     }
+
 
     title: "Pangan";
     // A real window frame, not a frameless one.
@@ -1327,6 +1634,20 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
         height: root.height - 56px;
         background: transparent;
         clip: true;
+
+        // The page's light. A single wide radial wash, centred on the hero,
+        // sitting above the flat background and below every control. It is the
+        // cheapest way to stop a large empty area reading as a void: the eye
+        // reads a lit room rather than a coloured rectangle.
+        Rectangle {
+            width: Math.max(parent.width * 1.5, 520px);
+            height: self.width;
+            x: (parent.width - self.width) / 2;
+            // Centred on the ring, which sits just under the header.
+            y: (parent.height - self.height) / 2 - 40px;
+            border-radius: self.width / 2;
+            background: Elev.page-light;
+        }
 
         // The watermark is deliberately oversized and offset so its edges fall
         // outside the body and it reads as a cropped detail rather than a
@@ -1381,7 +1702,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
         }
 
         HorizontalLayout {
-            padding-left: 18px; padding-right: 12px; spacing: 8px; alignment: space-between; // wordmark
+            padding-left: Space.gutter; padding-right: Space.gutter; spacing: 8px; alignment: space-between; // wordmark
             HorizontalLayout {
                 spacing: 9px;
                 alignment: start;
@@ -1446,7 +1767,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     // Body
     // ─────────────────────────────────────────────────────────────────────
     Rectangle {
-        y: 56px; width: parent.width; height: parent.height - 56px; background: transparent; // ═══ COMPACT ═══
+        y: 56px; width: parent.width; height: parent.height - 56px; background: transparent;
+        // ═══ COMPACT ═══
         if root.show-view == "main" && root.compact-mode : VerticalLayout {
             opacity: root.view-opacity;
             y: root.view-offset;
@@ -1624,10 +1946,16 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                 height: 60px;
                 x: 22px;
                 width: parent.width - 22px - 22px;
-                border-radius: 16px;
+                border-radius: Radius.panel;
                 background: Palette.surface;
                 border-width: 1px;
                 border-color: Palette.hairline;
+                // The date block is the one control on this screen you are
+                // meant to reach for, so it gets the higher elevation rather
+                // than the card level.
+                drop-shadow-blur: Elev.lift-blur;
+                drop-shadow-offset-y: Elev.lift-y;
+                drop-shadow-color: Elev.lift-shadow;
 
                 // The chevrons sit at the card's edges and the date block is
                 // centred in what is left. Before, the date block stretched to
@@ -1666,16 +1994,16 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                 height: 200px;
                 x: 22px;
                 width: parent.width - 22px - 22px;
-                border-radius: 14px;
+                border-radius: Radius.card;
                 background: Palette.surface;
                 border-width: 1px;
                 border-color: Palette.hairline;
+                drop-shadow-blur: Elev.card-blur;
+                drop-shadow-offset-y: Elev.card-y;
+                drop-shadow-color: Elev.card-shadow;
 
                 VerticalLayout {
-                    padding-left: 12px;
-                    padding-right: 14px;
-                    padding-top: 12px;
-                    padding-bottom: 14px;
+                    padding: Space.pad;
                     spacing: 0px;
 
                     HorizontalLayout {
@@ -1704,6 +2032,12 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             font-size: Type.small;
                             color: Palette.text-faint;
                             x: 2px;
+                            width: parent.width - 4px;
+                            vertical-alignment: center;
+                            // A full sentence in a 46px slot: it has to wrap,
+                            // or the last words are silently cut off.
+                            wrap: word-wrap;
+                            line-height-factor: 1.45;
                         }
                     }
 
@@ -1727,9 +2061,12 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         background: Palette.surface-2;
 
                         HorizontalLayout {
-                            padding-left: 10px;
-                            padding-right: 4px;
-                            spacing: 6px;
+                            // Equal at both ends. It was 10px left and 4px
+                            // right, which pushed the round Add button hard
+                            // against the edge of the pill.
+                            padding-left: Space.tight;
+                            padding-right: Space.tight;
+                            spacing: Space.tight;
 
                             // Two-way binding: a one-way `text:` binding is
                             // broken by the first keystroke, so clearing
@@ -1777,8 +2114,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             // ---- footer: sync ----
             HorizontalLayout {
                 height: 18px;
-                padding-left: 24px;
-                padding-right: 24px;
+                padding-left: Space.gutter;
+                padding-right: Space.gutter;
                 alignment: space-between;
                 Text {
                     text: root.sync-status;
@@ -1813,7 +2150,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             y: root.view-offset;
             padding: 0px; spacing: 0px; // ---- title bar ----
             HorizontalLayout {
-                height: 44px; padding-left: 14px; padding-right: 14px; spacing: 8px; IconButton {
+                height: Space.header-height; padding-left: Space.gutter; padding-right: Space.gutter; spacing: 8px; IconButton {
                     icon: "back"; size: 30px; icon-size: 15px; clicked => { root.close-today(); }
                 }
                 Text {
@@ -1831,15 +2168,15 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             }
 
             Flickable {
-                vertical-stretch: 1; content-height: today-content.preferred-height; interactive: true; today-content := VerticalLayout {
-                    width: parent.width; height: self.preferred-height; padding-left: 18px; padding-right: 18px; padding-bottom: 20px; spacing: 10px;
+                vertical-stretch: 1; width: parent.width; content-width: parent.width; content-height: today-content.preferred-height; interactive: true; today-content := VerticalLayout {
+                    width: parent.width; padding-left: Space.gutter; padding-right: Space.gutter; padding-bottom: Space.gap * 2; spacing: Space.gap;
 
                     // ---- the month calendar ----
                     // The point of the whole screen: pick a day, see that day's
                     // work, and add to a future day without leaving it.
                     Rectangle {
                         height: month-card.preferred-height + 24px;
-                        border-radius: 14px;
+                        border-radius: Radius.card;
                         background: Palette.surface;
                         border-width: 1px;
                         border-color: Palette.hairline;
@@ -1882,7 +2219,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 if !root.selected-is-today : Rectangle {
                                     width: 44px;
                                     height: 24px;
-                                    border-radius: 12px;
+                                    border-radius: Radius.tile;
                                     background: Palette.accent-soft;
                                     y: (parent.height - self.height) / 2;
                                     ta-today := TouchArea { clicked => { root.goto-today(); } }
@@ -1936,6 +2273,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             font-weight: 700;
                             color: Palette.text;
                             vertical-alignment: center;
+                            overflow: elide;
                         }
                         Text {
                             text: root.selected-day-sub;
@@ -1944,6 +2282,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             color: Palette.text-faint;
                             vertical-alignment: center;
                             horizontal-stretch: 1;
+                            overflow: elide;
                         }
                         Text {
                             text: Digits.num(root.day-tasks.length);
@@ -1955,7 +2294,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                     if root.day-tasks.length == 0 : Rectangle {
                         height: 48px;
-                        border-radius: 12px;
+                        border-radius: Radius.card;
                         background: Palette.surface;
                         border-width: 1px;
                         border-color: Palette.hairline;
@@ -1971,7 +2310,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                     for t in root.day-tasks : Rectangle {
                         height: editing == t.id ? 76px : 42px;
-                        border-radius: 12px;
+                        border-radius: Radius.card;
                         background: Palette.surface;
                         border-width: 1px;
                         border-color: editing == t.id ? Palette.accent : Palette.hairline;
@@ -1979,8 +2318,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         animate height { duration: Motion.normal; }
 
                         VerticalLayout {
-                            padding-left: 12px;
-                            padding-right: 8px;
+                            padding-left: Space.tight;
+                            padding-right: Space.tight;
                             spacing: 0px;
 
                             HorizontalLayout {
@@ -2059,12 +2398,12 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             // The rename field, only for the row being edited.
                             if editing == t.id : Rectangle {
                                 height: 32px;
-                                border-radius: 9px;
+                                border-radius: Radius.tile;
                                 background: Palette.surface-2;
 
                                 HorizontalLayout {
-                                    padding-left: 8px;
-                                    padding-right: 4px;
+                                    padding-left: Space.tight;
+                                    padding-right: Space.tight;
                                     spacing: 4px;
 
                                     LineEdit {
@@ -2109,9 +2448,12 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         background: Palette.surface-2;
 
                         HorizontalLayout {
-                            padding-left: 10px;
-                            padding-right: 4px;
-                            spacing: 6px;
+                            // Equal at both ends. It was 10px left and 4px
+                            // right, which pushed the round Add button hard
+                            // against the edge of the pill.
+                            padding-left: Space.tight;
+                            padding-right: Space.tight;
+                            spacing: Space.tight;
 
                             LineEdit {
                                 text <=> root.new-task-text;
@@ -2151,7 +2493,12 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     }
 
                     Rectangle {
-                        height: 146px; border-radius: 14px; background: Palette.surface; border-width: 1px; border-color: Palette.hairline; // era emblem, faint, on the right
+                        // Measures its text column. It held 146px, which fit
+                        // the four short lines it was designed around but not
+                        // the heritage title once it was rewritten into words —
+                        // the caption ran under the card's bottom edge.
+                        height: cal-head.preferred-height + 28px;
+                        border-radius: Radius.card; background: Palette.surface; border-width: 1px; border-color: Palette.hairline; // era emblem, faint, on the right
                         Rectangle {
                             width: 84px; height: 84px; x: parent.width - self.width - 12px; y: (parent.height - self.height) / 2; background: transparent; if root.era == "cyrus" : Shahbaz { width: 84px; height: 84px; color: Palette.accent; fade: 0.10; }
                             if root.era == "darius" : Faravahar { width: 84px; height: 84px; color: Palette.accent; fade: 0.10; }
@@ -2159,47 +2506,56 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             if root.era == "sasanid" : Senmurv { width: 84px; height: 84px; color: Palette.accent; fade: 0.10; }
                         }
 
-                        VerticalLayout {
-                            padding-left: 16px; padding-top: 14px; padding-bottom: 14px; spacing: 4px; Text {
-                                text: root.cal-weekday; font-family: "Vazirmatn"; font-size: Type.small; color: Palette.accent; font-weight: 600; }
+                        cal-head := VerticalLayout {
+                            padding-left: Space.pad; padding-top: Space.pad; padding-bottom: Space.pad; spacing: 4px; Text {
+                                text: root.cal-weekday; font-family: "Vazirmatn"; font-size: Type.small; color: Palette.accent; font-weight: 600; overflow: elide; }
                             Text {
-                                text: root.cal-date; font-family: "Vazirmatn"; font-size: Type.display; font-weight: 600; color: Palette.text; }
+                                text: root.cal-date; font-family: "Vazirmatn"; font-size: Type.display; font-weight: 600; color: Palette.text; overflow: elide; }
                             Text {
-                                text: root.cal-month-progress; font-family: "Vazirmatn"; font-size: Type.small; color: Palette.text-dim; }
+                                text: root.cal-month-progress; font-family: "Vazirmatn"; font-size: Type.small; color: Palette.text-dim; overflow: elide; }
                             Text {
                                 text: Strings.heritage-title + " · " + Strings.heritage-sub;
-                                font-family: "Vazirmatn"; font-size: Type.caption; color: Palette.accent; }
+                                font-family: "Vazirmatn"; font-size: Type.caption; color: Palette.accent;
+                                // Two clauses joined by a dot do not fit one
+                                // 260px line; wrapping keeps both readable
+                                // instead of eliding the half that says what
+                                // the calendar actually is.
+                                wrap: word-wrap; line-height-factor: 1.45; }
                         }
                     }
 
                     // ---- the Sasanian day-name ----
                     Rectangle {
-                        height: 74px; border-radius: 14px; background: Palette.accent-soft; border-width: 1px; border-color: Palette.accent; VerticalLayout {
-                            padding-left: 16px; padding-right: 16px; padding-top: 12px; padding-bottom: 12px; spacing: 2px; Text {
-                                text: Strings.day-name-label; font-family: "Vazirmatn"; font-size: Type.small; font-weight: 700; color: Palette.text-faint; }
+                        height: day-name-col.preferred-height + 24px; border-radius: Radius.card; background: Palette.accent-soft; border-width: 1px; border-color: Palette.accent; day-name-col := VerticalLayout {
+                            padding-left: Space.pad; padding-right: Space.pad; padding-top: 12px; padding-bottom: 12px; spacing: 2px; Text {
+                                text: Strings.day-name-label; font-family: "Vazirmatn"; font-size: Type.small; font-weight: 700; color: Palette.text-faint; overflow: elide; }
                             HorizontalLayout {
                                 spacing: 8px; Text {
-                                    text: root.cal-day-name; font-family: "Vazirmatn"; font-size: Type.display; font-weight: 600; color: Palette.accent; vertical-alignment: center; }
+                                    text: root.cal-day-name; font-family: "Vazirmatn"; font-size: Type.display; font-weight: 600; color: Palette.accent; vertical-alignment: center; overflow: elide; }
                                 Text {
-                                    text: root.cal-day-index; font-family: "Vazirmatn"; font-size: Type.small; color: Palette.text-dim; vertical-alignment: center; horizontal-stretch: 1; }
+                                    text: root.cal-day-index; font-family: "Vazirmatn"; font-size: Type.small; color: Palette.text-dim; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
                             }
                         }
                     }
 
                     // ---- feast badge, only when today is one ----
                     if root.cal-feast != "" : Rectangle {
-                        height: root.cal-feast-note != "" ? 62px : 46px;
-                        border-radius: 12px; background: Palette.surface-2; border-width: 1px; border-color: Palette.hairline; HorizontalLayout {
-                            padding-left: 14px; padding-right: 14px; spacing: 8px; alignment: start; Boteh {
+                        height: feast-col.preferred-height + 24px;
+                        border-radius: Radius.tile; background: Palette.surface-2; border-width: 1px; border-color: Palette.hairline; HorizontalLayout {
+                            padding-left: Space.pad; padding-right: Space.pad; spacing: 8px; alignment: start; Boteh {
                                 size: 20px; y: (parent.height - self.height) / 2; color: Palette.accent; fade: 0.9; }
-                            VerticalLayout {
+                            feast-col := VerticalLayout {
                                 vertical-stretch: 0;
                                 alignment: center;
                                 spacing: 1px;
                                 Text {
-                                    text: Strings.feast-prefix + root.cal-feast; font-family: "Vazirmatn"; font-size: Type.body; font-weight: 600; color: Palette.text; vertical-alignment: center; }
+                                    text: Strings.feast-prefix + root.cal-feast; font-family: "Vazirmatn"; font-size: Type.body; font-weight: 600; color: Palette.text; vertical-alignment: center; overflow: elide; }
                                 if root.cal-feast-note != "" : Text {
-                                    text: root.cal-feast-note; font-family: "Vazirmatn"; font-size: Type.small; color: Palette.text-dim; overflow: elide; }
+                                    // The note is a full sentence. Eliding it
+                                    // cut the gloss off mid-word, which is
+                                    // worse than not showing it, so it wraps
+                                    // and the card measures itself.
+                                    text: root.cal-feast-note; font-family: "Vazirmatn"; font-size: Type.small; color: Palette.text-dim; wrap: word-wrap; line-height-factor: 1.45; }
                             }
                         }
                     }
@@ -2213,12 +2569,12 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     }
 
                     if root.cal-events.length == 0 : Rectangle {
-                        height: 56px; border-radius: 12px; background: Palette.surface; border-width: 1px; border-color: Palette.hairline; Text {
+                        height: 56px; border-radius: Radius.tile; background: Palette.surface; border-width: 1px; border-color: Palette.hairline; Text {
                             text: root.cal-empty; font-family: "Vazirmatn"; font-size: Type.small; color: Palette.text-faint; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; line-height-factor: 1.55; }
                     }
 
                     for ev in root.cal-events : Rectangle {
-                        height: ev-row.preferred-height + 22px; border-radius: 12px; background: Palette.surface; border-width: 1px; border-color: Palette.hairline; ev-row := VerticalLayout {
+                        height: ev-row.preferred-height + 22px; border-radius: Radius.tile; background: Palette.surface; border-width: 1px; border-color: Palette.hairline; ev-row := VerticalLayout {
                             x: 14px; y: 11px; width: parent.width - 28px; height: self.preferred-height; spacing: 4px; HorizontalLayout {
                                 spacing: 6px; height: 14px; if ev.year != "" : Text {
                                     text: ev.year; font-family: "Vazirmatn"; font-size: Type.caption; font-weight: 700; color: Palette.accent; vertical-alignment: center; }
@@ -2233,7 +2589,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                     // ---- world history, folded away by default ----
                     if root.cal-world.length > 0 : Rectangle {
-                        height: 40px; border-radius: 12px; background: Palette.surface; border-width: 1px; border-color: Palette.hairline;
+                        height: 40px; border-radius: Radius.tile; background: Palette.surface; border-width: 1px; border-color: Palette.hairline;
                         ta-world := TouchArea { clicked => { root.cal-world-open = !root.cal-world-open; } }
                         HorizontalLayout {
                             padding-left: 14px; padding-right: 14px; spacing: 8px;
@@ -2252,7 +2608,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     if root.cal-world-open : VerticalLayout {
                         spacing: 10px;
                         for ev in root.cal-world : Rectangle {
-                            height: wv-row.preferred-height + 22px; border-radius: 12px; background: Palette.surface; border-width: 1px; border-color: Palette.hairline; wv-row := VerticalLayout {
+                            height: wv-row.preferred-height + 22px; border-radius: Radius.tile; background: Palette.surface; border-width: 1px; border-color: Palette.hairline; wv-row := VerticalLayout {
                                 x: 14px; y: 11px; width: parent.width - 28px; height: self.preferred-height; spacing: 4px; HorizontalLayout {
                                     spacing: 6px; height: 14px; if ev.year != "" : Text {
                                         text: ev.year; font-family: "Vazirmatn"; font-size: Type.caption; font-weight: 700; color: Palette.text-dim; vertical-alignment: center; }
@@ -2281,9 +2637,9 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
             // ---- title bar ----
             HorizontalLayout {
-                height: 44px;
-                padding-left: 14px;
-                padding-right: 14px;
+                height: Space.header-height;
+                padding-left: Space.gutter;
+                padding-right: Space.gutter;
                 spacing: 8px;
                 IconButton {
                     icon: "back";
@@ -2303,14 +2659,15 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
             Flickable {
                 vertical-stretch: 1;
+                width: parent.width;
                 content-height: chron-col.preferred-height;
                 interactive: true;
 
                 chron-col := VerticalLayout {
                     width: parent.width;
-                    padding-left: 18px;
-                    padding-right: 18px;
-                    padding-bottom: 22px;
+                    padding-left: Space.gutter;
+                    padding-right: Space.gutter;
+                    padding-bottom: Space.gap * 2;
                     spacing: 0px;
 
                     // ---- header: the claim the view makes ----
@@ -2385,11 +2742,11 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             padding: 0px;
             spacing: 0px;
 
-            // header row
+            // ── header ───────────────────────────────────────────────────
             HorizontalLayout {
-                height: 44px;
-                padding-left: 14px;
-                padding-right: 14px;
+                height: Space.header-height;
+                padding-left: Space.gutter;
+                padding-right: Space.gutter;
                 spacing: 8px;
                 alignment: start;
 
@@ -2405,6 +2762,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     font-weight: 600;
                     color: Palette.text;
                     horizontal-stretch: 1;
+                    vertical-alignment: center;
                 }
                 IconButton {
                     icon: "close";
@@ -2416,28 +2774,121 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
             Flickable {
                 vertical-stretch: 1;
-                content-height: 700px;
-                interactive: true;
+                width: parent.width;
+                content-height: report-col.preferred-height;
+                interactive: report-col.preferred-height > self.height;
 
-                VerticalLayout {
+                report-col := VerticalLayout {
                     width: parent.width;
-                    padding-left: 18px;
-                    padding-right: 18px;
-                    padding-bottom: 18px;
-                    spacing: 12px;
+                    padding-left: Space.gutter;
+                    padding-right: Space.gutter;
+                    padding-bottom: Space.gap * 2;
+                    spacing: Space.gap;
 
-                    // headline
-                    Rectangle {
-                        height: 92px;
-                        border-radius: 16px;
-                        background: Palette.surface;
+                    // ── period picker ────────────────────────────────────
+                    PeriodPicker {
+                        options: [Strings.period-day, Strings.period-week, Strings.period-month, Strings.period-year, Strings.period-all];
+                        current: root.report-period-index;
+                        selected(i) => { root.set-report-period(i); }
+                    }
+
+                    // ── span navigator ───────────────────────────────────
+                    // The title says which span you are looking at and the
+                    // arrows move one period at a time. This is the control
+                    // that was missing entirely: without it the screen could
+                    // only ever describe "now".
+                    HorizontalLayout {
+                        height: 40px;
+                        spacing: 6px;
+                        alignment: space-between;
+
+                        IconButton {
+                            icon: "back";
+                            size: 30px;
+                            icon-size: 14px;
+                            enabled: root.report-period-index != 4;
+                            clicked => { root.step-report(-1); }
+                        }
+
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            spacing: 1px;
+                            alignment: center;
+
+                            Text {
+                                text: root.report-title;
+                                font-size: Type.title;
+                                font-weight: 600;
+                                color: Palette.text;
+                                horizontal-alignment: center;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: root.report-span;
+                                font-size: Type.caption;
+                                color: Palette.text-faint;
+                                horizontal-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+
+                        // Forward is disabled at the current period: there is
+                        // no future data to show, and an arrow that does
+                        // nothing is worse than an arrow that says so.
+                        IconButton {
+                            icon: "chevron";
+                            size: 30px;
+                            icon-size: 14px;
+                            enabled: root.report-offset < 0;
+                            clicked => { root.step-report(1); }
+                        }
+                    }
+
+                    // ── "back to now" ────────────────────────────────────
+                    // Only present when you have actually navigated away, so
+                    // the current view stays uncluttered.
+                    if root.report-offset != 0 && root.report-period-index != 4 : Rectangle {
+                        height: 28px;
+                        border-radius: 14px;
+                        background: Palette.accent-soft;
                         border-width: 1px;
                         border-color: Palette.hairline;
 
-                        VerticalLayout {
-                            padding: 16px;
-                            spacing: 4px;
+                        now-ta := TouchArea { clicked => { root.report-today(); } }
+
+                        Text {
+                            text: Strings.stat-back-to-now;
+                            font-size: Type.caption;
+                            font-weight: 600;
+                            color: Palette.accent;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        states [
+                            hovered when now-ta.has-hover : {
+                                background: Palette.surface-3;
+                                in { animate background { duration: Motion.quick; } }
+                            }
+                        ]
+                    }
+
+                    // ── headline score ───────────────────────────────────
+                    Rectangle {
+                        height: score-col.preferred-height + Space.pad * 2;
+                        border-radius: Radius.panel;
+                        background: Palette.surface;
+                        border-width: 1px;
+                        border-color: Palette.hairline;
+                        drop-shadow-blur: Elev.lift-blur;
+                        drop-shadow-offset-y: Elev.lift-y;
+                        drop-shadow-color: Elev.lift-shadow;
+
+                        score-col := VerticalLayout {
+                            padding: Space.pad;
+                            spacing: 2px;
                             alignment: center;
+
                             Text {
                                 text: Strings.score-title;
                                 font-size: Type.caption;
@@ -2445,87 +2896,231 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 letter-spacing: Strings.fa ? 0px : Type.tracking;
                                 color: Palette.text-faint;
                                 horizontal-alignment: center;
+                                overflow: elide;
                             }
                             Text {
-                                text: Digits.num(root.today-score);
+                                text: Digits.num(root.report-score);
                                 font-size: 38px;
                                 font-weight: 300;
                                 color: Palette.accent;
                                 horizontal-alignment: center;
                             }
+                            // The delta against the previous period, directly
+                            // under the score it belongs to.
+                            if root.report-has-prev : HorizontalLayout {
+                                alignment: center;
+                                spacing: 4px;
+
+                                Text {
+                                    text: root.report-delta >= 0 ? "▲" : "▼";
+                                    font-size: Type.caption;
+                                    color: root.report-delta >= 0 ? Palette.accent : Palette.danger;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: Digits.num(Math.abs(root.report-delta)) + (Strings.fa ? "٪" : "%");
+                                    font-size: Type.caption;
+                                    font-weight: 600;
+                                    color: root.report-delta >= 0 ? Palette.accent : Palette.danger;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: Strings.stat-vs-prev;
+                                    font-size: Type.caption;
+                                    color: Palette.text-faint;
+                                    vertical-alignment: center;
+                                }
+                            }
                         }
                     }
 
-                    // week chart
+                    // ── the chart ────────────────────────────────────────
                     Rectangle {
-                        height: 190px;
-                        border-radius: 16px;
+                        height: chart-col.preferred-height + Space.pad * 2;
+                        border-radius: Radius.card;
                         background: Palette.surface;
                         border-width: 1px;
                         border-color: Palette.hairline;
+                        drop-shadow-blur: Elev.card-blur;
+                        drop-shadow-offset-y: Elev.card-y;
+                        drop-shadow-color: Elev.card-shadow;
 
-                        VerticalLayout {
-                            padding: 14px;
+                        chart-col := VerticalLayout {
+                            padding: Space.pad;
                             spacing: 8px;
-                            Text {
-                                text: Strings.this-week;
-                                font-size: Type.caption;
-                                font-weight: 700;
-                                letter-spacing: Strings.fa ? 0px : Type.tracking;
-                                color: Palette.text-faint;
+
+                            HorizontalLayout {
+                                spacing: 6px;
+
+                                Text {
+                                    text: Strings.focus;
+                                    font-size: Type.caption;
+                                    font-weight: 700;
+                                    letter-spacing: Strings.fa ? 0px : Type.tracking;
+                                    color: Palette.text-faint;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
+                                }
+                                Text {
+                                    text: Digits.num(root.report-minutes) + " " + Strings.minutes-short;
+                                    font-size: Type.caption;
+                                    font-weight: 600;
+                                    color: Palette.text-dim;
+                                    vertical-alignment: center;
+                                }
                             }
+
                             BarChart {
-                                values: root.week-bars;
-                                labels: root.week-labels;
-                                highlight: 6;
-                                vertical-stretch: 1;
+                                values: root.chart-bars;
+                                labels: root.chart-labels;
+                                current: root.chart-current;
+                                future-from: root.chart-future-from;
+                                // A month of 30 columns cannot print 30 labels;
+                                // every fifth is legible and enough to orient.
+                                label-every: root.report-period-index == 2 ? 5
+                                    : root.report-period-index == 4 ? 2
+                                    : root.report-period-index == 0 ? 3
+                                    : 1;
+                                bar-gap: root.report-period-index == 2 ? 2px : 3px;
+                            }
+
+                            if root.report-empty : Text {
+                                text: Strings.stat-empty;
+                                font-size: Type.small;
+                                color: Palette.text-faint;
+                                horizontal-alignment: center;
+                                wrap: word-wrap;
                             }
                         }
                     }
 
-                    // stat grid
+                    // ── KPI grid ─────────────────────────────────────────
                     HorizontalLayout {
-                        spacing: 10px;
+                        spacing: Space.gap;
                         StatCard {
                             label: Strings.sessions;
-                            value: Digits.num(root.today-sessions);
+                            value: Digits.num(root.report-sessions);
                             horizontal-stretch: 1;
                         }
                         StatCard {
                             label: Strings.focus;
-                            value: Digits.num(root.today-minutes) + " " + Strings.minutes-short;
+                            value: Digits.num(root.report-minutes) + " " + Strings.minutes-short;
                             horizontal-stretch: 1;
                         }
                     }
                     HorizontalLayout {
-                        spacing: 10px;
+                        spacing: Space.gap;
                         StatCard {
-                            label: Strings.streak;
-                            value: Digits.num(root.today-streak) + (Strings.fa ? " روز" : "d");
+                            label: Strings.stat-avg-session;
+                            value: Digits.num(root.report-avg) + " " + Strings.minutes-short;
+                            horizontal-stretch: 1;
+                        }
+                        StatCard {
+                            label: Strings.stat-best-day;
+                            value: Digits.num(root.report-best) + " " + Strings.minutes-short;
+                            hint: root.report-best-label;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: Space.gap;
+                        StatCard {
+                            label: Strings.stat-active-days;
+                            value: Digits.num(root.report-active-days) + " / " + Digits.num(root.report-days);
                             horizontal-stretch: 1;
                         }
                         StatCard {
                             label: Strings.consistency;
-                            value: Digits.pct(root.today-consistency / 100.0);
+                            value: Digits.pct(root.report-consistency / 100.0);
+                            horizontal-stretch: 1;
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: Space.gap;
+                        StatCard {
+                            label: Strings.streak;
+                            value: Digits.num(root.report-streak) + " " + Strings.stat-day-unit;
+                            horizontal-stretch: 1;
+                        }
+                        StatCard {
+                            label: Strings.stat-longest;
+                            value: Digits.num(root.report-longest) + " " + Strings.stat-day-unit;
                             horizontal-stretch: 1;
                         }
                     }
 
-                    // raw narrative, kept for parity with the report engine
-                    Rectangle {
-                        height: 1px;
-                        background: Palette.hairline;
+                    // ── time-of-day profile ──────────────────────────────
+                    // Only shown once there is something to show. An empty
+                    // 24-column strip is noise, not information.
+                    if root.has-hour-profile : Rectangle {
+                        height: hours-col.preferred-height + Space.pad * 2;
+                        border-radius: Radius.card;
+                        background: Palette.surface;
+                        border-width: 1px;
+                        border-color: Palette.hairline;
+                        drop-shadow-blur: Elev.card-blur;
+                        drop-shadow-offset-y: Elev.card-y;
+                        drop-shadow-color: Elev.card-shadow;
+
+                        hours-col := VerticalLayout {
+                            padding: Space.pad;
+                            spacing: 8px;
+
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: Strings.stat-hours;
+                                    font-size: Type.caption;
+                                    font-weight: 700;
+                                    letter-spacing: Strings.fa ? 0px : Type.tracking;
+                                    color: Palette.text-faint;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
+                                }
+                            }
+
+                            HourStrip {
+                                values: root.hour-bars;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 0px;
+                                for h[i] in [0, 6, 12, 18, 23] : Text {
+                                    horizontal-stretch: 1;
+                                    text: Digits.num(h);
+                                    font-size: Type.caption;
+                                    color: Palette.text-faint;
+                                    horizontal-alignment: i == 0 ? start : (i == 4 ? end : center);
+                                }
+                            }
+                        }
                     }
-                    Text {
-                        text: root.report-text;
-                        font-size: Type.small;
-                        color: Palette.text-faint;
-                        wrap: word-wrap;
-                        line-height-factor: 1.5;
+
+                    // ── narrative ────────────────────────────────────────
+                    // The same numbers, in sentences. Kept because a person
+                    // reads "you are up 40% on last week" faster than they
+                    // read two bars side by side.
+                    Rectangle {
+                        height: narrative-text.preferred-height + Space.pad * 2;
+                        border-radius: Radius.card;
+                        background: Palette.surface-2;
+                        border-width: 1px;
+                        border-color: Palette.hairline;
+
+                        narrative-text := Text {
+                            x: Space.pad;
+                            y: Space.pad;
+                            width: parent.width - Space.pad * 2;
+                            text: root.report-narrative;
+                            font-size: Type.small;
+                            color: Palette.text-dim;
+                            wrap: word-wrap;
+                        }
                     }
                 }
             }
         }
+
 
         // ═══ SETTINGS ═══
         if root.show-view == "settings" : VerticalLayout {
@@ -2535,9 +3130,9 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             spacing: 0px;
 
             HorizontalLayout {
-                height: 44px;
-                padding-left: 14px;
-                padding-right: 14px;
+                height: Space.header-height;
+                padding-left: Space.gutter;
+                padding-right: Space.gutter;
                 spacing: 8px;
 
                 IconButton {
@@ -2587,19 +3182,24 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             }
 
             Flickable {
+                content-width: parent.width;
+                content-height: settings-content.preferred-height;
+                interactive: true;
                 vertical-stretch: 1;
+                // A Flickable sizes to its content's preferred width unless it
+                // is told to fill. It was not, so the whole settings column —
+                // every card, every divider — came out 260px wide inside a
+                // 420px window and stopped dead short of the right gutter.
+                width: parent.width;
                 // Bind to the real content height so nothing is ever clipped when
                 // a section is added. (This used to be a hardcoded 1180px, which
                 // silently hid the bottom sections.)
-                content-height: settings-content.preferred-height;
-                interactive: true;
 
                 settings-content := VerticalLayout {
                     width: parent.width;
-                    height: self.preferred-height;
-                    padding-left: 18px;
-                    padding-right: 18px;
-                    padding-bottom: 20px;
+                    padding-left: Space.gutter;
+                    padding-right: Space.gutter;
+                    padding-bottom: Space.gap * 2;
                     spacing: 8px;
 
                     // ── timer ──
@@ -2612,28 +3212,28 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             HorizontalLayout {
                                 height: 40px;
                                 alignment: center;
-                                Text { text: Strings.lbl-work; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-work; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; overflow: elide; }
                                 Stepper { value <=> root.work-minutes; min: 1; max: 180; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.work-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
                                 alignment: center;
-                                Text { text: Strings.lbl-short; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-short; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; overflow: elide; }
                                 Stepper { value <=> root.short-break-minutes; min: 1; max: 60; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.short-break-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
                                 alignment: center;
-                                Text { text: Strings.lbl-long; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-long; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; overflow: elide; }
                                 Stepper { value <=> root.long-break-minutes; min: 1; max: 90; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.long-break-minutes = v; } }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 40px;
                                 alignment: center;
-                                Text { text: Strings.lbl-long-every; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-long-every; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; overflow: elide; }
                                 Stepper { value <=> root.long-break-interval; min: 1; max: 12; suffix: ""; changed(v) => { root.long-break-interval = v; } }
                             }
                         }
@@ -2646,7 +3246,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             padding: 14px;
                             HorizontalLayout {
                                 alignment: center;
-                                Text { text: Strings.lbl-goal; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-goal; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; overflow: elide; }
                                 Stepper { value <=> root.daily-goal-minutes; min: 15; max: 600; suffix: Strings.fa ? " دقیقه" : " min"; changed(v) => { root.daily-goal-minutes = v; } }
                             }
                         }
@@ -2660,13 +3260,13 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             spacing: 0px;
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-autostart-next; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-autostart-next; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; overflow: elide; }
                                 Toggle { checked <=> root.auto-start-next; y: (parent.height - self.height) / 2; }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-autostart-launch; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-autostart-launch; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; overflow: elide; }
                                 Toggle { checked <=> root.auto-start-on-launch; y: (parent.height - self.height) / 2; }
                             }
                         }
@@ -2797,7 +3397,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             spacing: 0px;
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-theme; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-theme; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; overflow: elide; }
                                 Segmented {
                                     options: [Strings.theme-system, Strings.theme-dark, Strings.theme-light];
                                     current: root.theme-pref == "dark" ? 1 : (root.theme-pref == "light" ? 2 : 0);
@@ -2812,7 +3412,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-compact; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-compact; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; overflow: elide; }
                                 Toggle {
                                     checked <=> root.compact-mode;
                                     y: (parent.height - self.height) / 2;
@@ -2854,7 +3454,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             padding: 14px;
                             HorizontalLayout {
                                 height: 34px;
-                                Text { text: Strings.lbl-language; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-language; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; overflow: elide; }
                                 Segmented {
                                     options: [Strings.lang-fa, Strings.lang-en];
                                     current: Strings.lang == "fa" ? 0 : 1;
@@ -2876,7 +3476,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                             HorizontalLayout {
                                 height: 26px;
-                                Text { text: Strings.lbl-sound-on; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-sound-on; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; overflow: elide; }
                                 Toggle { checked <=> root.sound-enabled; y: (parent.height - self.height) / 2; }
                             }
 
@@ -2998,19 +3598,19 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             spacing: 0px;
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-hotkeys; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-hotkeys; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; overflow: elide; }
                                 Toggle { checked <=> root.hotkey-enabled; y: (parent.height - self.height) / 2; }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-awake; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-awake; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; overflow: elide; }
                                 Toggle { checked <=> root.inhibit-enabled; y: (parent.height - self.height) / 2; }
                             }
                             Rectangle { height: 1px; background: Palette.hairline; }
                             HorizontalLayout {
                                 height: 44px;
-                                Text { text: Strings.lbl-overlay; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; }
+                                Text { text: Strings.lbl-overlay; font-size: Type.body; color: Palette.text; vertical-alignment: center; horizontal-stretch: 1; horizontal-alignment: Strings.fa ? end : start; overflow: elide; }
                                 Toggle { checked <=> root.overlay-enabled; y: (parent.height - self.height) / 2; }
                             }
                         }
@@ -3278,7 +3878,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 Rectangle {
                                     height: 24px;
                                     width: console-lbl.preferred-width + 22px;
-                                    border-radius: 12px;
+                                    border-radius: Radius.tile;
                                     background: Palette.surface-2;
                                     ta-console := TouchArea {
                                         clicked => { root.open-url("https://console.cloud.google.com/apis/credentials"); }

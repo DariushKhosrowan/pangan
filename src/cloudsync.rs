@@ -1215,7 +1215,7 @@ mod everything_syncs_tests {
         // are the same on both machines. Comparing a report computed from A's
         // sessions with one computed from B's proves the *derived* view matches,
         // not just the raw rows.
-        let report_a = stats::report(&data_a.sessions, Period::Month); let report_b = stats::report(&data_b.sessions, Period::Month); assert_eq!(
+        let report_a = stats::report(&data_a.sessions, Period::Month, 0); let report_b = stats::report(&data_b.sessions, Period::Month, 0); assert_eq!(
             report_a.sessions, report_b.sessions,
             "session counts must agree across devices"
         ); assert_eq!(

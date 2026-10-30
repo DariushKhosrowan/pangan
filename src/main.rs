@@ -65,6 +65,11 @@ struct AppState {
     /// The Jalali month the grid is showing, independent of the selected day:
     /// you can page to next month and look around without moving the selection.
     shown_month: Mutex<(i32, u32)>,
+    /// Which report the Stats screen is showing: the period shape and how many
+    /// periods back. Kept in app state rather than in the Slint window so the
+    /// choice survives the 300 ms tick that rebuilds the screen.
+    report_period: Mutex<stats::Period>,
+    report_offset: Mutex<i32>,
     /// Automatic cloud sync: the timer reads this, the UI writes it.
     cloud: Arc<cloudsync::Engine>,
     /// Google credentials, refreshed in place when they age out.
@@ -106,6 +111,8 @@ impl AppState {
             calendar_day: Mutex::new((0, 0, 0)),
             selected_day: Mutex::new(String::new()),
             shown_month: Mutex::new((0, 0)),
+            report_period: Mutex::new(stats::Period::Week),
+            report_offset: Mutex::new(0),
             cloud: Arc::new(cloudsync::Engine::new()),
             tokens: Arc::new(Mutex::new(sync::load_tokens().unwrap_or_default())),
             device: Arc::new(Mutex::new(device)),
@@ -129,20 +136,59 @@ fn resolve_theme(pref: &str) -> &'static str {
     if pref == "dark" {
         return "dark";
     }
-    // system -> try GTK color-scheme; default dark.
-    if let Ok(out) = std::process::Command::new("gsettings")
+    // system -> ask the desktop, then fall back to light.
+    theme_from_portal()
+        .or_else(theme_from_gsettings)
+        .unwrap_or("light")
+}
+
+/// Read the colour preference from the XDG desktop portal.
+///
+/// Returns Some("dark") or Some("light"), and None when the desktop has no
+/// preference. The portal encodes it as 0 (no preference), 1 (dark) or 2
+/// (light). Zero must not be mistaken for dark: that is exactly the bug that
+/// made the app open dark right after the user had chosen light.
+fn theme_from_portal() -> Option<&'static str> {
+    let out = std::process::Command::new("gdbus")
+        .args([
+            "call",
+            "--session",
+            "--dest",
+            "org.freedesktop.portal.Desktop",
+            "--object-path",
+            "/org/freedesktop/portal/desktop",
+            "--method",
+            "org.freedesktop.portal.Settings.ReadOne",
+            "org.freedesktop.appearance",
+            "color-scheme",
+        ])
+        .output()
+        .ok()?; let s = String::from_utf8_lossy(&out.stdout); if s.contains("uint32 2") {
+        return Some("light"); }
+    if s.contains("uint32 1") {
+        return Some("dark"); }
+    None
+}
+
+/// Read the colour preference from GTK settings, for desktops that do not
+/// expose the portal's colour-scheme key.
+fn theme_from_gsettings() -> Option<&'static str> {
+    let out = std::process::Command::new("gsettings")
         .args(["get", "org.gnome.desktop.interface", "color-scheme"])
         .output()
-    {
-        let s = String::from_utf8_lossy(&out.stdout);
-        if s.contains("dark") || s.contains("prefer-dark") {
-            return "dark";
-        }
-        if s.contains("light") || s.contains("prefer-light") {
-            return "light";
-        }
-    }
-    "dark"
+        .ok()?; let s = String::from_utf8_lossy(&out.stdout); if s.contains("prefer-dark") {
+        return Some("dark"); }
+    if s.contains("prefer-light") {
+        return Some("light"); }
+    // Older desktops encode the preference in the theme name instead.
+    let theme = std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.interface", "gtk-theme"])
+        .output()
+        .ok()?; let t = String::from_utf8_lossy(&theme.stdout).to_lowercase(); if t.contains("dark") {
+        return Some("dark"); }
+    if t.contains("light") {
+        return Some("light"); }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -258,6 +304,10 @@ fn apply_palette(win: &PanganWindow, resolved: &str, era: &str) {
     let p = ui::Palette::get(win);
     p.set_dark(resolved != "light");
     p.set_era(SharedString::from(era));
+    // Elevation is theme-dependent (a grey shadow on a dark page reads as a
+    // smudge, a black one on cream reads as dirt), so it follows the same
+    // resolved theme the palette does.
+    ui::Elev::get(win).set_dark(resolved != "light");
 }
 
 /// Session dots: total = long-break interval, done = position in the cycle.
@@ -668,33 +718,105 @@ fn refresh_day_view(win: &PanganWindow, app: &AppState) {
 }
 
 /// Recompute and set report + task text on the window.
+///
+/// The Stats screen is driven entirely from here: the period and offset live in
+/// `AppState`, this builds the report for that span and pushes every number the
+/// screen shows. Nothing on that screen computes its own figures, so the chart,
+/// the cards and the narrative can never disagree with each other.
 fn refresh_screens(win: &PanganWindow, app: &AppState) {
     let st = app.store.lock().unwrap();
-    let t = stats::report(&st.data.sessions, stats::Period::Today);
-    let w = stats::report(&st.data.sessions, stats::Period::Week);
-    let m = stats::report(&st.data.sessions, stats::Period::Month);
     let en = app.settings.lock().unwrap().lang == "en";
-    let mut report = String::from(if en {
-        "── TODAY ──\n"
-    } else {
-        "── امروز ──\n"
-    });
-    report.push_str(&stats::narrative(&t, en));
-    report.push_str(if en {
-        "\n\n── THIS WEEK ──\n"
-    } else {
-        "\n\n── این هفته ──\n"
-    });
-    report.push_str(&stats::narrative(&w, en));
-    report.push_str(if en {
-        "\n\n── THIS MONTH ──\n"
-    } else {
-        "\n\n── این ماه ──\n"
-    });
-    report.push_str(&stats::narrative(&m, en));
-    win.set_report_text(SharedString::from(report));
+    let period = *app.report_period.lock().unwrap();
+    let offset = *app.report_offset.lock().unwrap();
 
     let today = chrono::Local::now().date_naive();
+    let earliest = st
+        .data
+        .sessions
+        .iter()
+        .filter_map(|s| {
+            chrono::DateTime::from_timestamp(s.at, 0)
+                .map(|d| d.with_timezone(&chrono::Local).date_naive())
+        })
+        .min();
+    let r = stats::report_at(&st.data.sessions, period, offset, today, earliest, en);
+
+    win.set_report_period_index(period.index());
+    win.set_report_offset(offset);
+    win.set_report_title(SharedString::from(if en { r.title_en.clone() } else { r.title.clone() }));
+    win.set_report_span(SharedString::from(r.span.clone()));
+    win.set_report_narrative(SharedString::from(stats::narrative(&r, en)));
+
+    win.set_report_score(r.score as i32);
+    win.set_report_prev_score(r.prev_score as i32);
+    win.set_report_minutes(r.minutes as i32);
+    win.set_report_sessions(r.sessions as i32);
+    win.set_report_avg(r.avg as i32);
+    win.set_report_active_days(r.active_days as i32);
+    win.set_report_days(r.days_in_period as i32);
+    win.set_report_consistency((r.consistency * 100.0).round() as i32);
+    win.set_report_best(r.best_day_minutes as i32);
+    win.set_report_best_label(SharedString::from(if en {
+        r.best_day_label_en.clone()
+    } else {
+        r.best_day_label.clone()
+    }));
+    win.set_report_streak(r.streak as i32);
+    win.set_report_longest(r.longest_streak as i32);
+    win.set_report_prev_minutes(r.prev_minutes as i32);
+    win.set_report_delta(r.delta_pct.round() as i32);
+    win.set_report_has_prev(r.has_prev);
+    win.set_report_empty(r.sessions == 0);
+
+    // The chart. Bars are normalised to the peak so a quiet week still reads as
+    // a shape rather than as seven invisible stubs; an all-zero span keeps a
+    // floor so the baseline is still visible.
+    let peak = r.buckets.iter().map(|b| b.minutes).max().unwrap_or(0).max(1);
+    let bars: Vec<f32> = r
+        .buckets
+        .iter()
+        .map(|b| (b.minutes as f32 / peak as f32).clamp(0.0, 1.0))
+        .collect();
+    let labels: Vec<SharedString> = r
+        .buckets
+        .iter()
+        .map(|b| SharedString::from(b.label.clone()))
+        .collect();
+    let details: Vec<SharedString> = r
+        .buckets
+        .iter()
+        .map(|b| SharedString::from(b.detail.clone()))
+        .collect();
+    let current = r.buckets.iter().position(|b| b.current).map(|i| i as i32).unwrap_or(-1);
+    let future_from = r
+        .buckets
+        .iter()
+        .position(|b| b.future)
+        .map(|i| i as i32)
+        .unwrap_or(r.buckets.len() as i32);
+
+    win.set_chart_bars(ModelRc::new(VecModel::from(bars)));
+    win.set_chart_labels(ModelRc::new(VecModel::from(labels)));
+    win.set_chart_details(ModelRc::new(VecModel::from(details)));
+    win.set_chart_current(current);
+    win.set_chart_future_from(future_from);
+
+    // Hour-of-day profile, always 24 slots: this is what tells a user *when*
+    // they actually work, which no daily total can.
+    let hour_peak = r.hours.iter().copied().max().unwrap_or(0).max(1);
+    let hours: Vec<f32> = r
+        .hours
+        .iter()
+        .map(|m| (*m as f32 / hour_peak as f32).clamp(0.0, 1.0))
+        .collect();
+    win.set_hour_bars(ModelRc::new(VecModel::from(hours)));
+    let has_hours = r.hours.iter().any(|m| *m > 0);
+    win.set_has_hour_profile(has_hours);
+
+    // The old single-blob report text is still fed, because the main screen's
+    // compact summary reads it.
+    let t = stats::report_at(&st.data.sessions, stats::Period::Day, 0, today, earliest, en); let w = stats::report_at(&st.data.sessions, stats::Period::Week, 0, today, earliest, en); let m = stats::report_at(&st.data.sessions, stats::Period::Month, 0, today, earliest, en); let mut report = String::new(); report.push_str(&stats::narrative(&t, en)); report.push_str("\n\n"); report.push_str(&stats::narrative(&w, en)); report.push_str("\n\n"); report.push_str(&stats::narrative(&m, en)); win.set_report_text(SharedString::from(report));
+
     let mut tasks_line = String::new();
     let open = st.live_tasks().filter(|t| !t.done).count();
     let today_key = today.format("%Y-%m-%d").to_string();
@@ -739,41 +861,24 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
     win.set_goal_minutes(goal as i32);
     win.set_goal_done_minutes(t.minutes as i32);
 
-    // Weekly bars: Monday..Sunday of the current week, normalised to the peak.
-    let (week_start, _) = stats::Period::Week.bounds(today);
-    let mut per_day = [0u64; 7];
-    for s in &st.data.sessions {
-        let d = chrono::DateTime::from_timestamp(s.at, 0)
-            .map(|d| d.with_timezone(&chrono::Local).date_naive());
-        if let Some(d) = d {
-            let idx = (d - week_start).num_days();
-            if (0..7).contains(&idx) {
-                per_day[idx as usize] += s.minutes;
-            }
-        }
-    }
-    let peak = per_day.iter().copied().max().unwrap_or(0).max(1);
-    let bars: Vec<f32> = per_day
+    // The main screen's compact week strip. Saturday-first, taken from the
+    // same week report the Stats screen uses, so the two can never disagree
+    // about which day a bar belongs to.
+    let wb = stats::report_at(&st.data.sessions, stats::Period::Week, 0, today, earliest, en);
+    let week_peak = wb.buckets.iter().map(|b| b.minutes).max().unwrap_or(0).max(1);
+    let week_bars: Vec<f32> = wb
+        .buckets
         .iter()
-        .map(|m| (*m as f32 / peak as f32).clamp(0.0, 1.0))
+        .map(|b| (b.minutes as f32 / week_peak as f32).clamp(0.0, 1.0))
         .collect();
-    win.set_week_bars(ModelRc::new(VecModel::from(bars)));
-
-    let labels: Vec<SharedString> = if en {
-        ["M", "T", "W", "T", "F", "S", "S"]
-            .iter()
-            .map(|s| SharedString::from(*s))
-            .collect()
-    } else {
-        // The bars are Monday-first (see Period::Week::bounds), so the Persian
-        // initials follow the same order rather than the Saturday-first week
-        // the calendar view uses. Misaligning them would label the wrong day.
-        ["د", "س", "چ", "پ", "ج", "ش", "ی"]
-            .iter()
-            .map(|s| SharedString::from(*s))
-            .collect()
-    };
-    win.set_week_labels(ModelRc::new(VecModel::from(labels)));
+    win.set_week_bars(ModelRc::new(VecModel::from(week_bars)));
+    let week_labels: Vec<SharedString> = wb
+        .buckets
+        .iter()
+        .map(|b| SharedString::from(b.label.clone()))
+        .collect();
+    win.set_week_labels(ModelRc::new(VecModel::from(week_labels)));
+    win.set_week_current(wb.buckets.iter().position(|b| b.current).map(|i| i as i32).unwrap_or(-1));
 
     // Task list for the redesigned panel: open tasks first, then done.
     let mut items: Vec<ui::TaskItem> = st
@@ -1587,6 +1692,53 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // ---- Stats navigation ----
+    //
+    // Three controls drive the whole screen: pick a period shape, step one
+    // period back or forward, and jump back to the current one. Every one of
+    // them writes to AppState and then re-renders, so the screen is always a
+    // pure function of (period, offset) and cannot drift out of sync with the
+    // numbers it is showing.
+    let period_app = Arc::clone(&app);
+    let period_weak = weak.clone();
+    win.on_set_report_period(move |index| {
+        *period_app.report_period.lock().unwrap() = stats::Period::from_index(index);
+        // Switching shape resets to the current span: "last month" makes no
+        // sense as a starting point for the Day view.
+        *period_app.report_offset.lock().unwrap() = 0;
+        if let Some(w) = period_weak.upgrade() {
+            refresh_screens(&w, &period_app);
+        }
+    });
+
+    let step_app = Arc::clone(&app);
+    let step_weak = weak.clone();
+    win.on_step_report(move |delta| {
+        let period = *step_app.report_period.lock().unwrap();
+        if period == stats::Period::All {
+            return; // all-time has nothing to step through
+        }
+        let mut off = step_app.report_offset.lock().unwrap();
+        let next = *off + delta;
+        if next > 0 {
+            return; // never step past the current period into the future
+        }
+        *off = next;
+        drop(off);
+        if let Some(w) = step_weak.upgrade() {
+            refresh_screens(&w, &step_app);
+        }
+    });
+
+    let now_app = Arc::clone(&app);
+    let now_weak = weak.clone();
+    win.on_report_today(move || {
+        *now_app.report_offset.lock().unwrap() = 0;
+        if let Some(w) = now_weak.upgrade() {
+            refresh_screens(&w, &now_app);
+        }
+    });
+
     // Today (Persian calendar) open/close. Opening rebuilds the card so the
     // date is right even if the app has been left running across midnight.
     let today_open_weak = weak.clone();
@@ -1617,16 +1769,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     win.on_close_settings(move || {
         if let Some(w) = set_close_weak.upgrade() {
             let _ = apply_ui_settings(&w, &set_close_app);
-            // Rebase the timer on the new durations.
+            // Rebase the timer on the new durations. This is the whole point of
+            // the settings screen: without this call the new numbers were saved
+            // to disk and then never reached the clock, so the dial kept the old
+            // duration until a restart.
             let s = set_close_app.settings.lock().unwrap().clone();
             let cfg = clock::Config::from(&s);
-            // The clock is shared; rebuild its totals from the new config.
+            set_close_app.shared.set_config(cfg);
+            // Push the new snapshot so the dial and the phase label update now.
+            apply_snapshot(&w, &set_close_app.shared);
             w.set_theme_label(SharedString::from(s.theme_label()));
             let resolved = resolve_theme(&s.theme);
             w.set_resolved_theme(SharedString::from(resolved));
             apply_palette(&w, resolved, &s.era);
             w.set_show_view("main".into());
-            let _ = cfg;
         }
     });
 

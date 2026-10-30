@@ -177,13 +177,37 @@ impl Shared {
         }
     }
 
-    /// Replace the durations, e.g. after a cloud sync delivered new ones.
+    /// Replace the durations, e.g. after the settings screen closes or a cloud
+    /// sync delivered new ones.
     ///
-    /// A running countdown is left alone: the user started a 25-minute block
-    /// and it should finish as one. The new duration applies from the next
-    /// phase, which is the only reading that is not surprising.
+    /// Two cases, and they are deliberately different:
+    ///
+    /// * **Paused** — the dial is rebased onto the new duration immediately.
+    ///   No reset needed: set focus to 50 and it reads 50:00. This is the case
+    ///   that was broken; the new numbers were saved and never reached the
+    ///   clock, so the only way to see them was to press reset.
+    ///
+    /// * **Running** — the countdown is left completely alone. Its remaining
+    ///   time and its finish instant are untouched, so the block the user
+    ///   started finishes as one and the count never jumps. The new duration
+    ///   is picked up by `phase_total` when the next phase begins.
     pub fn set_config(&self, cfg: Config) {
-        *self.cfg.lock().unwrap() = cfg;
+        let new_total = {
+            let mut c = self.cfg.lock().unwrap();
+            *c = cfg;
+            match self.state.lock().unwrap().phase {
+                Phase::Work => Duration::from_secs(c.work_minutes * 60),
+                Phase::ShortBreak => Duration::from_secs(c.short_break_minutes * 60),
+                Phase::LongBreak => Duration::from_secs(c.long_break_minutes * 60),
+            }
+        };
+
+        let mut s = self.state.lock().unwrap();
+        if !s.running {
+            s.total = new_total;
+            s.remaining = new_total;
+            s.finish_at = None;
+        }
     }
 
     /// The current durations, for callers that need to read them back.
@@ -389,6 +413,54 @@ impl Shared {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Changing the focus duration must move the dial immediately when the
+    /// timer is paused — no reset needed. This is the bug the user hit: the
+    /// setting was saved to disk and never reached the clock.
+    #[test]
+    fn set_config_rebases_a_paused_timer() {
+        let shared = Shared::new(config());
+        assert_eq!(shared.snapshot().time, "25:00");
+
+        let mut longer = config();
+        longer.work_minutes = 50;
+        shared.set_config(longer);
+
+        assert_eq!(shared.snapshot().time, "50:00", "paused dial must follow the new duration");
+    }
+
+    /// A running countdown keeps its own total: the user started a 25-minute
+    /// block and it should finish as one, with no jump in the displayed time.
+    #[test]
+    fn set_config_leaves_a_running_timer_alone() {
+        let shared = Shared::new(config());
+        shared.toggle(); // start
+        assert!(shared.snapshot().running);
+
+        let mut longer = config();
+        longer.work_minutes = 50;
+        shared.set_config(longer);
+
+        assert_eq!(
+            shared.snapshot().time,
+            "25:00",
+            "a running block must not be stretched mid-flight"
+        );
+    }
+
+    /// After the running block ends, the new duration applies.
+    #[test]
+    fn new_duration_applies_to_the_next_phase() {
+        let shared = Shared::new(config());
+        shared.toggle();
+        let mut longer = config();
+        longer.work_minutes = 50;
+        shared.set_config(longer);
+
+        shared.skip(); // move to the break
+        shared.skip(); // back to work
+        assert_eq!(shared.snapshot().time, "50:00");
+    }
 
     fn config() -> Config {
         Config {
