@@ -384,6 +384,8 @@ mod tests {
             sessions: vec![SessionRecord { at: 1, minutes: 25 }],
             tasks: vec![task(1, "write", 10)],
             next_task_id: 2,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             decrees: vec![],
         };
@@ -391,6 +393,8 @@ mod tests {
             sessions: vec![SessionRecord { at: 2, minutes: 25 }],
             tasks: vec![task(2, "read", 20)],
             next_task_id: 3,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             decrees: vec![],
         };
@@ -447,6 +451,8 @@ mod tests {
             }],
             tasks: vec![task(1, "write the report", 10)],
             next_task_id: 2,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             decrees: vec![],
         };
@@ -482,6 +488,8 @@ mod tests {
         let b2 = Data {
             tasks: vec![task(1, "write the report", 10), task(2, "review", 20)],
             next_task_id: 3,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             ..b_now.clone()
         };
@@ -832,6 +840,8 @@ mod recovery_tests {
             }],
             tasks: vec![task(1, "write the report", 10), task(2, "review", 20)],
             next_task_id: 3,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             decrees: vec![],
         };
@@ -870,6 +880,8 @@ mod recovery_tests {
         let good = Data {
             tasks: vec![task(1, "keep me", 10)],
             next_task_id: 2,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -914,6 +926,8 @@ mod recovery_tests {
         let cloud = Data {
             tasks: vec![task(1, "from cloud", 10)],
             next_task_id: 2,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -923,6 +937,8 @@ mod recovery_tests {
         let offline = Data {
             tasks: vec![task(1, "from cloud", 10), task(2, "made offline", 30)],
             next_task_id: 3,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -956,6 +972,8 @@ mod recovery_tests {
         let before = Data {
             tasks: vec![task(1, "delete me", 10)],
             next_task_id: 2,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -1002,6 +1020,8 @@ mod recovery_tests {
         let local_data = Data {
             tasks: vec![task(1, "mine", 10)],
             next_task_id: 2,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -1029,6 +1049,8 @@ mod recovery_tests {
         let seed = Data {
             tasks: vec![task(1, "shared", 10)],
             next_task_id: 2,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -1086,6 +1108,8 @@ mod recovery_tests {
         let seed = Data {
             tasks: vec![task(1, "shared", 10)],
             next_task_id: 2,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -1109,6 +1133,8 @@ mod recovery_tests {
         let a_data = Data {
             tasks: vec![task(1, "shared", 10), task(2, "from desktop", 20)],
             next_task_id: 3,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -1117,6 +1143,8 @@ mod recovery_tests {
         let b_data = Data {
             tasks: vec![task(1, "shared", 10), task(3, "from laptop", 30)],
             next_task_id: 4,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -1267,6 +1295,8 @@ mod everything_syncs_tests {
                 task(2, "review the contract", 200),
             ],
             next_task_id: 3,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             decrees: vec![],
         };
@@ -1337,6 +1367,8 @@ mod everything_syncs_tests {
         let mut data_a = Data {
             tasks: vec![task(1, "first", 10)],
             next_task_id: 2,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -1403,6 +1435,8 @@ mod everything_syncs_tests {
         let data_a = Data {
             tasks: vec![task(1, "delete me", 10)],
             next_task_id: 2,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -1454,6 +1488,8 @@ mod everything_syncs_tests {
             }],
             tasks: vec![task(1, "stable", 10)],
             next_task_id: 2,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             decrees: vec![],
         };

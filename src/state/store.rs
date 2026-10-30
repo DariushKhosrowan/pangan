@@ -2,6 +2,7 @@
 //! Data lives under the config dir (`~/.config/pangan/data.json` on Linux).
 
 use crate::journal::{Decree, Inscription};
+use crate::state::rota::{self, RotaEntry, RotaError};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -57,6 +58,16 @@ pub struct Data {
     /// with no inscription facing it.
     #[serde(default)]
     pub decrees: Vec<Decree>,
+    /// The ordered queue of blocks a day is meant to hold, plus every entry the
+    /// user has taken off it. See `state::rota` for why entries keep the day
+    /// they were planned for instead of following the user forward.
+    #[serde(default)]
+    pub rota: Vec<RotaEntry>,
+    /// Hands out rota entry ids. Separate from `next_task_id` because the two
+    /// counters live in different collection types and sharing one would tie
+    /// two unrelated id spaces together for no gain.
+    #[serde(default)]
+    pub next_rota_id: u64,
 }
 
 impl Data {
@@ -399,6 +410,100 @@ impl Store {
             .iter()
             .filter(|d| !d.deleted && completed.contains(&d.session_at))
             .count()
+    }
+
+    // ── rota ──────────────────────────────────────────────────────────────
+    //
+    // The day's queue of planned blocks. Every rule lives in `state::rota`;
+    // these methods only own the id counter and the save, so the rules cannot
+    // drift between the store and a test.
+
+    /// Plan a block on `day` from raw user input.
+    ///
+    /// `all` is read from the store rather than passed in because the cap is a
+    /// property of the day, and a caller that had to remember to supply the
+    /// current list could forget.
+    pub fn add_rota_entry(
+        &mut self,
+        day: &str,
+        label: &str,
+        task_id: Option<u64>,
+        decree: &str,
+        minutes: u64,
+    ) -> Result<u64, RotaError> {
+        let id = self.data.next_rota_id + 1;
+        let entry = rota::create(
+            id,
+            day,
+            label,
+            task_id,
+            decree,
+            minutes,
+            chrono::Utc::now().timestamp(),
+            &self.data.rota,
+        )?;
+        self.data.next_rota_id = id;
+        let new_id = entry.id;
+        self.data.rota.push(entry);
+        self.save();
+        Ok(new_id)
+    }
+
+    /// The entries on one day, in the order they were planned.
+    pub fn rota_for_day(&self, day: &str) -> Vec<RotaEntry> {
+        rota::for_day(&self.data.rota, day)
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
+    /// The block to start next on `day`, if the rota has one left.
+    pub fn rota_next(&self, day: &str) -> Option<RotaEntry> {
+        rota::peek_next(&self.data.rota, day).cloned()
+    }
+
+    /// Mark a planned block as started. Returns false when it was not pending.
+    pub fn open_rota_entry(&mut self, id: u64) -> bool {
+        if rota::mark_opened(&mut self.data.rota, id, chrono::Utc::now().timestamp()) {
+            self.save();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Take an entry off the rota by marking it.
+    pub fn remove_rota_entry(&mut self, id: u64) -> bool {
+        if rota::remove(&mut self.data.rota, id) {
+            self.save();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Unstarted entries left behind on earlier days, oldest first.
+    pub fn rota_carry_over(&self, today: &str) -> Vec<RotaEntry> {
+        rota::carry_over(&self.data.rota, today)
+    }
+
+    /// Re-plan one stale entry onto `today` and retire the original.
+    ///
+    /// Both halves happen together so the stale row can never be offered twice:
+    /// a replan that tombstoned nothing would return the same leftover on every
+    /// launch, and one that only tombstoned would lose the plan.
+    pub fn carry_rota_entry_forward(&mut self, id: u64, today: &str) -> Option<u64> {
+        let stale = self.data.rota.iter().find(|e| e.id == id)?.clone();
+        if !stale.is_pending() {
+            return None;
+        }
+        let new_id = self.data.next_rota_id + 1;
+        let fresh = rota::replan(&stale, new_id, today, chrono::Utc::now().timestamp());
+        self.data.next_rota_id = new_id;
+        rota::remove(&mut self.data.rota, id);
+        self.data.rota.push(fresh);
+        self.save();
+        Some(new_id)
     }
 }
 

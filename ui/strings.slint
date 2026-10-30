@@ -255,7 +255,25 @@ export global Strings {
     // view that answers "how long have we been doing this", which the timer
     // and the calendar cannot.
     out property <string> nav-chronicle: fa ? "گاه‌شمار" : "Chronicle";
-    
+
+    // ── The rota: the day written down before it starts ────────────────────
+    // "Rota" is the Latin for a schedule, which is what this is: not a task
+    // list (things that need doing) but a plan for the hours (things this
+    // particular day is for). Persian says "روتین روز" — the day's order.
+    out property <string> rota-title: fa ? "روتین روز" : "Today's rota";
+    out property <string> rota-empty: fa
+        ? "هنوز بلوکی برای امروز برنامه‌ریزی نشده"
+        : "No blocks planned for today yet";
+    out property <string> rota-add-hint: fa
+        ? "بلوک تازه… (مثلاً: پیش‌نویس گزارش)"
+        : "Plan a block… (e.g. draft the report)";
+    // The two strings that carry a number are built in Rust (this is where the
+    // Persian digits come from), so only their fragments live here.
+    out property <string> rota-left-suffix: fa ? "مانده" : "left";
+    out property <string> rota-carry-prefix: fa
+        ? "بلوک ناتمام از روزهای پیش:"
+        : "Unfinished blocks from earlier days:";
+
     // ── Inscriptions: the written record ───────────────────────────────────
     // A stone inscription was how a Persian king answered "what did I
     // accomplish" so the answer would outlast him. Pangan asks the same

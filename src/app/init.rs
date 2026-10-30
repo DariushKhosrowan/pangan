@@ -350,6 +350,57 @@ fn notify(body: &str) {
     crate::platform::notify::send("Pangan", body);
 }
 
+/// Begin the block a rota entry describes.
+///
+/// Three things have to happen together, and each of them is easy to forget:
+///
+/// 1. the entry is marked taken up, so it stops being "next" — this must happen
+///    before the clock starts, because the tick that follows reads the rota;
+/// 2. the block's own length is applied, via `start_work_block`, which leaves
+///    the configured focus duration alone;
+/// 3. the entry's decree is parked in `pending_decree`, so when the session ends
+///    the intention written for it in the morning is what gets recorded —
+///    rather than the dialog asking again at the end of the block, or the
+///    decree going missing entirely.
+///
+/// A refresh follows, so the row's strikethrough and the button's new label
+/// appear on the same frame the countdown starts rather than one tick later.
+fn start_planned_block(
+    entry: &crate::state::rota::RotaEntry,
+    app: &Arc<AppState>,
+    shared: &Arc<Shared>,
+    win: &slint::Weak<PanganWindow>,
+) {
+    // Refuse on a running clock *before* marking anything: a refused start that
+    // has already struck the entry through would leave the rota claiming a
+    // block was taken up when it was not.
+    if !shared.at_fresh_work_start() {
+        return;
+    }
+    {
+        let mut st = app.store.lock().unwrap();
+        if !st.open_rota_entry(entry.id) {
+            return; // already taken up, or removed while the dialog was open
+        }
+    }
+    // Park the decree. An entry without one clears any stale pending decree
+    // rather than leaving a previous block's line waiting to attach itself to
+    // this session.
+    let written_at = chrono::Utc::now().timestamp();
+    *app.pending_decree.lock().unwrap() = if entry.decree.is_empty() {
+        None
+    } else {
+        Some((entry.decree.clone(), written_at))
+    };
+
+    shared.start_work_block(entry.minutes);
+    app.cloud.mark_dirty();
+    if let Some(w) = win.upgrade() {
+        apply_snapshot(&w, shared);
+        refresh_screens(&w, app);
+    }
+}
+
 /// Handle an action. `notify_msg` (if any) is shown from the event-loop thread.
 fn run_action(
     action: TrayAction,
@@ -790,6 +841,113 @@ fn push_decree_state(win: &PanganWindow, app: &AppState, st: &Store) {
     win.set_current_decree(SharedString::from(text));
 }
 
+/// Push the day's rota into the window: the rows, the Start Next label, and how
+/// much of the plan is still ahead.
+///
+/// Rebuilt from the store on every tick, like every other list here, for the
+/// same reason: the store is the truth and a window-side copy is one more thing
+/// that can disagree with it. The list is a handful of rows, so the cost is a
+/// few allocations every 300 ms.
+///
+/// The day pushed is *today*, not the day the calendar screen happens to be
+/// showing. A rota is about the hours you are actually in; planning for a day
+/// you are browsing is a feature, but beginning a block planned for last Tuesday
+/// is not, and conflating the two would make Start Next a way to start the wrong
+/// work.
+fn push_rota(win: &PanganWindow, app: &AppState, st: &Store) {
+    let en = app.settings.lock().unwrap().lang == "en";
+    let today = chrono::Local::now().date_naive();
+    let today_key = today.format("%Y-%m-%d").to_string();
+
+    let entries = st.rota_for_day(&today_key);
+    let total = entries.len();
+    let done = entries.iter().filter(|e| !e.is_pending()).count();
+    let pending = total - done;
+
+    let mut items: Vec<crate::ui::RotaItem> = Vec::with_capacity(total);
+    // The row height is decided here because the Slint side cannot sum it: a
+    // row with a decree is 54px and one without is 40px, and a Flickable's
+    // content-height must not be derived from its own children.
+    let mut list_height = 0.0f32;
+    let mut first_pending_seen = false;
+    for (i, e) in entries.iter().enumerate() {
+        let is_pending = e.is_pending();
+        // "next" marks exactly one row: the first still waiting. Marking every
+        // pending row would make the head of the queue impossible to find.
+        let state = if !is_pending {
+            "started"
+        } else if !first_pending_seen {
+            first_pending_seen = true;
+            "next"
+        } else {
+            "waiting"
+        };
+        let number = if en {
+            (i + 1).to_string()
+        } else {
+            calendar::fa_num((i + 1) as i64)
+        };
+        let length = if en {
+            format!("{}m", e.minutes)
+        } else {
+            format!("{}د", calendar::fa_num(e.minutes as i64))
+        };
+        list_height += if e.decree.is_empty() { 40.0 } else { 54.0 };
+        items.push(crate::ui::RotaItem {
+            id: e.id as i32,
+            number: SharedString::from(number),
+            label: SharedString::from(e.label.clone()),
+            length: SharedString::from(length),
+            state: SharedString::from(state),
+            decree: SharedString::from(e.decree.clone()),
+        });
+    }
+    win.set_rota(ModelRc::new(VecModel::from(items)));
+    win.set_rota_list_height(list_height);
+
+    let next = entries.iter().find(|e| e.is_pending());
+    win.set_rota_next_enabled(next.is_some());
+    // The button says what it will start, not "start next": the press should be
+    // informed about which block it is about to spend half an hour on.
+    win.set_rota_next_label(SharedString::from(match next {
+        Some(e) => e.label.clone(),
+        None => String::new(),
+    }));
+
+    // "2 of 5 left". Built here rather than in Slint because this is where the
+    // Persian digits are, and because the app's strings cannot interpolate.
+    win.set_rota_remaining(SharedString::from(if total == 0 {
+        String::new()
+    } else if en {
+        format!("{pending} of {total} left")
+    } else {
+        format!(
+            "{} از {} مانده",
+            calendar::fa_num(pending as i64),
+            calendar::fa_num(total as i64)
+        )
+    }));
+
+    // Leftovers from earlier days. Counted and offered, never merged in: a rota
+    // that silently refilled itself would be a list you can never finish.
+    let carry = st.rota_carry_over(&today_key);
+    win.set_rota_carry_count(carry.len() as i32);
+    win.set_rota_carry_label(SharedString::from(if carry.is_empty() {
+        String::new()
+    } else if en {
+        format!(
+            "Bring {} unfinished block{} to today",
+            carry.len(),
+            if carry.len() == 1 { "" } else { "s" }
+        )
+    } else {
+        format!(
+            "{} بلوک ناتمام از روزهای پیش را به امروز بیاور",
+            calendar::fa_num(carry.len() as i64)
+        )
+    }));
+}
+
 /// Push the inscription archive into the window, honouring the search box.
 ///
 /// The archive is rebuilt from the store on every tick rather than being edited
@@ -975,6 +1133,7 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
     let st = app.store.lock().unwrap();
     push_inscriptions(win, app, &st);
     push_decree_state(win, app, &st);
+    push_rota(win, app, &st);
     let en = app.settings.lock().unwrap().lang == "en";
     let period = *app.report_period.lock().unwrap();
     let offset = *app.report_offset.lock().unwrap();
@@ -2517,6 +2676,146 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             w.set_decree_text(SharedString::from(""));
             w.set_decree_error(SharedString::from(""));
             w.set_can_issue(false);
+        }
+    });
+
+    // ── rota ────────────────────────────────────────────────────────────────
+    //
+    // Planning a block writes it to today's rota. Nothing starts: the whole
+    // point of planning ahead is that writing the day down and beginning it are
+    // two separate acts, done at two separate times.
+    let rota_add_app = Arc::clone(&app);
+    let rota_add_weak = weak.clone();
+    win.on_add_rota_entry(move |label, minutes, decree| {
+        let day = chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string();
+        let minutes = (minutes.max(1) as u64).min(crate::state::rota::MAX_MINUTES);
+        let mut st = rota_add_app.store.lock().unwrap();
+        let res = st.add_rota_entry(&day, &label, None, &decree, minutes);
+        drop(st);
+        // A refused entry (blank label, a full day) leaves the field's text
+        // alone rather than clearing it: what the user typed is the thing they
+        // would have to type again.
+        if res.is_ok() {
+            if let Some(w) = rota_add_weak.upgrade() {
+                w.set_rota_new_label(SharedString::from(""));
+                w.set_rota_can_add(false);
+            }
+            rota_add_app.cloud.mark_dirty();
+        }
+        if let Some(w) = rota_add_weak.upgrade() {
+            refresh_screens(&w, &rota_add_app);
+        }
+    });
+
+    // The label field drives the Add button's enabled state. A predicate on the
+    // trimmed text, matching what the validator will accept, so the button can
+    // never be enabled for something the store then refuses.
+    let rota_lbl_weak = weak.clone();
+    win.on_rota_label_changed(move |text| {
+        if let Some(w) = rota_lbl_weak.upgrade() {
+            w.set_rota_can_add(!text.trim().is_empty());
+        }
+    });
+
+    // Re-plan every leftover from earlier days onto today.
+    //
+    // One press, because offering them one at a time would mean a dialog per
+    // stale entry before the user has had any coffee. Each is moved as a new
+    // row and the original tombstoned, so the same leftover cannot be offered
+    // again tomorrow either way.
+    let carry_app = Arc::clone(&app);
+    let carry_weak = weak.clone();
+    win.on_carry_rota_entries(move || {
+        let today = chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string();
+        let mut st = carry_app.store.lock().unwrap();
+        let ids: Vec<u64> = st.rota_carry_over(&today).iter().map(|e| e.id).collect();
+        for id in ids {
+            st.carry_rota_entry_forward(id, &today);
+        }
+        drop(st);
+        carry_app.cloud.mark_dirty();
+        if let Some(w) = carry_weak.upgrade() {
+            refresh_screens(&w, &carry_app);
+        }
+    });
+
+    // One stale entry, by id — the shape a future carry sheet would use.
+    let carry1_app = Arc::clone(&app);
+    let carry1_weak = weak.clone();
+    win.on_carry_rota_entry(move |id| {
+        let today = chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string();
+        {
+            let mut st = carry1_app.store.lock().unwrap();
+            st.carry_rota_entry_forward(id as u64, &today);
+        }
+        carry1_app.cloud.mark_dirty();
+        if let Some(w) = carry1_weak.upgrade() {
+            refresh_screens(&w, &carry1_app);
+        }
+    });
+
+    // Take a planned block off the rota.
+    let rota_rm_app = Arc::clone(&app);
+    let rota_rm_weak = weak.clone();
+    win.on_remove_rota_entry(move |id| {
+        {
+            let mut st = rota_rm_app.store.lock().unwrap();
+            st.remove_rota_entry(id as u64);
+        }
+        rota_rm_app.cloud.mark_dirty();
+        if let Some(w) = rota_rm_weak.upgrade() {
+            refresh_screens(&w, &rota_rm_app);
+        }
+    });
+
+    // Start the block at the head of the queue.
+    //
+    // This is the rota's payoff, so it does everything a session start does and
+    // three things more: it marks the entry taken up, adopts the entry's length
+    // as the block's length, and parks the entry's decree as the pending one so
+    // the block is governed by the intention that was written for it — without
+    // asking the user the question again.
+    //
+    // It refuses to act on a running clock. Starting "next" while a block is in
+    // flight would silently swap the session out from under the countdown the
+    // user is watching.
+    let next_app = Arc::clone(&app);
+    let next_shared = Arc::clone(&shared);
+    let next_weak = weak.clone();
+    win.on_start_rota_next(move || {
+        let today = chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string();
+        {
+            let st = next_app.store.lock().unwrap();
+            let Some(entry) = st.rota_next(&today) else {
+                return;
+            };
+            start_planned_block(&entry, &next_app, &next_shared, &next_weak);
+        }
+    });
+
+    // Start one specific entry.
+    let one_app = Arc::clone(&app);
+    let one_shared = Arc::clone(&shared);
+    let one_weak = weak.clone();
+    win.on_start_rota_entry(move |id| {
+        let draft = {
+            let st = one_app.store.lock().unwrap();
+            st.data.rota.iter().find(|e| e.id == id as u64).cloned()
+        };
+        if let Some(entry) = draft {
+            start_planned_block(&entry, &one_app, &one_shared, &one_weak);
         }
     });
 

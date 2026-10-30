@@ -1,4 +1,4 @@
-import { LineEdit, TextEdit } from "std-widgets.slint";
+import { LineEdit, TextEdit, SpinBox } from "std-widgets.slint";
 import { Shahbaz, Faravahar, Derafsh, Senmurv, Boteh, BotehDivider, EmblemField, SteppedCrenellation, LotusRow, WingedDivider, ArchFrame } from "heritage.slint";
 import { SunRing } from "ring.slint";
 import { Digits } from "digits.slint";
@@ -204,6 +204,26 @@ export struct DayCell {
 // so the grid is built as a list of rows of seven rather than one flat list.
 export struct DayRow {
     cells: [DayCell],
+}
+
+// One planned block on the day's rota.
+//
+// `state` is a word rather than a bool pair so the row has one thing to read:
+// "next" is the block Start Next will take, "started" one already begun, and
+// "waiting" one queued behind the current block.
+export struct RotaItem {
+    id: int,
+    /// The ordinal shown at the left, in the UI's digits ("۱", "۲", …).
+    number: string,
+    label: string,
+    /// "25m", already formatted for the active language's digits.
+    length: string,
+    /// "next" | "waiting" | "started"
+    state: string,
+    /// The decree this block will open with, "" when it has none. Shown as a
+    /// second line so the intention is visible before the block runs, which is
+    /// the whole reason it was written down early.
+    decree: string,
 }
 
 // One row of the inscription archive.
@@ -1038,6 +1058,127 @@ component PeriodPicker inherits Rectangle {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// RotaRow — one planned block: its number, what it is, how long, and the line
+// it opens with.
+//
+// The row says its own state rather than relying on colour alone: a block that
+// has been started is dimmed and struck through by label, and the next one to
+// run is marked "next" so the queue's head is never ambiguous.
+// ───────────────────────────────────────────────────────────────────────────
+component RotaRow inherits Rectangle {
+    in property <RotaItem> item;
+    in property <bool> last: false;
+    /// True when this row may be removed — the block has not been started.
+    in property <bool> removable: true;
+    callback start-entry(int);
+    callback remove-entry(int);
+
+    // Two lines for an entry with a decree, one for an entry without: the
+    // decree is the point, so it gets room rather than being elided away.
+    height: item.decree == "" ? 40px : 54px;
+
+    Rectangle {
+        width: parent.width;
+        height: 1px;
+        y: parent.height - 1px;
+        background: Palette.hairline;
+        visible: !root.last;
+    }
+
+    HorizontalLayout {
+        padding-left: 2px;
+        padding-right: 2px;
+        spacing: 10px;
+        alignment: start;
+
+        // The ordinal. A rota is a sequence, so its position is the most
+        // important thing about an entry after its text.
+        Rectangle {
+            width: 22px;
+            height: 22px;
+            border-radius: 11px;
+            y: (parent.height - self.height) / 2;
+            background: item.state == "next" ? Palette.accent : Palette.surface-3;
+            Text {
+                text: item.number;
+                font-size: Type.small;
+                font-weight: 700;
+                color: item.state == "next" ? Palette.on-accent : Palette.text-dim;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                width: parent.width;
+                height: parent.height;
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 1px;
+
+            // No explicit `width: parent.width` on these: a Text inside a
+            // layout that is itself sized by the layout creates a binding loop
+            // (layoutinfo -> width -> layoutinfo). `horizontal-stretch` on the
+            // enclosing layout is what gives them the room.
+            Text {
+                text: item.label;
+                font-size: Type.body;
+                color: item.state == "started" ? Palette.text-faint : Palette.text;
+                overflow: elide;
+            }
+
+            if item.decree != "" : Text {
+                text: item.decree;
+                font-size: Type.caption;
+                color: Palette.text-faint;
+                overflow: elide;
+            }
+        }
+
+        Text {
+            text: item.length;
+            font-size: Type.small;
+            color: Palette.text-faint;
+            y: (parent.height - self.height) / 2;
+        }
+
+        // A block already begun. This is the "taken up" mark the row has
+        // instead of a strikeout, and it stays for the rest of the day so the
+        // rota reads as a record of what was planned and what was started.
+        if item.state == "started" : Icon {
+            kind: "check";
+            size: 12px;
+            color: Palette.accent;
+            y: (parent.height - self.height) / 2;
+        }
+
+        // Remove. Only offered for a block that has not been started: taking
+        // away a block that already ran would leave the day's record claiming
+        // work it did not do.
+        if root.removable && item.state != "started" : Rectangle {
+            width: 24px;
+            height: 24px;
+            border-radius: 12px;
+            y: (parent.height - self.height) / 2;
+            background: transparent;
+            ta := TouchArea {
+                clicked => { root.remove-entry(item.id); }
+            }
+            states [
+                h when ta.has-hover : { background: Palette.surface-2; in { animate background { duration: Motion.quick; } } }
+            ]
+            Icon {
+                kind: "close";
+                size: 11px;
+                color: Palette.text-faint;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+            }
+        }
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // TaskRow — a single line with a check circle.
 // ───────────────────────────────────────────────────────────────────────────
 component TaskRow inherits Rectangle {
@@ -1604,6 +1745,33 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     /// Pushed from Rust so the 300 ms tick never has to reach into the store.
     in property <string> current-decree: "";
 
+    // ---- The day's rota ----
+    //
+    // The blocks this day is meant to hold, in the order they were planned.
+    // `rota` feeds the card on the main screen; `rota-next-enabled` gates the
+    // Start Next button, which is disabled rather than hidden so the layout
+    // does not jump when the last block is taken up.
+    in property <[RotaItem]> rota: [];
+    in property <bool> rota-next-enabled: false;
+    /// The label of the block Start Next will take, shown on the button so the
+    /// press is informed rather than a leap.
+    in property <string> rota-next-label: "";
+    /// "3 of 5 of the plan left" — built in Rust, where the Persian digits are.
+    in property <string> rota-remaining: "";
+    /// Summed height of the rota rows, pushed from Rust.
+    ///
+    /// A Flickable's `content-height` must not be derived from its own child —
+    /// that is a binding loop — and the rows are 40 or 54 px depending on
+    /// whether they carry a decree, so the sum belongs where that is known.
+    in property <length> rota-list-height: 0px;
+    /// Unstarted blocks planned for earlier days, offered back explicitly.
+    /// Carrying work forward is the user's decision, never automatic.
+    in property <int> rota-carry-count: 0;
+    in property <string> rota-carry-label: "";
+    in-out property <string> rota-new-label: "";
+    in-out property <int> rota-new-minutes: 25;
+    in property <bool> rota-can-add: false;
+
     // ---- Callbacks to Rust ----
     callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-chronicle; callback close-chronicle; callback copy-code(string); callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback sync-connect; callback sync-disconnect; callback set-client-id(string); callback set-sync-auto(bool); callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback refresh-events; callback open-url(string); callback window-drag-start; callback set-compact-mode(bool); callback set-animations(bool); callback pick-day(string); callback shift-month(int); callback goto-today; callback add-task-on(string); callback delete-task(int); callback rename-task(int, string); callback move-task(int, int); callback step-day(int); callback set-report-period(int); callback step-report(int); callback report-today;
     // ---- Inscription callbacks ----
@@ -1626,7 +1794,21 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     callback dismiss-decree;
     /// The field's text, so Rust can decide whether Issue is enabled.
     callback decree-text-changed(string);
-
+    // ---- Rota callbacks ----
+    /// Plan a block: label, length in minutes, and the decree it opens with.
+    callback add-rota-entry(string, int, string);
+    /// Start the next planned block (marks it taken up and seeds the session).
+    callback start-rota-next;
+    /// Start one specific entry, by id.
+    callback start-rota-entry(int);
+    /// Take an entry off the rota.
+    callback remove-rota-entry(int);
+    /// The label field's text, so Rust can enable/disable Add.
+    callback rota-label-changed(string);
+    /// Re-plan one stale entry onto today, by id.
+    callback carry-rota-entry(int);
+    /// Re-plan every stale entry onto today at once.
+    callback carry-rota-entries;
     // Resize: the edge/corner grab zones report the pointer's screen position
     // and which edge is being dragged; Rust turns that into a new window size.
 
@@ -2072,6 +2254,68 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
             Rectangle { height: 16px; }
 
+            // ---- Start Next ----
+            // The whole point of the rota: one press begins the next planned
+            // block, with its length and its decree already attached. It sits
+            // directly under the transport controls because it is a way of
+            // pressing play, not a separate destination.
+            //
+            // Disabled rather than hidden when the queue is empty, so the row
+            // does not reflow — and so "there is nothing planned" reads as a
+            // state of the same control rather than as a missing one.
+            Rectangle {
+                height: 34px;
+                width: Math.min(parent.width - 60px, 320px);
+                x: (parent.width - self.width) / 2;
+                border-radius: 17px;
+                background: root.rota-next-enabled ? Palette.accent-soft : Palette.surface-2;
+                border-width: 1px;
+                border-color: root.rota-next-enabled ? Palette.accent : Palette.hairline;
+
+                ta-next := TouchArea {
+                    clicked => {
+                        if (root.rota-next-enabled) { root.start-rota-next(); }
+                    }
+                }
+                states [
+                    h when ta-next.has-hover && root.rota-next-enabled : {
+                        background: Palette.accent;
+                        in { animate background { duration: Motion.quick; } }
+                    }
+                ]
+
+                HorizontalLayout {
+                    alignment: center;
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 7px;
+
+                    Icon {
+                        kind: "chevron";
+                        size: 11px;
+                        color: root.rota-next-enabled
+                            ? (ta-next.has-hover ? Palette.on-accent : Palette.accent)
+                            : Palette.text-faint;
+                    }
+
+                    Text {
+                        // The next block's label, not a generic "Start next":
+                        // the press should say what it is about to begin.
+                        text: root.rota-next-enabled ? root.rota-next-label : Strings.rota-empty;
+                        font-size: Type.small;
+                        font-weight: 700;
+                        color: root.rota-next-enabled
+                            ? (ta-next.has-hover ? Palette.on-accent : Palette.accent)
+                            : Palette.text-faint;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                }
+            }
+
+            Rectangle { height: 16px; }
+
             // ---- the day navigator ----
             // One block that says which day you are on and lets you walk to any
             // other. The date reads as a full date with the era year and a
@@ -2116,6 +2360,191 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
 
                     DayStep {
                         forward: true; clicked => { root.step-day(1); }
+                    }
+                }
+            }
+
+            Rectangle { height: 10px; }
+
+            // ---- the day's rota ----
+            // The blocks this day is meant to hold, in the order they were
+            // planned. It sits above the task list because it is more specific
+            // than a task: a task is something that needs doing, an entry here
+            // is a decision about *this afternoon*.
+            //
+            // The card is always present, but when the day has no plan it
+            // collapses to one line — a bare "plan a block" prompt — rather than
+            // disappearing. A feature nobody can find is a feature nobody uses,
+            // and a whole card that appears and vanishes would reflow the screen
+            // under the user's pointer.
+            Rectangle {
+                height: root.rota.length == 0
+                    ? (root.rota-carry-count > 0 ? 128px : 96px)
+                    : Math.min(60px + root.rota-list-height
+                        + (root.rota-carry-count > 0 ? 40px : 0px), 300px);
+                x: 22px;
+                width: parent.width - 22px - 22px;
+                border-radius: Radius.card;
+                background: Palette.surface;
+                border-width: 1px;
+                border-color: Palette.hairline;
+                drop-shadow-blur: Elev.card-blur;
+                drop-shadow-offset-y: Elev.card-y;
+                drop-shadow-color: Elev.card-shadow;
+
+                VerticalLayout {
+                    padding: Space.pad;
+                    spacing: 0px;
+
+                    HorizontalLayout {
+                        height: 18px;
+                        Text {
+                            text: Strings.rota-title;
+                            font-size: Type.caption;
+                            font-weight: 700;
+                            letter-spacing: Strings.fa ? 0px : Type.tracking;
+                            color: Palette.text-faint;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        // "2 of 5 left": the plan's remaining size, which is
+                        // the number that decides whether to start another.
+                        Text {
+                            text: root.rota-remaining;
+                            font-size: Type.caption;
+                            color: Palette.text-faint;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    if root.rota.length == 0 : Text {
+                        height: 26px;
+                        text: Strings.rota-empty;
+                        font-size: Type.small;
+                        color: Palette.text-faint;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    if root.rota.length > 0 : Flickable {
+                        vertical-stretch: 1;
+                        content-height: root.rota-list-height;
+                        interactive: root.rota-list-height > self.height;
+
+                        VerticalLayout {
+                            width: parent.width;
+                            spacing: 0px;
+                            for r[i] in root.rota : RotaRow {
+                                item: r;
+                                last: i == root.rota.length - 1;
+                                start-entry(id) => { root.start-rota-entry(id); }
+                                remove-entry(id) => { root.remove-rota-entry(id); }
+                            }
+                        }
+                    }
+
+                    // Leftovers from earlier days, offered explicitly. Never
+                    // merged in silently: a list that refills itself is a list
+                    // that can never be finished.
+                    if root.rota-carry-count > 0 : Rectangle {
+                        height: 32px;
+                        border-radius: 8px;
+                        background: Palette.accent-soft;
+                        ta-carry := TouchArea {
+                            clicked => { root.carry-rota-entries(); }
+                        }
+                        states [
+                            h when ta-carry.has-hover : { background: Palette.accent; }
+                        ]
+                        Text {
+                            text: root.rota-carry-label;
+                            font-size: Type.caption;
+                            color: ta-carry.has-hover ? Palette.on-accent : Palette.accent;
+                            x: 8px;
+                            width: parent.width - 26px;
+                            height: parent.height;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        Icon {
+                            kind: "chevron";
+                            size: 11px;
+                            color: ta-carry.has-hover ? Palette.on-accent : Palette.accent;
+                            x: parent.width - 20px;
+                            y: (parent.height - self.height) / 2;
+                        }
+                    }
+
+                    Rectangle { height: 8px; }
+
+                    // Quick add. Length and the block's opening line are set
+                    // after the fact in the rota, not here: the point of this
+                    // row is to get the day written down fast, and a four-field
+                    // form is what stops people doing it.
+                    Rectangle {
+                        height: 32px;
+                        border-radius: 9px;
+                        background: Palette.surface-2;
+
+                        HorizontalLayout {
+                            padding-left: 9px;
+                            padding-right: 4px;
+                            spacing: 8px;
+
+                            // Two-way binding, for the same reason the task
+                            // field uses one: a one-way `text:` is broken by the
+                            // first keystroke, so clearing it from Rust never
+                            // reaches the field.
+                            LineEdit {
+                                text <=> root.rota-new-label;
+                                placeholder-text: Strings.rota-add-hint;
+                                font-size: Type.small;
+                                horizontal-stretch: 1;
+                                accepted(t) => {
+                                    root.rota-new-label = t;
+                                    root.add-rota-entry(root.rota-new-label, root.rota-new-minutes, "");
+                                }
+                                edited(t) => { root.rota-label-changed(t); }
+                            }
+
+                            // Length. A rota entry may be a block of another
+                            // size than the timer's default — that is much of
+                            // the point of planning ahead.
+                            SpinBox {
+                                value <=> root.rota-new-minutes;
+                                minimum: 1;
+                                maximum: 180;
+                                width: 74px;
+                            }
+
+                            Rectangle {
+                                width: 24px;
+                                height: 24px;
+                                border-radius: 12px;
+                                y: (parent.height - self.height) / 2;
+                                background: root.rota-can-add ? Palette.accent : Palette.surface-3;
+                                ta-rota-add := TouchArea {
+                                    clicked => {
+                                        if (root.rota-can-add) {
+                                            root.add-rota-entry(root.rota-new-label, root.rota-new-minutes, "");
+                                        }
+                                    }
+                                }
+                                states [
+                                    h when ta-rota-add.has-hover && root.rota-can-add : {
+                                        background: Palette.text;
+                                        in { animate background { duration: Motion.quick; } }
+                                    }
+                                ]
+                                Icon {
+                                    kind: "plus";
+                                    size: 12px;
+                                    color: root.rota-can-add ? Palette.on-accent : Palette.text-faint;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                }
+                            }
+                        }
                     }
                 }
             }

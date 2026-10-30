@@ -25,6 +25,7 @@
 //! is what makes it safe to run on every sync tick without drift.
 
 use crate::journal::{Decree, Inscription};
+use crate::state::rota::RotaEntry;
 use crate::state::store::{Data, SessionRecord, Task};
 use std::collections::BTreeMap;
 
@@ -48,11 +49,23 @@ pub fn merge(local: &Data, remote: &Data) -> Data {
         next_task_id: local.next_task_id.max(remote.next_task_id),
         inscriptions: merge_inscriptions(&local.inscriptions, &remote.inscriptions),
         decrees: merge_decrees(&local.decrees, &remote.decrees),
+        rota: merge_rota(&local.rota, &remote.rota),
+        next_rota_id: local.next_rota_id.max(remote.next_rota_id),
     };
-    // Keep the id counter ahead of every id actually in use, so a merge can
-    // never hand out an id that already belongs to a task.
-    let highest = out.tasks.iter().map(|t| t.id).max().unwrap_or(0);
-    out.next_task_id = out.next_task_id.max(highest + 1);
+    // Keep the id counters ahead of every id actually in use, so a merge can
+    // never hand out an id that already belongs to a row. This matters more for
+    // the rota than for tasks: a stale counter would make the next planned block
+    // collide with one already on the list, and `mark_opened` would then open
+    // the wrong entry.
+    let highest_task = out.tasks.iter().map(|t| t.id).max().unwrap_or(0);
+    out.next_task_id = out.next_task_id.max(highest_task + 1);
+    // The rota counter is "the last id handed out", not "the next id", so the
+    // floor is the highest id itself. Using `highest + 1` here made an empty
+    // rota's counter climb from 0 to 1 on every merge, which is a change to a
+    // store that held nothing — enough to make the sync engine rewrite a device
+    // whose data was already the merged result, every tick, forever.
+    let highest_rota = out.rota.iter().map(|e| e.id).max().unwrap_or(0);
+    out.next_rota_id = out.next_rota_id.max(highest_rota);
     out
 }
 
@@ -175,6 +188,58 @@ fn merge_decrees(a: &[Decree], b: &[Decree]) -> Vec<Decree> {
     out
 }
 
+/// Union of both rotas, keyed by id — a set, not a newest-wins merge.
+///
+/// A rota entry is mutable in one field only (`opened_at`, which only ever goes
+/// from 0 to a timestamp), so the rule is the same as tasks': the copy that has
+/// been *used* is the one to keep, because a plan started on one device is
+/// started everywhere. Ties fall back to the planned day then the id, so two
+/// devices holding the same set converge to the same order instead of
+/// exchanging a delta on every sync.
+fn merge_rota(a: &[RotaEntry], b: &[RotaEntry]) -> Vec<RotaEntry> {
+    let mut map: BTreeMap<u64, RotaEntry> = BTreeMap::new();
+    for e in a.iter().chain(b.iter()) {
+        match map.get(&e.id) {
+            None => {
+                map.insert(e.id, e.clone());
+            }
+            Some(existing) => {
+                if newer_rota(e, existing) {
+                    map.insert(e.id, e.clone());
+                }
+            }
+        }
+    }
+    let mut out: Vec<RotaEntry> = map.into_values().collect();
+    out.sort_by(|x, y| {
+        x.day
+            .cmp(&y.day)
+            .then_with(|| x.created_at.cmp(&y.created_at))
+            .then_with(|| x.id.cmp(&y.id))
+    });
+    out
+}
+
+/// Which of two copies of one rota entry to keep.
+///
+/// Precedence, in order:
+///
+/// 1. a tombstone wins — a removal that loses to a stale copy would come back;
+/// 2. an opened entry beats a pending one — the block was actually started
+///    somewhere, and putting it back in the queue would ask the user to start
+///    work they have already begun;
+/// 3. otherwise the later `opened_at`, then the label, so both devices land on
+///    the same row rather than each keeping its own.
+fn newer_rota(candidate: &RotaEntry, existing: &RotaEntry) -> bool {
+    if candidate.deleted != existing.deleted {
+        return candidate.deleted;
+    }
+    if candidate.opened_at != existing.opened_at {
+        return candidate.opened_at > existing.opened_at;
+    }
+    candidate.label > existing.label
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,6 +336,8 @@ mod tests {
             sessions: vec![sess(1, 25)],
             tasks: vec![task(1, "x", 5)],
             next_task_id: 2,
+            rota: vec![],
+            next_rota_id: 0,
             inscriptions: vec![],
             decrees: vec![],
         };
@@ -370,5 +437,114 @@ mod tests {
         assert_eq!(once.decrees.len(), 3);
         assert_eq!(twice.decrees, once.decrees, "merging again changes nothing");
         assert_eq!(again.decrees, once.decrees, "and is idempotent on itself");
+    }
+
+    // ── rota ─────────────────────────────────────────────────────────────
+
+    fn planned(id: u64, day: &str, label: &str, created_at: i64) -> RotaEntry {
+        crate::state::rota::create(id, day, label, None, "", 25, created_at, &[]).unwrap()
+    }
+
+    #[test]
+    fn rotas_from_both_devices_both_survive() {
+        let a = Data {
+            rota: vec![planned(1, "2026-10-31", "from desktop", 10)],
+            ..Default::default()
+        };
+        let b = Data {
+            rota: vec![planned(2, "2026-10-31", "from laptop", 20)],
+            ..Default::default()
+        };
+        let out = merge(&a, &b);
+        let labels: Vec<&str> = out.rota.iter().map(|e| e.label.as_str()).collect();
+        assert_eq!(labels, vec!["from desktop", "from laptop"], "planned order");
+    }
+
+    #[test]
+    fn a_block_started_on_one_device_is_not_pending_on_the_other() {
+        // The one mutable field on a rota entry. Losing this would put work the
+        // user has already begun back at the top of the queue.
+        let pending = planned(1, "2026-10-31", "write", 10);
+        let mut opened = pending.clone();
+        opened.opened_at = 500;
+
+        let a = Data {
+            rota: vec![opened],
+            ..Default::default()
+        };
+        let b = Data {
+            rota: vec![pending],
+            ..Default::default()
+        };
+        assert_eq!(
+            merge(&a, &b).rota[0].opened_at,
+            500,
+            "the started copy wins: a then b"
+        );
+        assert_eq!(
+            merge(&b, &a).rota[0].opened_at,
+            500,
+            "and in the other direction"
+        );
+    }
+
+    #[test]
+    fn a_removed_rota_entry_is_not_resurrected() {
+        let live = planned(1, "2026-10-31", "dropped", 10);
+        let mut dead = live.clone();
+        dead.deleted = true;
+        let a = Data {
+            rota: vec![dead],
+            ..Default::default()
+        };
+        let b = Data {
+            rota: vec![live],
+            ..Default::default()
+        };
+        assert!(merge(&a, &b).rota[0].deleted, "tombstone wins: a then b");
+        assert!(merge(&b, &a).rota[0].deleted, "tombstone wins: b then a");
+    }
+
+    #[test]
+    fn the_rota_id_counter_stays_ahead_of_every_planned_block() {
+        let a = Data {
+            rota: vec![planned(9, "2026-10-31", "nine", 10)],
+            next_rota_id: 2, // stale, as an older file would carry
+            ..Default::default()
+        };
+        assert!(
+            merge(&a, &Data::default()).next_rota_id >= 9,
+            "a stale counter must not make a new block collide with a planned one"
+        );
+    }
+
+    /// Merging must not change a store that holds nothing.
+    ///
+    /// The counter is the trap here: bumping an empty rota's counter on every
+    /// merge rewrites `data.json` on every tick, so the sync engine reports a
+    /// local change forever and pushes an unchanged file to Drive twice a second.
+    #[test]
+    fn merging_two_empty_rotas_is_a_no_op() {
+        let empty = Data::default();
+        let once = merge(&empty, &empty);
+        assert_eq!(once.next_rota_id, empty.next_rota_id);
+        let twice = merge(&once, &once);
+        assert_eq!(twice.next_rota_id, once.next_rota_id);
+    }
+
+    #[test]
+    fn merging_rotas_repeatedly_does_not_drift() {
+        let a = Data {
+            rota: vec![planned(1, "2026-10-31", "one", 10)],
+            ..Default::default()
+        };
+        let b = Data {
+            rota: vec![planned(2, "2026-10-31", "two", 20)],
+            ..Default::default()
+        };
+        let once = merge(&a, &b);
+        let twice = merge(&once, &b);
+        assert_eq!(once.rota.len(), 2);
+        assert_eq!(twice.rota, once.rota, "merging again changes nothing");
     }
 }

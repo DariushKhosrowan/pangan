@@ -419,6 +419,38 @@ impl Shared {
         let s = self.state.lock().unwrap();
         s.phase == Phase::Work && !s.running && s.remaining == s.total
     }
+
+    /// Begin a focus block of a given length, from rest.
+    ///
+    /// This exists for the rota. A planned block carries its own length — the
+    /// whole point of planning ahead is deciding that *this* block is fifty
+    /// minutes and the next is twenty-five — but the settings hold one focus
+    /// duration, and rewriting it for every planned block would be the app
+    /// quietly editing a preference the user set on purpose.
+    ///
+    /// So the length is applied to this block only. `advance` reads its totals
+    /// from the config as it always has, which means the following block
+    /// returns to the configured duration. The settings are never touched.
+    ///
+    /// Returns false, changing nothing, when the clock is not at rest. Swapping
+    /// the length out from under a running countdown — or a break the user is
+    /// part-way through — is not something a button should be able to do.
+    pub fn start_work_block(&self, minutes: u64) -> bool {
+        let mut s = self.state.lock().unwrap();
+        if s.running || s.phase != Phase::Work || s.remaining != s.total {
+            return false;
+        }
+        let total = Duration::from_secs(minutes.clamp(1, 180) * 60);
+        s.total = total;
+        s.remaining = total;
+        s.running = true;
+        s.finish_at = Some(Instant::now() + total);
+        self.pending_events
+            .lock()
+            .unwrap()
+            .push(crate::state::settings::EVENT_FOCUS_START.into());
+        true
+    }
 }
 
 #[cfg(test)]
