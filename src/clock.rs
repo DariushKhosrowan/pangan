@@ -114,7 +114,10 @@ pub struct State {
 pub struct Shared {
     state: Mutex<State>,
     pub quit: std::sync::atomic::AtomicBool,
-    pub cfg: Config,
+    /// The timer's durations. Behind a lock because a cloud sync can change
+    /// them while the app is running: settings that arrive from another device
+    /// have to take effect, not wait for a restart.
+    cfg: Mutex<Config>,
     /// The UI language the snapshot's labels are produced in. Separate from
     /// `cfg` because it changes at runtime when the user switches language,
     /// while the durations in `cfg` are only re-read when settings close.
@@ -143,7 +146,7 @@ impl Shared {
                 finish_at: None,
             }),
             quit: std::sync::atomic::AtomicBool::new(false),
-            cfg,
+            cfg: Mutex::new(cfg),
             pending_sessions: Mutex::new(Vec::new()),
             pending_breaks: Mutex::new(0),
             pending_events: Mutex::new(Vec::new()),
@@ -166,11 +169,26 @@ impl Shared {
     }
 
     fn phase_total(&self, phase: Phase) -> Duration {
+        let cfg = self.cfg.lock().unwrap();
         match phase {
-            Phase::Work => Duration::from_secs(self.cfg.work_minutes * 60),
-            Phase::ShortBreak => Duration::from_secs(self.cfg.short_break_minutes * 60),
-            Phase::LongBreak => Duration::from_secs(self.cfg.long_break_minutes * 60),
+            Phase::Work => Duration::from_secs(cfg.work_minutes * 60),
+            Phase::ShortBreak => Duration::from_secs(cfg.short_break_minutes * 60),
+            Phase::LongBreak => Duration::from_secs(cfg.long_break_minutes * 60),
         }
+    }
+
+    /// Replace the durations, e.g. after a cloud sync delivered new ones.
+    ///
+    /// A running countdown is left alone: the user started a 25-minute block
+    /// and it should finish as one. The new duration applies from the next
+    /// phase, which is the only reading that is not surprising.
+    pub fn set_config(&self, cfg: Config) {
+        *self.cfg.lock().unwrap() = cfg;
+    }
+
+    /// The current durations, for callers that need to read them back.
+    pub fn config(&self) -> Config {
+        self.cfg.lock().unwrap().clone()
     }
 
     /// Advance to next phase; returns a notification string when a session
@@ -180,7 +198,9 @@ impl Shared {
 
         let notify = if increment_work {
             s.work_done += 1;
-            let is_long = s.work_done.is_multiple_of(self.cfg.long_break_interval);
+            let is_long = s
+                .work_done
+                .is_multiple_of(self.cfg.lock().unwrap().long_break_interval);
             s.phase = if is_long {
                 Phase::LongBreak
             } else {
@@ -233,7 +253,7 @@ impl Shared {
         };
         s.total = self.phase_total(s.phase);
         s.remaining = s.total;
-        s.running = self.cfg.auto_start_next;
+        s.running = self.cfg.lock().unwrap().auto_start_next;
         // When auto-start is off, land paused ready for the user to begin.
         s.finish_at = if s.running {
             Some(Instant::now() + s.remaining)
@@ -256,7 +276,7 @@ impl Shared {
                 if s.phase == Phase::Work {
                     let rec = SessionRecord {
                         at: chrono::Utc::now().timestamp(),
-                        minutes: self.cfg.work_minutes,
+                        minutes: self.cfg.lock().unwrap().work_minutes,
                     };
                     self.pending_sessions.lock().unwrap().push(rec);
                 } else {

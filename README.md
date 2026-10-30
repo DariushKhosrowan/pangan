@@ -33,8 +33,9 @@ no audio files, everything generated mathematically.
 - 🖥️ **System tray** — live countdown, Start/Pause, Skip, Reset, Quit.
 - 🔔 **Desktop notifications** — when a focus/break session ends.
 - 🌙 **Screen-lock inhibit** — keep the desktop awake during focus sessions.
-- ☁️ **Cloud sync & backup** — push performance snapshots to a Google Sheet and
-  **back up / restore** your full settings + history across devices (see `sync.toml.example`).
+- ☁️ **Google Drive sync** — sign in with Google once per device and your focus
+  history, tasks **and settings** stay the same everywhere. No account with us,
+  no server: the data lives in your own Drive (see `docs/google-sync.md`).
 
 ## Build
 
@@ -66,26 +67,24 @@ All preferences live in `~/.config/pangan/config.toml` (Linux),
 the in-app Settings screen. Native durations are 25/5/15 minutes with a long
 break every 4 focus sessions.
 
-## Cloud sync (Google Sheets)
+## Google sync
 
-1. Copy `sync.toml.example` to `~/.config/pangan/sync.toml`.
-2. Fill in `spreadsheet_id`, `sheet`, and a `token` obtained with:
-   ```bash
-   gcloud auth print-access-token --scopes=https://www.googleapis.com/auth/spreadsheets
-   ```
-3. Click the **☁ Sync** button in the app. Each sync appends one row: timestamp,
-   period, sessions, focus minutes, avg session, consistency %, streak, deep-work
-   score, and open-task count. Sync also runs automatically every 10 minutes
-   while the token is configured.
+Settings → **Cloud** → **Connect Google**. The app shows a short code; open
+<https://www.google.com/device>, type it, approve. Do the same on your other
+machine with the same account and everything follows.
 
-**Two-way backup / restore.** The Settings → Cloud section also offers:
+What travels: focus history, tasks, and your settings (durations, theme, era,
+language, sounds). What stays per-machine: hotkeys, automation commands, compact
+mode, screen-lock inhibit. The full list and the reasoning are in
+[`docs/google-sync.md`](docs/google-sync.md).
 
-- **Backup** — pushes a full snapshot of your settings + session history + tasks
-  to a dedicated `PanganBackup` sheet tab, so you can move to a new machine (or
-  recover after a wipe) without losing anything.
-- **Restore** — pulls the most recent backup and applies it locally.
+The data lives in a hidden `appDataFolder` inside your own Drive. There is no
+Pangan server and no account to create. Conflicts are resolved per record — and
+per field for settings — so two devices editing different things both keep their
+change, with no dialog to answer.
 
-Both need the same `sync.toml` token with spreadsheet access.
+**Backup / Restore** in the same section still pushes and pulls a full snapshot
+on demand, for moving to a new machine or recovering after a wipe.
 
 ## Data
 

@@ -332,10 +332,32 @@ pub fn fetch_email(token: &str) -> Option<String> {
 // Drive appDataFolder
 // ---------------------------------------------------------------------------
 
+/// What Drive knows about the sync file besides its contents.
+///
+/// `etag` is the concurrency token. Two devices that both read the file and
+/// both write it back would otherwise let the slower one silently erase the
+/// faster one's work — the write is unconditional, so the last request to
+/// arrive simply wins. Sending the etag back with `If-Match` turns that into a
+/// 412 the caller can retry, which is the difference between "sync" and "sync
+/// except when two machines are awake".
+#[derive(Clone, Debug, Default)]
+pub struct RemoteFile {
+    pub id: String,
+    /// Drive's monotonic version counter, for cheap change detection.
+    pub version: i64,
+    /// The concurrency token used with `If-Match`.
+    pub etag: String,
+}
+
 /// Find the sync file's id inside `appDataFolder`, if it exists.
 fn find_file(token: &str, name: &str) -> Result<Option<String>, String> {
+    Ok(find_file_meta(token, name)?.map(|f| f.id))
+}
+
+/// Find the sync file and its concurrency metadata.
+fn find_file_meta(token: &str, name: &str) -> Result<Option<RemoteFile>, String> {
     let url = format!(
-        "{}/drive/v3/files?spaces=appDataFolder&fields=files(id,name)&q=name%20%3D%20%27{}%27",
+        "{}/drive/v3/files?spaces=appDataFolder&fields=files(id,name,version,etag)&q=name%20%3D%20%27{}%27",
         drive_base(),
         name
     );
@@ -349,11 +371,13 @@ fn find_file(token: &str, name: &str) -> Result<Option<String>, String> {
     };
     let v: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| format!("drive list json: {e}"))?;
-    Ok(v["files"]
-        .as_array()
-        .and_then(|a| a.first())
-        .and_then(|f| f["id"].as_str())
-        .map(|s| s.to_string()))
+    Ok(v["files"].as_array().and_then(|a| a.first()).map(|f| {
+        RemoteFile {
+            id: f["id"].as_str().unwrap_or("").to_string(),
+            version: f["version"].as_i64().unwrap_or(0),
+            etag: f["etag"].as_str().unwrap_or("").to_string(),
+        }
+    }))
 }
 
 /// Download the sync file. `Ok(None)` means no device has uploaded yet.
@@ -363,16 +387,28 @@ pub fn download(token: &str) -> Result<Option<String>, String> {
 
 /// Download any file from `appDataFolder` by name.
 pub fn download_named(token: &str, name: &str) -> Result<Option<String>, String> {
-    let Some(id) = find_file(token, name)? else {
+    Ok(download_meta(token, name)?.map(|(text, _)| text))
+}
+
+/// Download a file together with the metadata needed to write it back safely.
+///
+/// Returns `(contents, metadata)`. The metadata is what a later
+/// `upload_conditional` needs, so a caller that wants a safe read-modify-write
+/// must use this and not `download_named`.
+pub fn download_meta(token: &str, name: &str) -> Result<Option<(String, RemoteFile)>, String> {
+    let Some(meta) = find_file_meta(token, name)? else {
         return Ok(None);
     };
-    let url = format!("{}/drive/v3/files/{id}?alt=media", drive_base());
+    let url = format!("{}/drive/v3/files/{}?alt=media", drive_base(), meta.id);
     let resp = agent()
         .get(&url)
         .header("Authorization", &format!("Bearer {token}"))
         .call();
     match resp {
-        Ok(r) => Ok(Some(r.into_body().read_to_string().unwrap_or_default())),
+        Ok(r) => Ok(Some((
+            r.into_body().read_to_string().unwrap_or_default(),
+            meta,
+        ))),
         Err(e) => Err(format!("drive download failed: {e}")),
     }
 }
@@ -384,22 +420,59 @@ pub fn upload(token: &str, body: &str) -> Result<(), String> {
 
 /// Upload any file to `appDataFolder` by name, creating or updating it.
 pub fn upload_named(token: &str, name: &str, body: &str) -> Result<(), String> {
-    match find_file(token, name)? {
-        Some(id) => {
+    upload_conditional(token, name, body, None)
+}
+
+/// Upload, refusing to overwrite a file that changed since `expected`.
+///
+/// `expected` is the metadata from `download_meta`. When it is `Some` and the
+/// remote has moved on, Drive answers 412 and this returns
+/// [`CONFLICT`], which the caller resolves by re-reading and re-merging. When
+/// it is `None` the write is unconditional, which is only correct for a file
+/// this device is creating or for a caller that has already established it is
+/// the only writer.
+pub const CONFLICT: &str = "pangan-sync-conflict";
+
+pub fn upload_conditional(
+    token: &str,
+    name: &str,
+    body: &str,
+    expected: Option<&RemoteFile>,
+) -> Result<(), String> {
+    match find_file_meta(token, name)? {
+        Some(meta) => {
             // Content-only update: PATCH the media, leave metadata alone.
             let url = format!(
-                "{}/upload/drive/v3/files/{id}?uploadType=media",
-                drive_base()
+                "{}/upload/drive/v3/files/{}?uploadType=media",
+                drive_base(),
+                meta.id
             );
-            let resp = agent()
+            let mut req = agent()
                 .patch(&url)
                 .header("Authorization", &format!("Bearer {token}"))
-                .header("Content-Type", "application/json")
-                .send(body);
+                .header("Content-Type", "application/json");
+            // Only guard when the caller actually read the file. A caller that
+            // did not read it has nothing to be stale against.
+            if let Some(exp) = expected {
+                if !exp.etag.is_empty() {
+                    req = req.header("If-Match", &exp.etag);
+                }
+            }
+            let resp = req.send(body);
             match resp {
                 Ok(r) if r.status() == 200 => Ok(()),
+                Ok(r) if r.status() == 412 => Err(CONFLICT.to_string()),
                 Ok(r) => Err(format!("drive update HTTP {}", r.status())),
-                Err(e) => Err(format!("drive update failed: {e}")),
+                Err(e) => {
+                    // ureq surfaces a non-2xx status as an error; a 412 must
+                    // still be recognised as a conflict rather than a failure.
+                    let msg = e.to_string();
+                    if msg.contains("412") {
+                        Err(CONFLICT.to_string())
+                    } else {
+                        Err(format!("drive update failed: {msg}"))
+                    }
+                }
             }
         }
         None => {
@@ -560,11 +633,25 @@ pub(crate) mod drive_roundtrip {
         fake_drive()
     }
 
+    /// The fake server's view of the file: contents plus a version counter that
+    /// stands in for Drive's etag.
+    ///
+    /// Without a version there is no way to test the conditional write, and the
+    /// conditional write is the whole defence against two devices clobbering
+    /// each other. A fake that always says "yes" would pass while the real
+    /// thing lost data.
+    struct FakeFile {
+        body: String,
+        version: u64,
+    }
+
     fn fake_drive() -> (String, Arc<Mutex<Option<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let stored: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let store = Arc::clone(&stored);
+        let file: Arc<Mutex<Option<FakeFile>>> = Arc::new(Mutex::new(None));
+        let file_state = Arc::clone(&file);
 
         std::thread::spawn(move || {
             for stream in listener.incoming() {
@@ -576,6 +663,7 @@ pub(crate) mod drive_roundtrip {
                     continue;
                 }
                 let mut content_length = 0usize;
+                let mut if_match: Option<String> = None;
                 loop {
                     let mut line = String::new();
                     if reader.read_line(&mut line).unwrap_or(0) == 0 {
@@ -588,6 +676,11 @@ pub(crate) mod drive_roundtrip {
                     if let Some(v) = lower.strip_prefix("content-length:") {
                         content_length = v.trim().parse().unwrap_or(0);
                     }
+                    if let Some(v) = lower.strip_prefix("if-match:") {
+                        // Keep the original case: the value is compared as-is.
+                        if_match = line.split_once(':').map(|(_, v)| v.trim().to_string());
+                        let _ = v;
+                    }
                 }
                 let mut body = vec![0u8; content_length];
                 if content_length > 0 {
@@ -596,6 +689,7 @@ pub(crate) mod drive_roundtrip {
                 let body = String::from_utf8_lossy(&body).to_string();
 
                 let path = request_line.split_whitespace().nth(1).unwrap_or("/");
+                let method = request_line.split_whitespace().next().unwrap_or("GET");
 
                 // Order matters: "/upload/drive/v3/files?..." also contains
                 // "/drive/v3/files?", so the upload cases must come first or a
@@ -612,26 +706,66 @@ pub(crate) mod drive_roundtrip {
                         .rsplit_once("\r\n--")
                         .map(|(c, _)| c.to_string())
                         .unwrap_or(content);
-                    *store.lock().unwrap() = Some(content);
+                    *store.lock().unwrap() = Some(content.clone());
+                    *file_state.lock().unwrap() = Some(FakeFile {
+                        body: content,
+                        version: 1,
+                    });
                     ("200 OK", r#"{"id":"file-1"}"#.to_string())
                 } else if path.contains("uploadType=media") {
-                    *store.lock().unwrap() = Some(body);
-                    ("200 OK", r#"{"id":"file-1"}"#.to_string())
+                    // A conditional write must be refused when the caller's
+                    // etag is stale, exactly as Drive refuses it.
+                    let mut guard = file_state.lock().unwrap();
+                    if let Some(exp) = &if_match {
+                        let current = guard
+                            .as_ref()
+                            .map(|f| format!("\"v{}\"", f.version))
+                            .unwrap_or_default();
+                        if *exp != current {
+                            ("412 Precondition Failed", String::new())
+                        } else {
+                            let next = guard.as_ref().map(|f| f.version + 1).unwrap_or(1);
+                            *guard = Some(FakeFile {
+                                body: body.clone(),
+                                version: next,
+                            });
+                            *store.lock().unwrap() = Some(body);
+                            ("200 OK", r#"{"id":"file-1"}"#.to_string())
+                        }
+                    } else {
+                        let next = guard.as_ref().map(|f| f.version + 1).unwrap_or(1);
+                        *guard = Some(FakeFile {
+                            body: body.clone(),
+                            version: next,
+                        });
+                        *store.lock().unwrap() = Some(body);
+                        ("200 OK", r#"{"id":"file-1"}"#.to_string())
+                    }
                 } else if path.contains("alt=media") {
                     match store.lock().unwrap().clone() {
                         Some(data) => ("200 OK", data),
                         None => ("404 Not Found", String::new()),
                     }
                 } else if path.contains("/drive/v3/files?") {
-                    if store.lock().unwrap().is_some() {
-                        (
-                            "200 OK",
-                            r#"{"files":[{"id":"file-1","name":"pangan-sync.json"}]}"#.to_string(),
-                        )
-                    } else {
-                        ("200 OK", r#"{"files":[]}"#.to_string())
-                    }
+                    let guard = file_state.lock().unwrap();
+                    // Built with serde_json rather than a format string: the
+                    // etag has to be a JSON string containing quotes, and
+                    // hand-escaping that is exactly the kind of thing that
+                    // looks right and produces invalid JSON.
+                    let payload = match guard.as_ref() {
+                        Some(f) => serde_json::json!({
+                            "files": [{
+                                "id": "file-1",
+                                "name": "pangan-sync.json",
+                                "version": f.version.to_string(),
+                                "etag": format!("\"v{}\"", f.version),
+                            }]
+                        }),
+                        None => serde_json::json!({ "files": [] }),
+                    };
+                    ("200 OK", payload.to_string())
                 } else {
+                    let _ = method;
                     ("404 Not Found", String::new())
                 };
 

@@ -1204,6 +1204,11 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in property <string> sync-device-url: "https://www.google.com/device";
     in property <bool> sync-waiting: false;
     in property <bool> sync-available: true;
+    // What this device is, and what the last sync actually moved. The status
+    // line alone says "synced"; these say *what* synced and *from where*, which
+    // is what a user needs when a setting changed on its own.
+    in property <string> sync-device-name: "";
+    in property <string> sync-detail: "";
     in-out property <string> sync-client-id: ""; in-out property <bool> code-copied: false;
     // The chronicle rows, built in Rust so the facts live in one place and
     // follow the UI language.
@@ -3081,6 +3086,28 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 }
                             }
 
+                            // Which machine you are looking at. With two devices
+                            // on one account this is the first thing a user needs
+                            // to know when something looks out of step.
+                            HorizontalLayout {
+                                spacing: 6px;
+                                visible: root.sync-device-name != "";
+                                Text {
+                                    text: Strings.sync-this-device;
+                                    font-size: Type.caption;
+                                    color: Palette.text-faint;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: root.sync-device-name;
+                                    font-size: Type.caption;
+                                    color: Palette.text-dim;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
+                                }
+                            }
+
                             Text {
                                 text: Strings.sync-blurb;
                                 font-size: Type.caption;
@@ -3144,6 +3171,27 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             // is required of them.
                             Text {
                                 text: Strings.sync-signed-in-hint; font-size: Type.caption; color: Palette.text-faint; wrap: word-wrap; line-height-factor: 1.55; visible: root.sync-signed-in; }
+
+                            // Say plainly what travels and what does not. A user
+                            // who expects their hotkeys to follow them and finds
+                            // they did not has been misled by silence.
+                            VerticalLayout {
+                                spacing: 3px;
+                                visible: root.sync-signed-in;
+                                Text {
+                                    text: Strings.sync-settings-note-title;
+                                    font-size: Type.caption;
+                                    font-weight: 600;
+                                    color: Palette.text-dim;
+                                }
+                                Text {
+                                    text: Strings.sync-settings-note;
+                                    font-size: Type.caption;
+                                    color: Palette.text-faint;
+                                    wrap: word-wrap;
+                                    line-height-factor: 1.55;
+                                }
+                            }
 
                             // Only shown when the build has no registered
                             // client. Google issues a client id per project, so

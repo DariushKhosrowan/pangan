@@ -25,6 +25,7 @@ mod sound;
 mod stats;
 mod store;
 mod sync;
+mod syncfile;
 
 use clock::Shared;
 use settings::Settings;
@@ -67,10 +68,19 @@ struct AppState {
     cloud: Arc<cloudsync::Engine>,
     /// Google credentials, refreshed in place when they age out.
     tokens: Arc<Mutex<gdrive::Tokens>>,
+    /// This machine's sync identity and its remembered settings stamps.
+    ///
+    /// The stamps have to survive a restart: rebuilt from scratch on every
+    /// launch, every launch would look like "the user just changed everything"
+    /// and this device would clobber the other one's edits on the first sync.
+    device: Arc<Mutex<syncfile::DeviceState>>,
+    /// The timer core. Held here so a sync that delivers new durations can
+    /// apply them to the running clock, not just to the settings screen.
+    shared: Arc<Shared>,
 }
 
 impl AppState {
-    fn load() -> Self {
+    fn load(shared: Arc<Shared>) -> Self {
         let store = Store::load();
         let settings = Settings::load();
         let sound_theme = settings.sound_theme.clone();
@@ -79,6 +89,7 @@ impl AppState {
         } else {
             "همگام‌سازی ابری آماده است".to_string()
         };
+        let device = syncfile::DeviceState::load(&settings);
         Self {
             store: Mutex::new(store),
             settings: Mutex::new(settings),
@@ -96,6 +107,8 @@ impl AppState {
             shown_month: Mutex::new((0, 0)),
             cloud: Arc::new(cloudsync::Engine::new()),
             tokens: Arc::new(Mutex::new(sync::load_tokens().unwrap_or_default())),
+            device: Arc::new(Mutex::new(device)),
+            shared,
         }
     }
 
@@ -192,6 +205,7 @@ fn flush_on_quit(app: &Arc<AppState>) {
     }
 
     let local = app.store.lock().unwrap().data.clone();
+    let settings_now = app.settings.lock().unwrap().clone();
     let mut t = app.tokens.lock().unwrap().clone();
 
     // Run the cycle here rather than on a spawned thread: `store` is a plain
@@ -200,14 +214,27 @@ fn flush_on_quit(app: &Arc<AppState>) {
     // the edit. The HTTP layer has its own timeouts, so this cannot hang
     // indefinitely.
     let result = {
-        let mut merged_out: Option<store::Data> = None;
-        let out = cloudsync::sync_once(&mut t, &local, &mut |merged: &store::Data| {
-            merged_out = Some(merged.clone());
-        });
-        if let Some(merged) = merged_out {
+        let mut merged_out: Option<(store::Data, Settings)> = None;
+        let mut dev = app.device.lock().unwrap();
+        let out = cloudsync::sync_once(
+            &mut t,
+            &cloudsync::Local {
+                data: local,
+                settings: settings_now,
+            },
+            &mut dev,
+            &mut |merged: &store::Data, merged_settings: &Settings| {
+                merged_out = Some((merged.clone(), merged_settings.clone()));
+            },
+        );
+        if let Some((merged, merged_settings)) = merged_out {
             let mut st = app.store.lock().unwrap();
             st.data = merged;
             st.save();
+            drop(st);
+            let mut s = app.settings.lock().unwrap();
+            *s = merged_settings;
+            s.save();
         }
         out
     };
@@ -818,12 +845,16 @@ fn do_sync(win: &slint::Weak<PanganWindow>, app: &Arc<AppState>) {
     }
 
     // Snapshot the data now; the merge happens against this copy.
-    let local = app.store.lock().unwrap().data.clone();
+    let local = cloudsync::Local {
+        data: app.store.lock().unwrap().data.clone(),
+        settings: app.settings.lock().unwrap().clone(),
+    };
 
     let weak = win.clone();
     let app2 = Arc::clone(app);
     let tokens_arc = Arc::clone(&app.tokens);
     let engine = Arc::clone(&app.cloud);
+    let device_arc = Arc::clone(&app.device);
 
     {
         let mut st = engine.state.lock().unwrap();
@@ -836,11 +867,21 @@ fn do_sync(win: &slint::Weak<PanganWindow>, app: &Arc<AppState>) {
     std::thread::spawn(move || {
         let result = {
             let mut t = tokens_arc.lock().unwrap();
-            cloudsync::sync_once(&mut t, &local, &mut |merged: &store::Data| {
-                let mut st = app2.store.lock().unwrap();
-                st.data = merged.clone();
-                st.save();
-            })
+            let mut dev = device_arc.lock().unwrap();
+            cloudsync::sync_once(
+                &mut t,
+                &local,
+                &mut dev,
+                &mut |merged: &store::Data, merged_settings: &Settings| {
+                    let mut st = app2.store.lock().unwrap();
+                    st.data = merged.clone();
+                    st.save();
+                    drop(st);
+                    let mut s = app2.settings.lock().unwrap();
+                    *s = merged_settings.clone();
+                    s.save();
+                },
+            )
         };
         // Persist refreshed credentials so the next launch does not sign in
         // again, and so a rotated refresh token is not lost.
@@ -850,21 +891,47 @@ fn do_sync(win: &slint::Weak<PanganWindow>, app: &Arc<AppState>) {
                 let _ = sync::save_tokens(&t);
             }
         }
+        // Persist the device stamps: without them the next launch would treat
+        // every setting as freshly edited and overwrite the other device.
+        {
+            let dev = device_arc.lock().unwrap();
+            dev.save();
+        }
 
         let status = match &result {
             Ok(out) => {
                 let stamp = chrono::Local::now().format("%H:%M").to_string();
+                // Say what actually moved. "Synced" for every outcome hides
+                // the interesting case — that settings arrived from another
+                // machine — and the user is left wondering why the theme
+                // changed on its own.
                 if out.quiet() {
                     if en {
                         format!("Synced {stamp}")
                     } else {
                         format!("همگام شد {stamp}")
                     }
-                } else if out.pulled {
-                    if en {
-                        format!("Updated from cloud {stamp}")
+                } else if out.settings_pulled && !out.data_pulled {
+                    let from = if out.remote_device.is_empty() {
+                        String::new()
                     } else {
-                        format!("از ابر به‌روز شد {stamp}")
+                        format!(" ({})", out.remote_device)
+                    };
+                    if en {
+                        format!("Settings updated{from} {stamp}")
+                    } else {
+                        format!("تنظیمات به‌روز شد{from} {stamp}")
+                    }
+                } else if out.pulled {
+                    let from = if out.remote_device.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({})", out.remote_device)
+                    };
+                    if en {
+                        format!("Updated from cloud{from} {stamp}")
+                    } else {
+                        format!("از ابر به‌روز شد{from} {stamp}")
                     }
                 } else {
                     if en {
@@ -921,9 +988,24 @@ fn do_sync(win: &slint::Weak<PanganWindow>, app: &Arc<AppState>) {
 
         *app2.last_sync.lock().unwrap() = status.clone();
 
+        // Settings that arrived from the cloud have to reach the window, or the
+        // user sees the old theme and the old durations until the next launch.
+        // This is the half of sync that is invisible when it works and obvious
+        // when it does not.
+        let settings_arrived = matches!(&result, Ok(out) if out.settings_pulled);
+
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(w) = weak.upgrade() {
                 w.set_sync_status(SharedString::from(status));
+                if settings_arrived {
+                    push_settings_to_ui(&w, &app2);
+                    // New durations have to reach the timer, not just the
+                    // settings screen. A running countdown keeps its own total
+                    // (the user started a 25-minute block and it should finish
+                    // as one); the new value applies from the next phase.
+                    let cfg = clock::Config::from(&*app2.settings.lock().unwrap());
+                    app2.shared.set_config(cfg);
+                }
                 if signed_out {
                     // Drop the UI back to the signed-out state so the Connect
                     // button returns. The account is genuinely gone; leaving
@@ -935,6 +1017,45 @@ fn do_sync(win: &slint::Weak<PanganWindow>, app: &Arc<AppState>) {
             }
         });
     });
+}
+
+/// Push the model's settings into the window.
+///
+/// Used at startup and whenever a cloud sync delivers settings from another
+/// device. Keeping it in one place is the point: the startup path and the sync
+/// path must show the same values, and a control that is wired into one but
+/// not the other is the kind of bug that only appears on the second machine.
+fn push_settings_to_ui(win: &PanganWindow, app: &AppState) {
+    let s = app.settings.lock().unwrap().clone();
+
+    win.set_work_minutes(s.work_minutes as i32);
+    win.set_short_break_minutes(s.short_break_minutes as i32);
+    win.set_long_break_minutes(s.long_break_minutes as i32);
+    win.set_long_break_interval(s.long_break_interval as i32);
+    win.set_auto_start_next(s.auto_start_next);
+    win.set_auto_start_on_launch(s.auto_start_on_launch);
+    win.set_daily_goal_minutes(s.daily_goal_minutes as i32);
+    win.set_compact_mode(s.compact_mode);
+    win.set_animations(s.animations);
+    ui::Motion::get(win).set_enabled(s.animations);
+    win.set_sound_enabled(s.sound_enabled);
+    win.set_sound_theme(SharedString::from(s.sound_theme.clone()));
+    win.set_sound_volume(s.sound_volume as i32);
+    win.set_hotkey_enabled(s.hotkey_enabled);
+    win.set_inhibit_enabled(s.inhibit_enabled);
+    win.set_overlay_enabled(s.overlay_enabled);
+    win.set_era(SharedString::from(s.era.clone()));
+    win.set_era_label(SharedString::from(s.era_label()));
+    win.set_era_blurb(SharedString::from(s.era_blurb()));
+    win.set_theme_pref(SharedString::from(s.theme.clone()));
+    win.set_theme_label(SharedString::from(s.theme_label()));
+
+    let resolved = resolve_theme(&s.theme);
+    win.set_resolved_theme(SharedString::from(resolved));
+    apply_palette(win, resolved, &s.era);
+    ui::Strings::get(win).set_lang(SharedString::from(s.lang.clone()));
+
+    *app.sound_theme.lock().unwrap() = s.sound_theme.clone();
 }
 
 /// Push the current settings values from the window back into the model and
@@ -974,7 +1095,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let settings = Settings::load();
     let cfg = clock::Config::from(&settings);
     let shared = Arc::new(Shared::new(cfg));
-    let app = Arc::new(AppState::load());
+    let app = Arc::new(AppState::load(Arc::clone(&shared)));
 
     // Sounds: warm all themes, then pick the active one.
     let sounds_dir = store::Store::data_dir().join("sounds");
@@ -1003,6 +1124,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if signed_in {
             win.set_sync_account(SharedString::from(tokens.email.clone()));
         }
+        // Which machine this is, so the card can say so once there are two.
+        let device_name = app.device.lock().unwrap().device_name.clone();
+        win.set_sync_device_name(SharedString::from(device_name));
     }
 
     // Initial theme application.
@@ -1014,21 +1138,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         apply_palette(&win, resolved, &settings.era);
     }
 
-    // Push settings into the UI.
+    // Push settings into the UI. The same helper runs when a cloud sync
+    // delivers settings from another device, so the two paths cannot drift.
+    push_settings_to_ui(&win, &app);
+
+    // The UI deliberately has no width/height binding (that would undo any
+    // user resize), so the initial size is applied here, once. After this the
+    // window manager owns the geometry.
     {
-        win.set_work_minutes(settings.work_minutes as i32);
-        win.set_short_break_minutes(settings.short_break_minutes as i32);
-        win.set_long_break_minutes(settings.long_break_minutes as i32);
-        win.set_long_break_interval(settings.long_break_interval as i32);
-        win.set_auto_start_next(settings.auto_start_next);
-        win.set_auto_start_on_launch(settings.auto_start_on_launch);
-        win.set_daily_goal_minutes(settings.daily_goal_minutes as i32);
-        win.set_compact_mode(settings.compact_mode);
-        win.set_animations(settings.animations);
-        ui::Motion::get(&win).set_enabled(settings.animations);
-        // The UI deliberately has no width/height binding (that would undo any
-        // user resize), so the initial size is applied here, once. After this
-        // the window manager owns the geometry.
         let (w0, h0) = if settings.compact_mode {
             (320.0, 300.0)
         } else {
@@ -1037,17 +1154,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = win
             .window()
             .set_size(slint::WindowSize::Logical(slint::LogicalSize::new(w0, h0)));
-        win.set_sound_enabled(settings.sound_enabled);
-        win.set_sound_theme(SharedString::from(settings.sound_theme.clone()));
-        win.set_sound_volume(settings.sound_volume as i32);
-        win.set_hotkey_enabled(settings.hotkey_enabled);
-        win.set_inhibit_enabled(settings.inhibit_enabled);
-        win.set_overlay_enabled(settings.overlay_enabled);
-        win.set_era(SharedString::from(settings.era.clone()));
-        win.set_era_label(SharedString::from(settings.era_label()));
-        win.set_era_blurb(SharedString::from(settings.era_blurb()));
-        // Language lives in the Strings global; set it once at startup.
-        ui::Strings::get(&win).set_lang(SharedString::from(settings.lang.clone()));
     }
 
     // UI tick: countdown + inhibit + session persistence + auto-sync.
