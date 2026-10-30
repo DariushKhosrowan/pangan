@@ -23,6 +23,7 @@ ureq = { version = "3", features = ["json"] }
 sha2 = "0.10"
 base64 = "0.22"
 getrandom = "0.2"
+arboard = "3.7.0"
 
 # --- Global hotkey (all three OS) -------------------------------
 [target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))'.dependencies]

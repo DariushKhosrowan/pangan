@@ -101,10 +101,21 @@ fn agent() -> ureq::Agent {
 /// forever. Everything else — a timeout, a 500, no route — is worth retrying.
 pub fn is_auth_error(msg: &str) -> bool {
     let m = msg.to_ascii_lowercase();
+    // Only signals that mean "this credential can never work again".
+    //
+    // `invalid_grant` is the one Google returns for a revoked or expired refresh
+    // token. `invalid_client` means the client id/secret pair is wrong, which no
+    // amount of retrying fixes. The rest are our own wording for the same
+    // situation.
+    //
+    // Deliberately NOT here: a bare "401". Matching that substring signed the
+    // user out whenever any response body happened to contain those three
+    // digits — a Drive error, a quota message, a request id — which looked like
+    // the app randomly forgetting the account. A real 401 from Drive already
+    // carries `unauthorized` in the text, so nothing is lost by dropping it.
     m.contains("invalid_grant")
         || m.contains("invalid_client")
         || m.contains("unauthorized")
-        || m.contains("401")
         || m.contains("no refresh token")
         || m.contains("sign in again")
 }
@@ -241,6 +252,16 @@ pub enum PollOutcome {
     Failed(String),
 }
 
+/// A short, log-safe excerpt of a response body.
+///
+/// Token responses can carry a refresh token, so the log gets at most a
+/// single line and nothing that looks like a credential is useful here: this
+/// exists to make a protocol surprise readable, not to record the payload.
+fn preview(body: &str) -> String {
+    let one_line: String = body.chars().take(200).collect::<String>().replace('\n', " ");
+    one_line.trim().to_string()
+}
+
 /// Poll the token endpoint once. Call this every `interval` seconds until it
 /// returns `Approved` or `Failed`.
 pub fn poll_token(device_code: &str) -> PollOutcome {
@@ -254,9 +275,22 @@ pub fn poll_token(device_code: &str) -> PollOutcome {
         "device_code": device_code,
         "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
     });
+    // The status code must not decide the outcome here.
+    //
+    // Google answers the device-flow token endpoint with **428 Precondition
+    // Required** while the user has not finished on their phone
+    // (`error: authorization_pending`), and with 400 for the other error
+    // codes. The useful answer is always in the body. Treating a non-2xx
+    // status as a transport failure aborted the poll five seconds in, well
+    // before anyone could type the code, so a sign-in that Google had accepted
+    // never reached the app. Only a genuine transport error (no response at
+    // all) is a failure here.
     let resp = agent()
         .post(TOKEN_URL)
         .header("Content-Type", "application/json")
+        .config()
+        .http_status_as_error(false)
+        .build()
         .send_json(body);
     let text = match resp {
         Ok(r) => r.into_body().read_to_string().unwrap_or_default(),
@@ -264,7 +298,9 @@ pub fn poll_token(device_code: &str) -> PollOutcome {
     };
     let v: serde_json::Value = match serde_json::from_str(&text) {
         Ok(v) => v,
-        Err(e) => return PollOutcome::Failed(format!("token json: {e}")),
+        Err(e) => {
+            return PollOutcome::Failed(format!("token json: {e} (body: {})", preview(&text)))
+        }
     };
     if let Some(err) = v.get("error").and_then(|x| x.as_str()) {
         return match err {
@@ -272,7 +308,12 @@ pub fn poll_token(device_code: &str) -> PollOutcome {
             "authorization_pending" | "slow_down" => PollOutcome::Pending,
             "access_denied" => PollOutcome::Failed("access denied".into()),
             "expired_token" => PollOutcome::Failed("the code expired".into()),
-            other => PollOutcome::Failed(other.to_string()),
+            other => PollOutcome::Failed(format!(
+                "{other}: {}",
+                v.get("error_description")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+            )),
         };
     }
     let access = v["access_token"].as_str().unwrap_or("").to_string();
@@ -336,20 +377,36 @@ pub fn refresh(tokens: &Tokens) -> Result<Tokens, String> {
         "refresh_token": tokens.refresh_token,
         "grant_type": "refresh_token",
     });
+    // Read the body whatever the status is, for the same reason `poll_token`
+    // does: Google puts the reason in the JSON, and ureq turns a non-2xx into an
+    // opaque error that throws that reason away. Without this, a 400 came back
+    // as "refresh failed: http status: 400" — no `invalid_grant` for
+    // `is_auth_error` to recognise, and nothing useful in the log.
     let resp = agent()
         .post(TOKEN_URL)
         .header("Content-Type", "application/json")
+        .config()
+        .http_status_as_error(false)
+        .build()
         .send_json(body);
     let text = match resp {
         Ok(r) => r.into_body().read_to_string().unwrap_or_default(),
         Err(e) => return Err(format!("refresh failed: {e}")),
     };
-    let v: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| format!("refresh json: {e}"))?;
+    let v: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("refresh json: {e} (body: {})", preview(&text)))?;
     let access = v["access_token"].as_str().unwrap_or("");
     if access.is_empty() {
         let err = v["error"].as_str().unwrap_or("refresh failed");
-        return Err(err.to_string());
+        let desc = v
+            .get("error_description")
+            .and_then(|x| x.as_str())
+            .unwrap_or("");
+        return Err(if desc.is_empty() {
+            err.to_string()
+        } else {
+            format!("{err}: {desc}")
+        });
     }
     Ok(Tokens {
         access_token: access.to_string(),
@@ -565,41 +622,64 @@ pub fn upload_conditional(
             // it goes in the user's normal Drive; a `drive.appdata` token goes
             // in the hidden folder. Getting this wrong fails the create with a
             // 403 that says nothing useful about which scope was at fault.
-            let boundary = "pangan-sync-boundary";
-            let parent = if expected.is_some_and(|e| e.space == "drive") {
-                "drive"
-            } else {
-                "appDataFolder"
-            };
-            let meta = if parent == "drive" {
-                serde_json::json!({ "name": name })
-            } else {
-                serde_json::json!({ "name": name, "parents": ["appDataFolder"] })
-            };
-            let payload = format!(
-                "--{b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{m}\r\n--{b}\r\nContent-Type: application/json\r\n\r\n{body}\r\n--{b}--",
-                b = boundary,
-                m = meta,
-                body = body
-            );
-            let url = format!(
-                "{}/upload/drive/v3/files?uploadType=multipart",
-                drive_base()
-            );
-            let resp = agent()
-                .post(&url)
-                .header("Authorization", &format!("Bearer {token}"))
-                .header(
-                    "Content-Type",
-                    &format!("multipart/related; boundary={boundary}"),
-                )
-                .send(payload);
-            match resp {
-                Ok(r) if r.status() == 200 => Ok(()),
-                Ok(r) => Err(format!("drive create HTTP {}", r.status())),
-                Err(e) => Err(format!("drive create failed: {e}")),
+            //
+            // The scope is a property of *how the user signed in*, not of what
+            // the caller passed: on the very first sync there is no remote file
+            // yet, so `expected` is `None` and carries no space. Inferring the
+            // parent from it therefore always chose `appDataFolder`, which a
+            // device-flow (`drive.file`) token can never write to — the first
+            // sync after a successful sign-in failed with a 403 every time.
+            // So: try the hidden folder, and fall back to the visible root when
+            // Google refuses it. One of the two is always allowed.
+            let mut last = String::new();
+            for parent in ["appDataFolder", "drive"] {
+                match create_file(token, name, body, parent) {
+                    Ok(()) => return Ok(()),
+                    Err(e) => {
+                        // A refusal here means "this token cannot use that
+                        // space", which the next iteration answers.
+                        last = e;
+                    }
+                }
             }
+            Err(last)
         }
+    }
+}
+
+/// Create a file in one specific Drive space.
+///
+/// Split out so the caller can try both spaces without repeating the multipart
+/// body construction, and so a failure names the space it failed in.
+fn create_file(token: &str, name: &str, body: &str, parent: &str) -> Result<(), String> {
+    let boundary = "pangan-sync-boundary";
+    let meta = if parent == "drive" {
+        serde_json::json!({ "name": name })
+    } else {
+        serde_json::json!({ "name": name, "parents": ["appDataFolder"] })
+    };
+    let payload = format!(
+        "--{b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{m}\r\n--{b}\r\nContent-Type: application/json\r\n\r\n{body}\r\n--{b}--",
+        b = boundary,
+        m = meta,
+        body = body
+    );
+    let url = format!(
+        "{}/upload/drive/v3/files?uploadType=multipart",
+        drive_base()
+    );
+    let resp = agent()
+        .post(&url)
+        .header("Authorization", &format!("Bearer {token}"))
+        .header(
+            "Content-Type",
+            &format!("multipart/related; boundary={boundary}"),
+        )
+        .send(payload);
+    match resp {
+        Ok(r) if r.status() == 200 => Ok(()),
+        Ok(r) => Err(format!("drive create in {parent} HTTP {}", r.status())),
+        Err(e) => Err(format!("drive create in {parent} failed: {e}")),
     }
 }
 
@@ -687,6 +767,23 @@ mod auth_tests {
         assert!(!is_auth_error("drive download failed: timeout"));
         assert!(!is_auth_error("drive create HTTP 500"));
         assert!(!is_auth_error("dns error"));
+    }
+
+    #[test]
+    fn a_stray_401_in_a_body_does_not_sign_the_user_out() {
+        // The regression: `is_auth_error` matched the substring "401" anywhere
+        // in the message. A Drive error, a quota notice, or a request id that
+        // happened to contain those digits was read as a dead credential, and
+        // the app cleared the tokens — which looked exactly like the account
+        // being forgotten at random.
+        assert!(!is_auth_error("drive list failed: quota exceeded for project 4012"));
+        assert!(!is_auth_error("drive update HTTP 403 (request id 9f401c2a)"));
+        assert!(!is_auth_error("rate limited, retry after 401 seconds"));
+        // A real auth failure still matches, by its own words.
+        assert!(is_auth_error("drive list failed: HTTP 401 Unauthorized"));
+        assert!(is_auth_error(
+            "invalid_grant: Token has been expired or revoked"
+        ));
     }
 
     #[test]

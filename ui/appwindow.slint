@@ -944,9 +944,19 @@ component MonthGrid inherits Rectangle {
 // ───────────────────────────────────────────────────────────────────────────
 component SectionLabel {
     in property <string> text: "";
-    height: 20px;
+    // Breathing room above each section heading.
+    //
+    // The settings list uses one uniform 8px spacing, so a heading sat the same
+    // distance from the card above it as the rows inside a card sit from each
+    // other — the sections read as one undifferentiated stack. The gap belongs
+    // to the heading, not to the list, so it is added here once instead of at
+    // twelve call sites.
+    in property <length> top: 10px;
+    height: 20px + self.top;
     Text {
         text: root.text;
+        y: root.top;
+        height: 20px;
         font-size: Type.caption;
         font-weight: 700;
         // Tracking only in Latin. Persian is a connected script: spacing the
@@ -1213,7 +1223,15 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     // The chronicle rows, built in Rust so the facts live in one place and
     // follow the UI language.
     in property <[Dynasty]> dynasties;
-    in-out property <string> new-task-text; in-out property <string> show-view: "main"; // ---- Settings (edited in the Settings screen) ----
+    in-out property <string> new-task-text;
+    // The automation card's own field.
+    //
+    // It used to bind straight to `new-task-text`, the same property the two
+    // task quick-add fields use. Typing a routine command therefore leaked into
+    // the task box on the main screen — press Add Task there afterwards and the
+    // command was added as a task. Clearing the task field on either screen also
+    // wiped a half-typed command.
+    in-out property <string> new-automation-text; in-out property <string> show-view: "main"; // ---- Settings (edited in the Settings screen) ----
     in-out property <int> work-minutes: 25; in-out property <int> short-break-minutes: 5; in-out property <int> long-break-minutes: 15; in-out property <int> long-break-interval: 4; in-out property <int> daily-goal-minutes: 120; in-out property <bool> auto-start-next: true; in-out property <bool> auto-start-on-launch: false; in-out property <bool> sound-enabled: true; in-out property <string> sound-theme: "santur"; in-out property <bool> hotkey-enabled: true; in-out property <bool> inhibit-enabled: true; in-out property <bool> overlay-enabled: true; in-out property <bool> compact-mode: false; in-out property <bool> animations: true; in-out property <int> sound-volume: 80; in property <string> automation-summary; // ---- Rich data (pushed from Rust) ----
     in property <[TaskItem]> tasks: []; in property <[DayRow]> month-rows: []; in property <[TaskItem]> day-tasks: []; in property <string> month-title: ""; in property <string> selected-day-title: ""; in property <string> selected-day-sub: ""; in property <bool> selected-is-today: false; in-out property <string> cal-selected: "";
     // Which task row is open for renaming (its id), or 0 for none. Only one row
@@ -2534,7 +2552,17 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     font-weight: 600;
                     color: Palette.text;
                     horizontal-stretch: 1;
+                    vertical-alignment: center;
                 }
+                // The primary action of this screen.
+                //
+                // It was a filled accent pill while every other primary action
+                // in the app — Start, Add task, Add routine — is also filled
+                // accent, and the secondary ones (Preview, Backup, Restore,
+                // Sync now) are flat surface-2. That is the right hierarchy; the
+                // settings header was the one place that broke it, with a flat
+                // grey "Done" that read as disabled next to the accent "Add"
+                // button further down the same screen.
                 Rectangle {
                     width: 62px;
                     height: 30px;
@@ -2553,6 +2581,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         font-weight: 600;
                         color: Palette.on-accent;
                         horizontal-alignment: center;
+                        vertical-alignment: center;
                     }
                 }
             }
@@ -2669,6 +2698,16 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 }
                             }
 
+                            // Two rows of two, not one row of four.
+                            //
+                            // At the default window width the settings column is
+                            // 384px, so four cards with three 7px gaps left each
+                            // card about 90px — and after its 10px inner padding
+                            // only ~70px for the name and the sub-label. "آخامنشی"
+                            // and "Persepolis" do not fit in that, and both labels
+                            // are set to elide, so the choice was silently cut to
+                            // a stub. Two per row doubles the usable width and the
+                            // cards read as a picker again.
                             HorizontalLayout {
                                 spacing: 7px;
                                 EraCard {
@@ -2689,6 +2728,10 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     horizontal-stretch: 1;
                                     picked => { root.set-era("darius"); }
                                 }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 7px;
                                 EraCard {
                                     era-id: "parthian";
                                     name: Strings.era-parthian;
@@ -3000,10 +3043,9 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     border-radius: 9px;
                                     background: Palette.surface-2;
                                     LineEdit {
-                                        text: root.new-task-text;
+                                        text <=> root.new-automation-text;
                                         placeholder-text: Strings.automation-placeholder;
                                         font-size: Type.small;
-                                        edited(t) => { root.new-task-text = t; }
                                     }
                                 }
 
@@ -3013,7 +3055,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     border-radius: 9px;
                                     background: Palette.accent;
                                     ta12 := TouchArea {
-                                        clicked => { root.add-automation("focus_start", root.new-task-text); }
+                                        clicked => { root.add-automation("focus_start", root.new-automation-text); }
                                     }
                                     states [
                                         h when ta12.has-hover : {

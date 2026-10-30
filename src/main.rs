@@ -887,13 +887,116 @@ fn describe_last_sync(last: i64, now: i64, en: bool) -> Option<String> {
 /// flow as before: show a code, open the page, poll until approved. The app
 /// still needs the user to type eight characters, which is why the loopback
 /// flow is preferred — but a working sign-in beats a blocked one.
+/// Put text on the system clipboard, returning whether it worked.
+///
+/// Linux desktops vary wildly here, so this tries the in-process X11 selection
+/// first (no external tool needed, which is the common case on a minimal
+/// install), then the usual command-line helpers. Returning a bool is the point:
+/// the caller must not tell the user it copied when it did not.
+fn copy_to_clipboard(text: &str) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        // No external binary required: talk to the X server directly. This is
+        // what wl-copy/xclip do, minus the dependency.
+        if let Ok(mut cb) = arboard::Clipboard::new() {
+            if cb.set_text(text.to_string()).is_ok() {
+                return true; }
+        }
+        // Fall back to the command-line tools for Wayland and odd setups.
+        for (prog, args) in [
+            ("wl-copy", vec![]),
+            ("xclip", vec!["-selection", "clipboard"]),
+            ("xsel", vec!["--clipboard", "--input"]),
+        ] {
+            let ok = std::process::Command::new(prog)
+                .args(&args)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .and_then(|mut c| {
+                    use std::io::Write; if let Some(stdin) = c.stdin.as_mut() {
+                        let _ = stdin.write_all(text.as_bytes()); }
+                    c.wait()
+                })
+                .map(|st| st.success())
+                .unwrap_or(false); if ok {
+                return true; }
+        }
+        false
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("pbcopy")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut c| {
+                use std::io::Write; if let Some(stdin) = c.stdin.as_mut() {
+                    let _ = stdin.write_all(text.as_bytes()); }
+                c.wait()
+            })
+            .map(|st| st.success())
+            .unwrap_or(false)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // `clip` is present on every Windows install.
+        std::process::Command::new("clip")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut c| {
+                use std::io::Write; if let Some(stdin) = c.stdin.as_mut() {
+                    let _ = stdin.write_all(text.as_bytes()); }
+                c.wait()
+            })
+            .map(|st| st.success())
+            .unwrap_or(false)
+    }
+}
+
+/// Append one line to the sync log.
+///
+/// Sign-in failures used to be invisible: the status line said "Device
+/// connected" on the phone while the app quietly gave up, and there was nothing
+/// on disk to say why. Every step of the flow now leaves a line in
+/// `~/.config/pangan/sync.log`, so a failure can be diagnosed instead of guessed
+/// at. Secrets are never written: only outcomes and error strings.
+fn sync_log(msg: &str) {
+    use std::io::Write;
+    let path = crate::store::Store::data_dir().join("sync.log");
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+        let _ = writeln!(f, "[{ts}] {msg}");
+    }
+}
+
 fn device_flow_sign_in(
     _client_id: &str,
     en: bool,
     weak: &slint::Weak<PanganWindow>,
 ) -> Result<oauth::SignedIn, String> {
     let started = std::time::Instant::now();
-    let code = gdrive::request_device_code()?;
+    sync_log("device flow: requesting a device code");
+    let code = match gdrive::request_device_code() {
+        Ok(c) => {
+            sync_log(&format!(
+                "device flow: got code {} (expires in {}s, interval {}s)",
+                c.user_code, c.expires_in, c.interval
+            ));
+            c
+        }
+        Err(e) => {
+            sync_log(&format!("device flow: device code request FAILED: {e}"));
+            return Err(e);
+        }
+    };
 
     // Show the code before polling, so the user can start typing immediately.
     {
@@ -929,12 +1032,20 @@ fn device_flow_sign_in(
         }
         match gdrive::poll_token(&code.device_code) {
             gdrive::PollOutcome::Pending => continue,
-            gdrive::PollOutcome::Failed(e) => return Err(e),
+            gdrive::PollOutcome::Failed(e) => {
+                sync_log(&format!("device flow: poll FAILED: {e}"));
+                return Err(e);
+            }
             gdrive::PollOutcome::Approved(tokens) => {
+                sync_log(&format!(
+                    "device flow: approved, access token {} chars, refresh token {} chars",
+                    tokens.access_token.len(),
+                    tokens.refresh_token.len()
+                ));
                 return Ok(oauth::SignedIn {
                     tokens,
                     seconds: started.elapsed().as_secs(),
-                })
+                });
             }
         }
     }
@@ -980,29 +1091,39 @@ fn do_sync(win: &slint::Weak<PanganWindow>, app: &Arc<AppState>) {
     }
 
     std::thread::spawn(move || {
-        let result = {
-            let mut t = tokens_arc.lock().unwrap();
-            let mut dev = device_arc.lock().unwrap();
-            cloudsync::sync_once(
-                &mut t,
-                &local,
-                &mut dev,
-                &mut |merged: &store::Data, merged_settings: &Settings| {
-                    let mut st = app2.store.lock().unwrap();
-                    st.data = merged.clone();
-                    st.save();
-                    drop(st);
-                    let mut s = app2.settings.lock().unwrap();
-                    *s = merged_settings.clone();
-                    s.save();
-                },
-            )
-        };
+        // The credential and device locks must NOT be held across the network
+        // call. They used to be, and the UI tick reads both (`is_empty()` on
+        // every 300 ms tick, `last_ok` for the settings card), so any sync in
+        // flight froze the countdown for as long as Drive took to answer — up
+        // to the 20 s request timeout, three attempts, plus the conflict
+        // backoff. Adding a task marks the data dirty, which starts a sync
+        // immediately, which is exactly when the clock appeared to stop.
+        //
+        // So: take a copy, release, work on the copy, then write the refreshed
+        // credentials back under a brief lock. Nothing is lost by this — the
+        // engine already guarantees one cycle at a time, so there is no second
+        // writer to race with.
+        let mut t = tokens_arc.lock().unwrap().clone();
+        let mut dev = device_arc.lock().unwrap().clone();
+        let result = cloudsync::sync_once(
+            &mut t,
+            &local,
+            &mut dev,
+            &mut |merged: &store::Data, merged_settings: &Settings| {
+                let mut st = app2.store.lock().unwrap();
+                st.data = merged.clone();
+                st.save();
+                drop(st);
+                let mut s = app2.settings.lock().unwrap();
+                *s = merged_settings.clone();
+                s.save();
+            },
+        );
         // Persist refreshed credentials so the next launch does not sign in
         // again, and so a rotated refresh token is not lost.
         {
-            let t = tokens_arc.lock().unwrap().clone();
             if !t.is_empty() {
+                *tokens_arc.lock().unwrap() = t.clone();
                 let _ = sync::save_tokens(&t);
             }
         }
@@ -1011,11 +1132,11 @@ fn do_sync(win: &slint::Weak<PanganWindow>, app: &Arc<AppState>) {
         // The last-success time is stamped here too, so the settings card can
         // still say when sync last worked after a restart.
         {
-            let mut dev = device_arc.lock().unwrap();
             if result.is_ok() {
                 dev.last_ok = chrono::Utc::now().timestamp();
             }
             dev.save();
+            *device_arc.lock().unwrap() = dev;
         }
 
         let status = match &result {
@@ -1089,7 +1210,13 @@ fn do_sync(win: &slint::Weak<PanganWindow>, app: &Arc<AppState>) {
                 .consecutive_failures
                 .store(0, std::sync::atomic::Ordering::Relaxed),
             Err(e) => {
+                // Every failure leaves a line. Without this, a sync that failed
+                // for a reason nobody could see was indistinguishable from one
+                // that never ran, and a wrong `is_auth_error` verdict signed the
+                // user out with no trace of why.
+                sync_log(&format!("sync FAILED: {e}"));
                 if gdrive::is_auth_error(e) {
+                    sync_log("sync: treating this as a dead credential, signing out");
                     signed_out = true;
                     let _ = sync::clear_tokens();
                     *app2.tokens.lock().unwrap() = gdrive::Tokens::default();
@@ -1104,6 +1231,9 @@ fn do_sync(win: &slint::Weak<PanganWindow>, app: &Arc<AppState>) {
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
             }
+        }
+        if result.is_ok() {
+            sync_log("sync ok");
         }
 
         *app2.last_sync.lock().unwrap() = status.clone();
@@ -1896,74 +2026,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if code.is_empty() {
             return;
         }
-        if let Some(w) = copy_weak.upgrade() {
-            w.set_code_copied(true);
-        }
-        // Prefer the platform clipboard tools; fall back to the X11 selection
-        // on Linux, which is what a bare Wayland/X session offers.
-        #[cfg(target_os = "linux")]
-        {
-            let ok = std::process::Command::new("wl-copy")
-                .arg(&code)
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-            if !ok {
-                let _ = std::process::Command::new("xclip")
-                    .args(["-selection", "clipboard"])
-                    .stdin(std::process::Stdio::piped())
-                    .spawn()
-                    .and_then(|mut c| {
-                        use std::io::Write;
-                        if let Some(stdin) = c.stdin.as_mut() {
-                            let _ = stdin.write_all(code.as_bytes());
-                        }
-                        c.wait()
-                    });
-            }
-        }
-        #[cfg(target_os = "macos")]
-        {
-            let _ = std::process::Command::new("pbcopy")
-                .stdin(std::process::Stdio::piped())
-                .spawn()
-                .and_then(|mut c| {
-                    use std::io::Write;
-                    if let Some(stdin) = c.stdin.as_mut() {
-                        let _ = stdin.write_all(code.as_bytes());
-                    }
-                    c.wait()
-                });
-        }
-        #[cfg(target_os = "windows")]
-        {
-            let _ = std::process::Command::new("cmd")
-                .args(["/C", "clip"])
-                .stdin(std::process::Stdio::piped())
-                .spawn()
-                .and_then(|mut c| {
-                    use std::io::Write;
-                    if let Some(stdin) = c.stdin.as_mut() {
-                        let _ = stdin.write_all(code.as_bytes());
-                    }
-                    c.wait()
-                });
-        }
-
-        // Reset the label after a beat.
-        let reset_weak = copy_weak.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(1600));
-            let w3 = reset_weak.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(w) = w3.upgrade() {
-                    w.set_code_copied(false);
-                }
-            });
-        });
-    });
+        // Only claim success if the clipboard actually took the text. The old
+        // version flipped the label to "Copied" before trying, so on a machine
+        // with no clipboard tool it said "Copied" and pasted nothing — which is
+        // exactly the kind of lie that wastes a user's afternoon.
+        let copied = copy_to_clipboard(&code); if let Some(w) = copy_weak.upgrade() {
+            w.set_code_copied(copied); }
+    }); 
 
     // Open an external URL in the user's default browser (About / credits links).
     // Only http(s) is accepted, so a stray string can never launch a local binary.
@@ -2124,7 +2193,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Ok(tok) = gdrive::access_token(&mut tokens) {
                 tokens.email = gdrive::fetch_email(&tok).unwrap_or_default();
             }
-            let _ = sync::save_tokens(&tokens);
+            match sync::save_tokens(&tokens) {
+                Ok(()) => sync_log("sign-in: tokens saved to sync.toml"),
+                Err(e) => sync_log(&format!("sign-in: SAVING TOKENS FAILED: {e}")),
+            }
             *app2.tokens.lock().unwrap() = tokens.clone();
 
             // Signing in *is* asking for sync. A second switch would be a
@@ -2152,6 +2224,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             });
             // First sync immediately, so something visibly arrives.
+            sync_log("sign-in: running the first sync");
             do_sync(&weak2, &app2);
         });
     });
@@ -2217,34 +2290,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings: toml::to_string_pretty(&s).unwrap_or_default(),
             data: serde_json::to_string_pretty(&d).unwrap_or_default(),
         };
-        let status = match sync::push_backup(&mut tokens, &payload) {
-            Ok(()) => {
-                // Persist a rotated access token so the next call does not
-                // refresh again.
-                let mut held = backup_app.tokens.lock().unwrap();
-                *held = tokens.clone();
-                let _ = sync::save_tokens(&tokens);
-                if en {
-                    "Backup saved to Google Drive ✓".to_string()
-                } else {
-                    "پشتیبان در گوگل درایو ذخیره شد ✓".to_string()
+        // The upload runs on a worker thread, not here.
+        //
+        // This used to block the UI thread for the whole Drive round trip —
+        // up to the 20 s request timeout — and every 300 ms tick queued behind
+        // it, so the countdown visibly stopped while a backup was in flight.
+        // The countdown is the one thing this app cannot afford to freeze.
+        let weak2 = backup_weak.clone();
+        let tokens_arc = Arc::clone(&backup_app.tokens);
+        let app2 = Arc::clone(&backup_app);
+        std::thread::spawn(move || {
+            let status = match sync::push_backup(&mut tokens, &payload) {
+                Ok(()) => {
+                    // Persist a rotated access token so the next call does not
+                    // refresh again.
+                    *tokens_arc.lock().unwrap() = tokens.clone();
+                    let _ = sync::save_tokens(&tokens);
+                    if en {
+                        "Backup saved to Google Drive ✓".to_string()
+                    } else {
+                        "پشتیبان در گوگل درایو ذخیره شد ✓".to_string()
+                    }
                 }
-            }
-            Err(e) => {
-                if en {
-                    format!("Backup error: {e}")
-                } else {
-                    format!("خطای پشتیبان‌گیری: {e}")
+                Err(e) => {
+                    if en {
+                        format!("Backup error: {e}")
+                    } else {
+                        format!("خطای پشتیبان‌گیری: {e}")
+                    }
                 }
-            }
-        };
-        {
-            let mut ls = backup_app.last_sync.lock().unwrap();
-            *ls = status.clone();
-        }
-        if let Some(w) = backup_weak.upgrade() {
-            w.set_sync_status(SharedString::from(status));
-        }
+            };
+            *app2.last_sync.lock().unwrap() = status.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(w) = weak2.upgrade() {
+                    w.set_sync_status(SharedString::from(status));
+                }
+            });
+        });
     });
 
     // Cloud restore (pull latest backup and apply it).
@@ -2263,69 +2345,84 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             return;
         }
-        let status = match sync::pull_backup(&mut tokens) {
-            Ok(payload) => {
-                {
-                    let mut held = restore_app.tokens.lock().unwrap();
-                    *held = tokens.clone();
+        // The download runs on a worker thread, not on the UI thread, for the
+        // same reason the backup upload does: a Drive round trip here froze the
+        // countdown, and the restore is not urgent enough to justify that.
+        let weak2 = restore_weak.clone();
+        let tokens_arc = Arc::clone(&restore_app.tokens);
+        let app2 = Arc::clone(&restore_app);
+        std::thread::spawn(move || {
+            let status = match sync::pull_backup(&mut tokens) {
+                Ok(payload) => {
+                    *tokens_arc.lock().unwrap() = tokens.clone();
                     let _ = sync::save_tokens(&tokens);
+                    // Apply settings and data, then push the result to the UI
+                    // from the event loop: Slint properties must not be set
+                    // off the UI thread.
+                    let mut restored_settings = None;
+                    if let Ok(mut s) = toml::from_str::<Settings>(&payload.settings) {
+                        s.sanitize_mut();
+                        s.save();
+                        *app2.settings.lock().unwrap() = s.clone();
+                        *app2.sound_theme.lock().unwrap() = s.sound_theme.clone();
+                        restored_settings = Some(s);
+                    }
+                    if let Ok(d) = serde_json::from_str::<store::Data>(&payload.data) {
+                        let mut st = app2.store.lock().unwrap();
+                        st.data = d;
+                        st.save();
+                    }
+                    let ts = payload.ts.clone();
+                    let msg = if en {
+                        format!("Backup restored from {ts}")
+                    } else {
+                        format!("پشتیبان بازگردانده شد از {ts}")
+                    };
+                    let w3 = weak2.clone();
+                    let app3 = Arc::clone(&app2);
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = w3.upgrade() {
+                            if let Some(s) = restored_settings {
+                                w.set_sound_theme(SharedString::from(s.sound_theme.clone()));
+                                w.set_sound_volume(s.sound_volume as i32);
+                                w.set_compact_mode(s.compact_mode);
+                                w.set_animations(s.animations);
+                                ui::Motion::get(&w).set_enabled(s.animations);
+                                let (cw, ch) = if s.compact_mode {
+                                    (320.0, 300.0)
+                                } else {
+                                    (420.0, 680.0)
+                                };
+                                let _ = w.window().set_size(slint::WindowSize::Logical(
+                                    slint::LogicalSize::new(cw, ch),
+                                ));
+                                w.set_theme_pref(SharedString::from(s.theme.clone()));
+                                w.set_theme_label(SharedString::from(s.theme_label()));
+                                let resolved = resolve_theme(&s.theme);
+                                w.set_resolved_theme(SharedString::from(resolved));
+                                apply_palette(&w, resolved, &s.era);
+                            }
+                            refresh_screens(&w, &app3);
+                        }
+                    });
+                    msg
                 }
-                // Apply settings.
-                if let Ok(s) = toml::from_str::<Settings>(&payload.settings) {
-                    let mut s = s;
-                    s.sanitize_mut();
-                    s.save();
-                    *restore_app.settings.lock().unwrap() = s.clone();
-                    *restore_app.sound_theme.lock().unwrap() = s.sound_theme.clone();
-                    if let Some(w) = restore_weak.upgrade() {
-                        w.set_sound_theme(SharedString::from(s.sound_theme.clone()));
-                        w.set_sound_volume(s.sound_volume as i32);
-                        w.set_compact_mode(s.compact_mode);
-                        w.set_animations(s.animations);
-                        ui::Motion::get(&w).set_enabled(s.animations);
-                        let (cw, ch) = if s.compact_mode {
-                            (320.0, 300.0)
-                        } else {
-                            (420.0, 680.0)
-                        };
-                        let _ = w
-                            .window()
-                            .set_size(slint::WindowSize::Logical(slint::LogicalSize::new(cw, ch)));
-                        w.set_theme_pref(SharedString::from(s.theme.clone()));
-                        w.set_theme_label(SharedString::from(s.theme_label()));
-                        let resolved = resolve_theme(&s.theme);
-                        w.set_resolved_theme(SharedString::from(resolved));
-                        apply_palette(&w, resolved, &s.era);
+                Err(e) => {
+                    if en {
+                        format!("Restore error: {e}")
+                    } else {
+                        format!("خطای بازگردانی: {e}")
                     }
                 }
-                // Apply data.
-                if let Ok(d) = serde_json::from_str::<store::Data>(&payload.data) {
-                    let mut st = restore_app.store.lock().unwrap();
-                    st.data = d;
-                    st.save();
+            };
+            *app2.last_sync.lock().unwrap() = status.clone();
+            let w4 = weak2.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(w) = w4.upgrade() {
+                    w.set_sync_status(SharedString::from(status));
                 }
-                if en {
-                    format!("Backup restored from {}", payload.ts)
-                } else {
-                    format!("پشتیبان بازگردانده شد از {}", payload.ts)
-                }
-            }
-            Err(e) => {
-                if en {
-                    format!("Restore error: {e}")
-                } else {
-                    format!("خطای بازگردانی: {e}")
-                }
-            }
-        };
-        {
-            let mut ls = restore_app.last_sync.lock().unwrap();
-            *ls = status.clone();
-        }
-        if let Some(w) = restore_weak.upgrade() {
-            w.set_sync_status(SharedString::from(status));
-            refresh_screens(&w, &restore_app);
-        }
+            });
+        });
     });
 
     // Automation: add a rule (event, command).
