@@ -23,9 +23,35 @@ nothing.
    - While the app is in **Testing**, add your own Google account under
      **Test users**. Without this, Google refuses the sign-in.
 4. **APIs & Services → Credentials → Create credentials → OAuth client ID**:
-   - Application type: **TVs and Limited Input devices**. This is the type that
-     supports the device flow; a "Desktop app" client will not work here.
+   - Application type: **Desktop app**. ← this is the one that gives one-click
+     sign-in. Do not pick "TVs and Limited Input devices" unless you have a
+     reason to; see below.
    - Copy the client id. It ends in `.apps.googleusercontent.com`.
+
+You do **not** need the client secret. Pangan never asks for it and never stores
+it: the sign-in uses PKCE, which exists precisely so a desktop app does not have
+to ship a secret it cannot keep.
+
+## Which client type, and why it matters
+
+| Client type | Sign-in | What the user does |
+| --- | --- | --- |
+| **Desktop app** | Loopback + PKCE | Presses the button, picks their account in the browser. Done. |
+| **TVs and Limited Input devices** | Device code | Presses the button, types an 8-character code into a web page. |
+
+The app detects which one it has and picks the flow itself, so either works.
+Two things are worth knowing:
+
+- Google **blocks the loopback redirect** for a TVs-and-Limited-Input client
+  (`Localhost URI is not allowed for 'NATIVE_DEVICE' client type`). That is why
+  the desktop type is the one to choose.
+- Google **refuses the `drive.appdata` scope on the device flow**
+  (`Invalid device flow scope`). A device-flow sign-in therefore uses
+  `drive.file` and keeps the sync file in the visible part of Drive instead of
+the hidden app folder. It still only sees files Pangan created.
+
+If you already made a TVs-and-Limited-Input client, make a second one as
+**Desktop app** and paste that id instead. Nothing else changes.
 
 ## Point the build at that client id
 
@@ -42,10 +68,15 @@ sync working without a rebuild.
 
 ## Signing in
 
-Settings → **Cloud** → **Connect Google**. The app shows a code like
-`ABCD-EFGH`; open <https://www.google.com/device> on any device, type the code,
-and approve. The app picks up the token within a few seconds and turns automatic
-sync on.
+Settings → **Cloud** → **Connect Google**.
+
+With a Desktop-app client the browser opens on Google's account chooser, the
+user picks an account and approves, and the tab says *Pangan is connected* and
+can be closed. The app is already syncing by the time they look back at it.
+
+With a TVs-and-Limited-Input client the app shows a code like `ABCD-EFGH`;
+open <https://www.google.com/device> on any device, type the code, approve. The
+app picks up the token within a few seconds.
 
 Do this on each device. Same account, and the data is the same.
 
