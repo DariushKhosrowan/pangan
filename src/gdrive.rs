@@ -499,12 +499,32 @@ fn find_file_meta(token: &str, name: &str) -> Result<Option<RemoteFile>, String>
         let resp = agent()
             .get(&url)
             .header("Authorization", &format!("Bearer {token}"))
+            .config()
+            .http_status_as_error(false)
+            .build()
             .call();
-        let text = match resp {
-            Ok(r) => r.into_body().read_to_string().unwrap_or_default(),
-            // A space this token cannot see is not an error; try the next one.
-            Err(_) => continue,
+        let (status, text) = match resp {
+            Ok(r) => (r.status(), r.into_body().read_to_string().unwrap_or_default()),
+            // A transport failure is a real failure, not "the file is absent".
+            Err(e) => return Err(format!("drive list failed: {e}")),
         };
+        if status != 200 {
+            let reason = google_reason(&text);
+            // A space this token cannot see is not fatal; try the next one.
+            // But an error that applies to *every* space (the Drive API being
+            // disabled, a revoked scope) must be reported, not silently turned
+            // into "no file yet" — that made the app try to create a file after
+            // a read that had actually failed, and report the create's error
+            // instead of the read's.
+            if status == 401 || status == 403 {
+                let is_space_problem = reason.to_lowercase().contains("appdatafolder");
+                if is_space_problem {
+                    continue;
+                }
+                return Err(format!("drive list failed: HTTP {status}: {reason}"));
+            }
+            continue;
+        }
         let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
             continue;
         };
@@ -668,6 +688,10 @@ fn create_file(token: &str, name: &str, body: &str, parent: &str) -> Result<(), 
         "{}/upload/drive/v3/files?uploadType=multipart",
         drive_base()
     );
+    // Read the body whatever the status is. Google puts the actual reason in
+    // the JSON — "Google Drive API has not been used in project N or it is
+    // disabled", a scope problem, a quota — and a bare "HTTP 403" throws that
+    // away, leaving the user with a number and no way to act on it.
     let resp = agent()
         .post(&url)
         .header("Authorization", &format!("Bearer {token}"))
@@ -675,12 +699,47 @@ fn create_file(token: &str, name: &str, body: &str, parent: &str) -> Result<(), 
             "Content-Type",
             &format!("multipart/related; boundary={boundary}"),
         )
+        .config()
+        .http_status_as_error(false)
+        .build()
         .send(payload);
     match resp {
         Ok(r) if r.status() == 200 => Ok(()),
-        Ok(r) => Err(format!("drive create in {parent} HTTP {}", r.status())),
+        Ok(r) => {
+            let status = r.status();
+            let text = r.into_body().read_to_string().unwrap_or_default();
+            Err(format!(
+                "drive create in {parent} HTTP {status}: {}",
+                google_reason(&text)
+            ))
+        }
         Err(e) => Err(format!("drive create in {parent} failed: {e}")),
     }
+}
+
+/// Pull the human-readable reason out of a Google API error body.
+///
+/// Google's errors are nested (`error.message`, plus an `errors[0].message`),
+/// and the useful sentence is the one the user can act on. When the body is not
+/// JSON at all, the raw preview is still better than nothing.
+pub fn google_reason(body: &str) -> String {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(body) {
+        if let Some(msg) = v
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+        {
+            // The API-disabled message is long and ends with a console link.
+            // Keep it whole: the link is the fix.
+            return msg.trim().to_string(); }
+        if let Some(msg) = v
+            .get("error_description")
+            .and_then(|m| m.as_str())
+            .or_else( || v.get("error").and_then(|e| e.as_str()))
+        {
+            return msg.trim().to_string(); }
+    }
+    preview(body)
 }
 
 /// How long to wait between polls, as a `Duration`.
