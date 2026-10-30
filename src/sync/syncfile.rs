@@ -34,8 +34,8 @@
 //! setting is machine-local until someone decides otherwise, which is the safe
 //! default.
 
-use crate::settings::Settings;
-use crate::store::Data;
+use crate::state::settings::Settings;
+use crate::state::store::Data;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -362,7 +362,7 @@ pub struct DeviceState {
 }
 
 fn state_path() -> std::path::PathBuf {
-    crate::store::Store::data_dir().join("sync-state.json")
+    crate::state::store::Store::data_dir().join("sync-state.json")
 }
 
 impl DeviceState {

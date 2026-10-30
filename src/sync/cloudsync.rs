@@ -29,11 +29,11 @@
 //! Three attempts, then an honest error: a device that keeps losing the race is
 //! not going to win it by trying harder.
 
-use crate::gdrive::{self, Tokens};
-use crate::merge;
-use crate::settings::Settings;
-use crate::store::Data;
-use crate::syncfile::{DeviceState, Envelope};
+use crate::sync::gdrive::{self, Tokens};
+use crate::sync::merge;
+use crate::state::settings::Settings;
+use crate::state::store::Data;
+use crate::sync::syncfile::{DeviceState, Envelope};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
@@ -244,7 +244,7 @@ fn attempt_once(
 
     if pushed {
         let envelope = Envelope {
-            schema: crate::syncfile::SCHEMA,
+            schema: crate::sync::syncfile::SCHEMA,
             revision: remote.revision + 1,
             updated_at: now,
             device_id: device.device_id.clone(),
@@ -311,7 +311,7 @@ impl Outcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{SessionRecord, Task};
+    use crate::state::store::{SessionRecord, Task};
 
     fn task(id: u64, title: &str, updated_at: i64) -> Task {
         Task {
@@ -347,10 +347,10 @@ mod tests {
     /// Point the client at a fresh fake Drive and hand back a signed-in token.
     /// The caller holds the guard so two such tests cannot share a server.
     fn fake() -> (std::sync::MutexGuard<'static, ()>, Tokens) {
-        let guard = crate::gdrive::drive_roundtrip::DRIVE_ENV_LOCK
+        let guard = crate::sync::gdrive::drive_roundtrip::DRIVE_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let (base, _store) = crate::gdrive::drive_roundtrip::fake_drive_for_tests();
+        let (base, _store) = crate::sync::gdrive::drive_roundtrip::fake_drive_for_tests();
         std::env::set_var("PANGAN_DRIVE_BASE", &base);
         let tokens = Tokens {
             access_token: "tok".into(),
@@ -716,7 +716,7 @@ mod tests {
 
         // Write the old format straight into the fake Drive.
         let legacy = r#"{"sessions":[{"at":100,"minutes":25}],"tasks":[{"id":1,"title":"old work","date":"","time":"","done":false,"created_at":0,"updated_at":10,"deleted":false}],"next_task_id":2}"#;
-        crate::gdrive::upload("tok", legacy).unwrap();
+        crate::sync::gdrive::upload("tok", legacy).unwrap();
 
         let mut dev = device("desktop");
         let mut arrived = Data::default();
@@ -734,9 +734,9 @@ mod tests {
         assert_eq!(arrived.tasks[0].title, "old work");
 
         // And the file is now an envelope, so the next read is the new format.
-        let raw = crate::gdrive::download("tok").unwrap().unwrap();
+        let raw = crate::sync::gdrive::download("tok").unwrap().unwrap();
         let env = Envelope::parse(&raw).unwrap();
-        assert_eq!(env.schema, crate::syncfile::SCHEMA);
+        assert_eq!(env.schema, crate::sync::syncfile::SCHEMA);
         assert_eq!(env.data.tasks.len(), 1);
     }
 }
@@ -744,7 +744,7 @@ mod tests {
 #[cfg(test)]
 mod recovery_tests {
     use super::*;
-    use crate::store::{SessionRecord, Task};
+    use crate::state::store::{SessionRecord, Task};
 
     fn task(id: u64, title: &str, updated_at: i64) -> Task {
         Task {
@@ -778,10 +778,10 @@ mod recovery_tests {
     /// they must not run at the same time or they would each see the other's
     /// Drive. The guard is released on drop.
     fn fake() -> (std::sync::MutexGuard<'static, ()>, Tokens) {
-        let guard = crate::gdrive::drive_roundtrip::DRIVE_ENV_LOCK
+        let guard = crate::sync::gdrive::drive_roundtrip::DRIVE_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let (base, _store) = crate::gdrive::drive_roundtrip::fake_drive_for_tests();
+        let (base, _store) = crate::sync::gdrive::drive_roundtrip::fake_drive_for_tests();
         std::env::set_var("PANGAN_DRIVE_BASE", &base);
         let tokens = Tokens {
             access_token: "tok".into(),
@@ -965,7 +965,7 @@ mod recovery_tests {
     #[test]
     fn a_corrupt_remote_file_is_refused_rather_than_overwritten() {
         let (_guard, mut tokens) = fake(); // Something that is not valid JSON at all.
-        crate::gdrive::upload("tok", "{ this is not json").unwrap(); let mut dev = device("desktop"); let local_data = Data {
+        crate::sync::gdrive::upload("tok", "{ this is not json").unwrap(); let mut dev = device("desktop"); let local_data = Data {
             tasks: vec![task(1, "mine", 10)],
             next_task_id: 2,
             ..Default::default()
@@ -979,7 +979,7 @@ mod recovery_tests {
             err.contains("not valid JSON"),
             "the error must say what is wrong: {err}"
         ); // And the file is untouched, so the user can inspect or restore it.
-        let raw = crate::gdrive::download("tok").unwrap().unwrap(); assert_eq!(raw, "{ this is not json"); }
+        let raw = crate::sync::gdrive::download("tok").unwrap().unwrap(); assert_eq!(raw, "{ this is not json"); }
 
     /// The race the merge cannot fix, end to end: two devices read the same
     /// version, both write, and the second write must be retried against the
@@ -1002,7 +1002,7 @@ mod recovery_tests {
 
         // Device A reads the current state, then device B writes a new task
         // before A gets to write. A's conditional write must be refused.
-        let (text, meta) = crate::gdrive::download_meta("tok", "pangan-sync.json")
+        let (text, meta) = crate::sync::gdrive::download_meta("tok", "pangan-sync.json")
             .unwrap()
             .expect("the seeded file must exist");
 
@@ -1011,12 +1011,12 @@ mod recovery_tests {
         b_env.device_name = "laptop".into();
         b_env.data.tasks.push(task(2, "from laptop", 20));
         b_env.data.next_task_id = 3;
-        crate::gdrive::upload_conditional("tok", "pangan-sync.json", &b_env.to_json().unwrap(), Some(&meta))
+        crate::sync::gdrive::upload_conditional("tok", "pangan-sync.json", &b_env.to_json().unwrap(), Some(&meta))
             .unwrap();
 
         // A now tries to write against the version it read. It must be told
         // the file moved, not silently allowed to overwrite the laptop's task.
-        let stale = crate::gdrive::upload_conditional(
+        let stale = crate::sync::gdrive::upload_conditional(
             "tok",
             "pangan-sync.json",
             r#"{"schema":2,"revision":2,"data":{"sessions":[],"tasks":[],"next_task_id":1}}"#,
@@ -1024,12 +1024,12 @@ mod recovery_tests {
         );
         assert_eq!(
             stale.unwrap_err(),
-            crate::gdrive::CONFLICT,
+            crate::sync::gdrive::CONFLICT,
             "a stale write must be refused, not applied"
         );
 
         // And the laptop's task is still there.
-        let raw = crate::gdrive::download("tok").unwrap().unwrap();
+        let raw = crate::sync::gdrive::download("tok").unwrap().unwrap();
         let env = Envelope::parse(&raw).unwrap();
         assert_eq!(env.data.tasks.len(), 2, "the laptop's task was lost");
     }
@@ -1069,7 +1069,7 @@ mod recovery_tests {
         sync_once(&mut tokens, &local(b_data), &mut dev_b, &mut |_, _| {}).unwrap();
 
         // Both tasks must have survived.
-        let raw = crate::gdrive::download("tok").unwrap().unwrap();
+        let raw = crate::sync::gdrive::download("tok").unwrap().unwrap();
         let env = Envelope::parse(&raw).unwrap();
         let titles: Vec<&str> = env.data.tasks.iter().map(|t| t.title.as_str()).collect();
         assert!(
@@ -1123,8 +1123,8 @@ mod engine_tests {
 #[cfg(test)]
 mod everything_syncs_tests {
     use super::*;
-    use crate::stats::{self, Period};
-    use crate::store::{SessionRecord, Task};
+    use crate::stats::stats::{self, Period};
+    use crate::state::store::{SessionRecord, Task};
 
     fn task(id: u64, title: &str, updated_at: i64) -> Task {
         Task {
@@ -1155,9 +1155,9 @@ mod everything_syncs_tests {
     }
 
     fn fake() -> (std::sync::MutexGuard<'static, ()>, Tokens) {
-        let guard = crate::gdrive::drive_roundtrip::DRIVE_ENV_LOCK
+        let guard = crate::sync::gdrive::drive_roundtrip::DRIVE_ENV_LOCK
             .lock()
-            .unwrap_or_else(|e| e.into_inner()); let (base, _store) = crate::gdrive::drive_roundtrip::fake_drive_for_tests(); std::env::set_var("PANGAN_DRIVE_BASE", &base); let tokens = Tokens {
+            .unwrap_or_else(|e| e.into_inner()); let (base, _store) = crate::sync::gdrive::drive_roundtrip::fake_drive_for_tests(); std::env::set_var("PANGAN_DRIVE_BASE", &base); let tokens = Tokens {
             access_token: "tok".into(),
             refresh_token: "refresh".into(),
             expires_at: chrono::Utc::now().timestamp() + 3600,

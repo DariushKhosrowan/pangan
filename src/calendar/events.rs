@@ -144,7 +144,7 @@ impl Events {
     /// Load the embedded table. A malformed table degrades to empty rather than
     /// panicking, so a bad data file can never take the timer down.
     pub fn load() -> Self {
-        Self::from_str(include_str!("../data/day_events.json"))
+        Self::from_str(include_str!("../../data/day_events.json"))
     }
 
     /// Load from an explicit JSON string (used by the refresh path, so a
@@ -319,7 +319,7 @@ mod tests {
     fn damaged_cache_is_rejected_in_favour_of_the_embedded_copy() {
         // Take the good table and damage one day the way the old build did.
         let mut table: serde_json::Value =
-            serde_json::from_str(include_str!("../data/day_events.json")).unwrap();
+            serde_json::from_str(include_str!("../../data/day_events.json")).unwrap();
         table["iran"]["8-7"]["deaths"] =
             serde_json::json!(["مظفرالدین‌شاه قاجار", "زندانی سیاسی", "دادستان تهران"]);
         let damaged = serde_json::to_string(&table).unwrap();

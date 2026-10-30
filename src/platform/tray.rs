@@ -5,8 +5,8 @@
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
-use crate::clock::Shared;
-use crate::TrayAction;
+use crate::timer::clock::Shared;
+use crate::app::init::TrayAction;
 
 // ---------------------------------------------------------------------------
 // Linux: ksni

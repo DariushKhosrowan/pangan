@@ -2,8 +2,8 @@
 //! The deadline is an `Instant`; every tick recomputes remaining from the
 //! monotonic clock, so there is no `sleep()` drift.
 
-use crate::settings::Settings;
-use crate::store::SessionRecord;
+use crate::state::settings::Settings;
+use crate::state::store::SessionRecord;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -234,17 +234,17 @@ impl Shared {
             self.pending_events
                 .lock()
                 .unwrap()
-                .push(crate::settings::EVENT_FOCUS_END.into());
+                .push(crate::state::settings::EVENT_FOCUS_END.into());
             if is_long {
                 self.pending_events
                     .lock()
                     .unwrap()
-                    .push(crate::settings::EVENT_POMODORO_COMPLETE.into());
+                    .push(crate::state::settings::EVENT_POMODORO_COMPLETE.into());
             }
             self.pending_events
                 .lock()
                 .unwrap()
-                .push(crate::settings::EVENT_BREAK_START.into());
+                .push(crate::state::settings::EVENT_BREAK_START.into());
             Some(if self.is_en() {
                 format!(
                     "{} finished — {} started.",
@@ -264,11 +264,11 @@ impl Shared {
             self.pending_events
                 .lock()
                 .unwrap()
-                .push(crate::settings::EVENT_BREAK_END.into());
+                .push(crate::state::settings::EVENT_BREAK_END.into());
             self.pending_events
                 .lock()
                 .unwrap()
-                .push(crate::settings::EVENT_FOCUS_START.into());
+                .push(crate::state::settings::EVENT_FOCUS_START.into());
             Some(if self.is_en() {
                 "Break over — back to deep work.".to_string()
             } else {
@@ -328,7 +328,7 @@ impl Shared {
                 self.pending_events
                     .lock()
                     .unwrap()
-                    .push(crate::settings::EVENT_FOCUS_START.into());
+                    .push(crate::state::settings::EVENT_FOCUS_START.into());
             }
         } else {
             s.finish_at = None;

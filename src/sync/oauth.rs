@@ -34,7 +34,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::time::{Duration, Instant};
 
-use crate::gdrive::Tokens;
+use crate::sync::gdrive::Tokens;
 
 /// Google's authorization and token endpoints.
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -322,7 +322,7 @@ pub fn location_means_blocked(location: &str) -> bool {
 ///
 pub fn supports_loopback(client_id: &str) -> bool {
     let url = authorize_url(client_id, 53682, "probe", &challenge_for("probe"));
-    let resp = crate::gdrive::http_agent()
+    let resp = crate::sync::gdrive::http_agent()
         .get(&url)
         .config()
         // Following the redirect would land on Google's page and throw away
@@ -426,7 +426,7 @@ fn exchange(client_id: &str, code: &str, verifier: &str, port: u16) -> Result<To
     // normally empty and correctly omitted. It is sent when configured because
     // some client types still demand it, and sending an empty string would be
     // worse than sending nothing.
-    let secret = crate::gdrive::client_secret();
+    let secret = crate::sync::gdrive::client_secret();
     let secret_part = if secret.is_empty() {
         String::new()
     } else {
@@ -440,7 +440,7 @@ fn exchange(client_id: &str, code: &str, verifier: &str, port: u16) -> Result<To
         urlencode(&redirect_uri(port)),
         secret_part,
     );
-    let resp = crate::gdrive::http_agent()
+    let resp = crate::sync::gdrive::http_agent()
         .post(TOKEN_URL)
         .header("Content-Type", "application/x-www-form-urlencoded")
         .send(body);

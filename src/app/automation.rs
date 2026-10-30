@@ -4,7 +4,7 @@
 //! drive their desktop (pause media, switch workspaces, raise a VPN, etc.).
 //! Commands run detached, in a background shell, and never block the UI.
 
-use crate::settings::{AutomationAction, Settings};
+use crate::state::settings::{AutomationAction, Settings};
 use std::process::{Command, Stdio};
 
 /// Fire the automation rules for a given event. Called from the event-loop
@@ -40,7 +40,7 @@ pub fn sorted(settings: &Settings) -> Vec<AutomationAction> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::{
+    use crate::state::settings::{
         EVENT_BREAK_END, EVENT_BREAK_START, EVENT_FOCUS_END, EVENT_FOCUS_START,
         EVENT_POMODORO_COMPLETE,
     };
@@ -57,7 +57,7 @@ mod tests {
     #[test]
     fn clock_fires_focus_and_break_events() {
         // Verify the clock emits the right automation events on transitions.
-        let s = crate::clock::Shared::new(crate::clock::Config {
+        let s = crate::timer::clock::Shared::new(crate::timer::clock::Config {
             work_minutes: 25,
             short_break_minutes: 5,
             long_break_minutes: 15,
@@ -83,7 +83,7 @@ mod tests {
 
     #[test]
     fn clock_fires_pomodoro_complete_on_fourth_focus() {
-        let s = crate::clock::Shared::new(crate::clock::Config {
+        let s = crate::timer::clock::Shared::new(crate::timer::clock::Config {
             work_minutes: 25,
             short_break_minutes: 5,
             long_break_minutes: 15,

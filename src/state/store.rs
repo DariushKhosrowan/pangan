@@ -189,7 +189,7 @@ impl Store {
     pub fn shift_task_days(&mut self, id: u64, delta: i32, today: &str) -> Option<String> {
         let cur = self.data.tasks.iter().find(|t| t.id == id)?.date.clone();
         let base = if cur.is_empty() { today } else { cur.as_str() };
-        let next = crate::calendar::shift_day_key(base, delta)?;
+        let next = crate::calendar::calendar::shift_day_key(base, delta)?;
         if let Some(t) = self.data.tasks.iter_mut().find(|t| t.id == id) {
             t.date = next.clone();
             Self::touch(t);

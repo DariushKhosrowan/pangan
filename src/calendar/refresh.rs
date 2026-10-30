@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 /// Where the refreshed table is cached between runs.
 pub fn cache_path() -> PathBuf {
-    crate::store::Store::data_dir().join("day_events.json")
+    crate::state::store::Store::data_dir().join("day_events.json")
 }
 
 /// Read the cached table if a previous refresh wrote one.
@@ -721,7 +721,7 @@ mod live_tests {
     #[ignore]
     fn live_refresh_returns_data() {
         let mut table: serde_json::Value =
-            serde_json::from_str(include_str!("../data/day_events.json")).unwrap(); // 7 Aban 1405 == 29 October 2026
+            serde_json::from_str(include_str!("../../data/day_events.json")).unwrap(); // 7 Aban 1405 == 29 October 2026
         let r = refresh_today(&mut table, 8, 7, 10, 29).expect("refresh should succeed");
         assert!(r.iran_events > 0, "expected Iranian events, got {r:?}");
         assert!(r.world_events > 0, "expected world events, got {r:?}");

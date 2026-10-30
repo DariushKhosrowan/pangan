@@ -145,7 +145,7 @@ pub fn client_id() -> String {
     // Precedence: a value the user pasted in Settings, then the build-time
     // value, then the environment, then the placeholder. Settings wins because
     // it is the only one an end user can change without a compiler.
-    if let Some(id) = crate::sync::load_client_id() {
+    if let Some(id) = crate::sync::backup::load_client_id() {
         return id;
     }
     if let Some(id) = BUILT_IN_CLIENT_ID.filter(|s| !s.trim().is_empty()) {
@@ -163,7 +163,7 @@ pub fn client_id() -> String {
 /// value, then the environment. Empty means "send nothing", which is correct
 /// for a Desktop-app client where PKCE replaces the secret.
 pub fn client_secret() -> String {
-    if let Some(s) = crate::sync::load_client_secret() {
+    if let Some(s) = crate::sync::backup::load_client_secret() {
         return s;
     }
     if let Some(s) = BUILT_IN_CLIENT_SECRET.filter(|s| !s.trim().is_empty()) {

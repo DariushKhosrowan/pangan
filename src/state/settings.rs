@@ -188,7 +188,7 @@ fn default_sync_interval() -> u64 {
 
 impl Settings {
     pub fn path() -> PathBuf {
-        crate::store::Store::data_dir().join("config.toml")
+        crate::state::store::Store::data_dir().join("config.toml")
     }
 
     pub fn load() -> Self {

@@ -18,7 +18,7 @@
 //! result as B with A, and merging a result with itself changes nothing. That
 //! is what makes it safe to run on every sync tick without drift.
 
-use crate::store::{Data, SessionRecord, Task};
+use crate::state::store::{Data, SessionRecord, Task};
 use std::collections::BTreeMap;
 
 /// Merge two snapshots into one. Neither input is modified.
