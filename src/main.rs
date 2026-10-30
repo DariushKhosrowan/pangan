@@ -14,6 +14,7 @@
 mod app;
 mod audio;
 mod calendar;
+mod journal;
 mod platform;
 mod state;
 mod stats;

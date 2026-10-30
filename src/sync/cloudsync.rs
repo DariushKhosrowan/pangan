@@ -384,11 +384,13 @@ mod tests {
             sessions: vec![SessionRecord { at: 1, minutes: 25 }],
             tasks: vec![task(1, "write", 10)],
             next_task_id: 2,
+            inscriptions: vec![],
         };
         let b = Data {
             sessions: vec![SessionRecord { at: 2, minutes: 25 }],
             tasks: vec![task(2, "read", 20)],
             next_task_id: 3,
+            inscriptions: vec![],
         };
         let first = merge::merge(&a, &b);
         let second = merge::merge(&first, &b);
@@ -443,6 +445,7 @@ mod tests {
             }],
             tasks: vec![task(1, "write the report", 10)],
             next_task_id: 2,
+            inscriptions: vec![],
         };
         let mut dev_a = device("desktop");
         let out_a = sync_once(&mut tokens, &local(a.clone()), &mut dev_a, &mut |_, _| {}).unwrap();
@@ -476,6 +479,7 @@ mod tests {
         let b2 = Data {
             tasks: vec![task(1, "write the report", 10), task(2, "review", 20)],
             next_task_id: 3,
+            inscriptions: vec![],
             ..b_now.clone()
         };
         sync_once(&mut tokens, &local(b2), &mut dev_b, &mut |_, _| {}).unwrap();
@@ -825,6 +829,7 @@ mod recovery_tests {
             }],
             tasks: vec![task(1, "write the report", 10), task(2, "review", 20)],
             next_task_id: 3,
+            inscriptions: vec![],
         };
         let mut dev = device("desktop");
         sync_once(&mut tokens, &local(good), &mut dev, &mut |_, _| {}).unwrap();
@@ -861,6 +866,7 @@ mod recovery_tests {
         let good = Data {
             tasks: vec![task(1, "keep me", 10)],
             next_task_id: 2,
+            inscriptions: vec![],
             ..Default::default()
         };
         sync_once(&mut tokens, &local(good), &mut dev, &mut |_, _| {}).unwrap();
@@ -904,6 +910,7 @@ mod recovery_tests {
         let cloud = Data {
             tasks: vec![task(1, "from cloud", 10)],
             next_task_id: 2,
+            inscriptions: vec![],
             ..Default::default()
         };
         sync_once(&mut tokens, &local(cloud), &mut dev, &mut |_, _| {}).unwrap();
@@ -912,6 +919,7 @@ mod recovery_tests {
         let offline = Data {
             tasks: vec![task(1, "from cloud", 10), task(2, "made offline", 30)],
             next_task_id: 3,
+            inscriptions: vec![],
             ..Default::default()
         };
 
@@ -944,6 +952,7 @@ mod recovery_tests {
         let before = Data {
             tasks: vec![task(1, "delete me", 10)],
             next_task_id: 2,
+            inscriptions: vec![],
             ..Default::default()
         };
         sync_once(&mut tokens, &local(before.clone()), &mut dev, &mut |_, _| {}).unwrap();
@@ -984,6 +993,7 @@ mod recovery_tests {
         crate::sync::gdrive::upload("tok", "{ this is not json").unwrap(); let mut dev = device("desktop"); let local_data = Data {
             tasks: vec![task(1, "mine", 10)],
             next_task_id: 2,
+            inscriptions: vec![],
             ..Default::default()
         }; let err = sync_once(
             &mut tokens,
@@ -1012,6 +1022,7 @@ mod recovery_tests {
         let seed = Data {
             tasks: vec![task(1, "shared", 10)],
             next_task_id: 2,
+            inscriptions: vec![],
             ..Default::default()
         };
         sync_once(&mut tokens, &local(seed), &mut dev_a, &mut |_, _| {}).unwrap();
@@ -1063,6 +1074,7 @@ mod recovery_tests {
         let seed = Data {
             tasks: vec![task(1, "shared", 10)],
             next_task_id: 2,
+            inscriptions: vec![],
             ..Default::default()
         };
         sync_once(&mut tokens, &local(seed.clone()), &mut dev_a, &mut |_, _| {}).unwrap();
@@ -1073,6 +1085,7 @@ mod recovery_tests {
         let a_data = Data {
             tasks: vec![task(1, "shared", 10), task(2, "from desktop", 20)],
             next_task_id: 3,
+            inscriptions: vec![],
             ..Default::default()
         };
         sync_once(&mut tokens, &local(a_data), &mut dev_a, &mut |_, _| {}).unwrap();
@@ -1080,6 +1093,7 @@ mod recovery_tests {
         let b_data = Data {
             tasks: vec![task(1, "shared", 10), task(3, "from laptop", 30)],
             next_task_id: 4,
+            inscriptions: vec![],
             ..Default::default()
         };
         sync_once(&mut tokens, &local(b_data), &mut dev_b, &mut |_, _| {}).unwrap();
@@ -1206,6 +1220,7 @@ mod everything_syncs_tests {
                 task(2, "review the contract", 200),
             ],
             next_task_id: 3,
+            inscriptions: vec![],
         }; let mut dev_a = device("desktop"); let out_a = sync_once(
             &mut tokens,
             &Local {
@@ -1250,6 +1265,7 @@ mod everything_syncs_tests {
         let (_guard, mut tokens) = fake(); let mut dev_a = device("desktop"); let mut data_a = Data {
             tasks: vec![task(1, "first", 10)],
             next_task_id: 2,
+            inscriptions: vec![],
             ..Default::default()
         }; sync_once(&mut tokens, &local(data_a.clone()), &mut dev_a, &mut |_, _| {}).unwrap(); // Laptop pulls, adds a task, marks the first one done.
         let mut dev_b = device("laptop"); let mut data_b = Data::default(); sync_once(
@@ -1279,6 +1295,7 @@ mod everything_syncs_tests {
         let (_guard, mut tokens) = fake(); let mut dev_a = device("desktop"); let mut dev_b = device("laptop"); let data_a = Data {
             tasks: vec![task(1, "delete me", 10)],
             next_task_id: 2,
+            inscriptions: vec![],
             ..Default::default()
         }; let mut on_b = Data::default(); sync_once(&mut tokens, &local(data_a.clone()), &mut dev_a, &mut |_, _| {}).unwrap(); sync_once(
             &mut tokens,
@@ -1300,6 +1317,7 @@ mod everything_syncs_tests {
             sessions: vec![SessionRecord { at: 1_000, minutes: 25 }],
             tasks: vec![task(1, "stable", 10)],
             next_task_id: 2,
+            inscriptions: vec![],
         }; let mut dev = device("desktop"); let mut settled = data.clone(); sync_once(&mut tokens, &local(data.clone()), &mut dev, &mut |_, _| {}).unwrap(); for _ in 0..5 {
             sync_once(&mut tokens, &local(data.clone()), &mut dev, &mut |d, _| {
                 settled = d.clone()

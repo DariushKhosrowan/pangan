@@ -255,6 +255,45 @@ export global Strings {
     // view that answers "how long have we been doing this", which the timer
     // and the calendar cannot.
     out property <string> nav-chronicle: fa ? "گاه‌شمار" : "Chronicle";
+    
+    // ── Inscriptions: the written record ───────────────────────────────────
+    // A stone inscription was how a Persian king answered "what did I
+    // accomplish" so the answer would outlast him. Pangan asks the same
+    // question of a focus session, and keeps the answer.
+    out property <string> nav-inscriptions: fa ? "سنگ‌نوشته‌ها" : "Inscriptions";
+    out property <string> ins-title: fa ? "سنگ‌نوشته‌ها" : "Inscriptions";
+    out property <string> ins-sub: fa
+        ? "هر نشست کار، یک خط. آنچه انجام شد، نوشته می‌ماند."
+        : "One line per focus session. What got done, kept in writing.";
+    out property <string> ins-prompt: fa
+        ? "در این نشست چه کردید؟"
+        : "What did you accomplish this session?";
+    out property <string> ins-placeholder: fa
+        ? "یک جمله…"
+        : "One sentence…";
+    out property <string> ins-inscribe: fa ? "بنویس" : "Inscribe";
+    out property <string> ins-skip: fa ? "بی‌نوشته بگذر" : "Skip";
+    out property <string> ins-archive: fa ? "بایگانی" : "Archive";
+    out property <string> ins-search: fa ? "جست‌وجو در سنگ‌نوشته‌ها…" : "Search inscriptions…";
+    out property <string> ins-empty: fa
+        ? "هنوز چیزی نوشته نشده است. با پایان نخستین نشست کار، اینجا آغاز می‌شود."
+        : "Nothing written yet. It begins when your first focus session ends.";
+    out property <string> ins-none-found: fa
+        ? "چیزی با این واژه پیدا نشد."
+        : "Nothing matches that.";
+    out property <string> ins-export: fa ? "برون‌بری" : "Export";
+    out property <string> ins-copy: fa ? "رونوشت" : "Copy";
+    out property <string> ins-copied: fa ? "رونوشت شد" : "Copied";
+    out property <string> ins-no-clipboard: fa
+        ? "رونوشت نشد: ابزار تخته‌گیره‌ای یافت نشد."
+        : "Not copied: no clipboard tool found.";
+    out property <string> ins-count: fa ? "نوشته" : "entries";
+    // What the export is called on disk, so the user can find it.
+    out property <string> ins-exported: fa ? "برون‌بری در " : "Exported to ";
+    out property <string> ins-export-failed: fa
+        ? "برون‌بری انجام نشد."
+        : "Export failed.";
+    out property <string> ins-delete: fa ? "دور انداختن" : "Discard";
     out property <string> chron-title: fa ? "گاه‌شمار پادشاهی ایران" : "Chronicle of the Iranian Kingdom";
     out property <string> chron-sub: fa
         ? "دو هزار و پانصد سال فرمانروایی، از کوروش تا امروز"

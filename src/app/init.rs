@@ -13,6 +13,7 @@ use slint::{
 use crate::app::automation;
 use crate::audio::sound;
 use crate::calendar::{chronicle, events, jalali as calendar, refresh};
+use crate::journal;
 use crate::state::{settings, store};
 use crate::stats::report as stats;
 use crate::sync::{backup as sync, cloudsync, gdrive, oauth, syncfile};
@@ -22,7 +23,7 @@ use clock::Shared;
 use settings::Settings;
 use store::Store;
 
-use crate::ui::PanganWindow;
+use crate::ui::{InscriptionItem, PanganWindow};
 
 /// Actions that tray menu / hotkey events translate into.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -70,6 +71,17 @@ struct AppState {
     /// The timer core. Held here so a sync that delivers new durations can
     /// apply them to the running clock, not just to the settings screen.
     shared: Arc<Shared>,
+    /// The search text the archive is filtered by. Kept here rather than in the
+    /// window so the 300 ms tick that rebuilds the archive list cannot clear
+    /// what the user typed.
+    ins_query: Mutex<String>,
+    /// A session the user chose not to write about.
+    ///
+    /// Without this, the tick that notices an unwritten session would reopen
+    /// the dialog every 300 ms after a Skip, and the only way out would be to
+    /// write something. One remembered timestamp is enough: only the newest
+    /// session is ever offered.
+    ins_skipped: Mutex<Option<i64>>,
 }
 
 impl AppState {
@@ -104,6 +116,8 @@ impl AppState {
             tokens: Arc::new(Mutex::new(sync::load_tokens().unwrap_or_default())),
             device: Arc::new(Mutex::new(device)),
             shared,
+            ins_query: Mutex::new(String::new()),
+            ins_skipped: Mutex::new(None),
         }
     }
 
@@ -712,8 +726,115 @@ fn refresh_day_view(win: &PanganWindow, app: &AppState) {
 /// `AppState`, this builds the report for that span and pushes every number the
 /// screen shows. Nothing on that screen computes its own figures, so the chart,
 /// the cards and the narrative can never disagree with each other.
+/// Push the inscription archive into the window, honouring the search box.
+///
+/// The archive is rebuilt from the store on every tick rather than being edited
+/// in place, for the same reason every other list in this app is: the store is
+/// the truth, and a second copy in the window would be one more thing that can
+/// disagree with it. The list is small (one line per focus session), so the
+/// cost is a sort and a dozen allocations every 300 ms.
+fn push_inscriptions(win: &PanganWindow, app: &AppState, st: &Store) {
+    let en = app.settings.lock().unwrap().lang == "en";
+    let query = app.ins_query.lock().unwrap().clone();
+    let live = st.inscriptions_newest_first();
+    let hits: Vec<journal::Inscription> = journal::search(&live, &query)
+        .into_iter()
+        .cloned()
+        .collect();
+
+    let mut items: Vec<InscriptionItem> = Vec::with_capacity(hits.len());
+    let mut last_day = String::new();
+    for ins in &hits {
+        let day_key = journal::day_of(ins);
+        // The heading only appears on the first row of each day, so the archive
+        // reads as day groups instead of repeating the date on every line.
+        let day = if day_key == last_day {
+            String::new()
+        } else {
+            last_day = day_key.clone();
+            jalali_day_heading(&day_key, en)
+        };
+        items.push(InscriptionItem {
+            id: SharedString::from(ins.id.clone()),
+            text: SharedString::from(ins.text.clone()),
+            time: SharedString::from(local_time(ins.session_at)),
+            day: SharedString::from(day),
+            session: ins.session_at as i32,
+        });
+    }
+
+    win.set_inscriptions(ModelRc::new(VecModel::from(items)));
+    win.set_inscription_text(SharedString::from(String::new()));
+    win.set_inscription_prompt(SharedString::from(if en {
+        "What did you accomplish this session?"
+    } else {
+        "در این نشست چه کردید؟"
+    }));
+    win.set_inscription_limit(journal::MAX_CHARS as i32);
+    win.set_archive_empty(SharedString::from(if query.trim().is_empty() {
+        if en {
+            "Nothing written yet. It begins when your first focus session ends."
+        } else {
+            "هنوز چیزی نوشته نشده است. با پایان نخستین نشست کار، اینجا آغاز می‌شود."
+        }
+    } else if en {
+        "Nothing matches that."
+    } else {
+        "چیزی با این واژه پیدا نشد."
+    }));
+}
+
+/// `HH:MM` for a Unix timestamp, in local time.
+fn local_time(at: i64) -> String {
+    chrono::DateTime::from_timestamp(at, 0)
+        .map(|u| {
+            u.with_timezone(&chrono::Local)
+                .format("%H:%M")
+                .to_string()
+        })
+        .unwrap_or_else(|| "--:--".to_string())
+}
+
+/// A Jalali heading for a `YYYY-MM-DD` local date, e.g. "۱۴ آبان ۱۴۰۵".
+///
+/// The store keys days the Gregorian way (the same key every other screen uses),
+/// but the archive is read by a Persian user, so the heading is Jalali. A
+/// malformed key falls back to the raw string rather than an empty heading that
+/// would make the day invisible.
+fn jalali_day_heading(day_key: &str, en: bool) -> String {
+    let parts: Vec<&str> = day_key.split('-').collect();
+    if parts.len() != 3 {
+        return day_key.to_string();
+    }
+    let (Ok(y), Ok(m), Ok(d)) = (
+        parts[0].parse::<i32>(),
+        parts[1].parse::<u32>(),
+        parts[2].parse::<u32>(),
+    ) else {
+        return day_key.to_string();
+    };
+    let (jy, jm, jd) = calendar::from_gregorian(y, m, d);
+    let month = if en {
+        calendar::MONTHS_EN
+            .get(jm.saturating_sub(1) as usize)
+            .copied()
+            .unwrap_or("")
+    } else {
+        calendar::MONTHS
+            .get(jm.saturating_sub(1) as usize)
+            .copied()
+            .unwrap_or("")
+    };
+    if en {
+        format!("{jd} {month} {jy}")
+    } else {
+        format!("{} {} {}", calendar::fa_num(jd as i64), month, calendar::fa_num(jy as i64))
+    }
+}
+
 fn refresh_screens(win: &PanganWindow, app: &AppState) {
     let st = app.store.lock().unwrap();
+    push_inscriptions(win, app, &st);
     let en = app.settings.lock().unwrap().lang == "en";
     let period = *app.report_period.lock().unwrap();
     let offset = *app.report_offset.lock().unwrap();
@@ -1547,6 +1668,24 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             {
                 let mut st = tick_app.store.lock().unwrap();
                 st.add_sessions(&recs);
+                // Offer to write a line about the block that just finished. This
+                // is the only moment the app knows both that the work happened
+                // and roughly what it was, so it is the only moment worth
+                // asking. The newest session is the one being offered; an older
+                // unwritten session is not resurrected, because by then the user
+                // has lost the thread of what it was.
+                if let Some(newest) = recs.iter().map(|r| r.at).max() {
+                    let already_written = st.inscription_for_session(newest).is_some();
+                    let skipped = *tick_app.ins_skipped.lock().unwrap() == Some(newest);
+                    if !already_written && !skipped {
+                        if let Some(w) = tick_weak.upgrade() {
+                            w.set_inscription_session(newest as i32);
+                            w.set_inscription_text(SharedString::from(""));
+                            w.set_inscription_error(SharedString::from(""));
+                            w.set_inscription_open(true);
+                        }
+                    }
+                }
             }
             // A finished focus block is the most important thing to sync: it
             // is the user's actual history.
@@ -1676,6 +1815,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let close_weak = weak.clone();
     win.on_close_report(move || {
         if let Some(w) = close_weak.upgrade() {
+            w.set_show_view("main".into());
+        }
+    });
+
+    let insopen_app = Arc::clone(&app);
+    let insopen_weak = weak.clone();
+    win.on_open_inscriptions(move || {
+        if let Some(w) = insopen_weak.upgrade() {
+            w.set_show_view("inscriptions".into());
+            let st = insopen_app.store.lock().unwrap();
+            push_inscriptions(&w, &insopen_app, &st);
+        }
+    });
+    let insclose_weak = weak.clone();
+    win.on_close_inscriptions(move || {
+        if let Some(w) = insclose_weak.upgrade() {
             w.set_show_view("main".into());
         }
     });
@@ -1851,6 +2006,168 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             w.set_new_task_text(SharedString::from(""));
             refresh_screens(&w, &task_app);
             refresh_day_view(&w, &task_app);
+        }
+    });
+
+    // ── inscriptions: the written record of each session ──
+    //
+    // The dialog opens from the tick loop when a focus session finishes, not
+    // from here. These handlers only record what the user typed.
+    let ins_app = Arc::clone(&app);
+    let ins_weak = weak.clone();
+    win.on_inscribe(move |session_at, text| {
+        let session_at = session_at as i64;
+        let raw = text.to_string();
+        let now = chrono::Utc::now().timestamp();
+        match journal::create(session_at, now, &raw) {
+            Ok(ins) => {
+                {
+                    let mut st = ins_app.store.lock().unwrap();
+                    st.add_inscription(ins);
+                }
+                // The record is the user's own writing about their work, so it
+                // is worth the same immediate sync a finished session gets.
+                ins_app.cloud.mark_dirty();
+                if let Some(w) = ins_weak.upgrade() {
+                    w.set_inscription_open(false);
+                    w.set_inscription_text(SharedString::from(""));
+                    w.set_inscription_error(SharedString::from(""));
+                    refresh_screens(&w, &ins_app);
+                }
+            }
+            Err(e) => {
+                // The refusal is shown next to the field rather than swallowed:
+                // a dialog that silently refuses a keystroke reads as broken.
+                if let Some(w) = ins_weak.upgrade() {
+                    w.set_inscription_error(SharedString::from(format!("{e}")));
+                }
+            }
+        }
+    });
+
+    // Skipping has to be remembered, or the same session asks again on the next
+    // tick — twelve times a second — and the dialog becomes impossible to close.
+    let skip_app = Arc::clone(&app);
+    let skip_weak = weak.clone();
+    win.on_skip_inscription(move |session_at| {
+        let session_at = session_at as i64;
+        *skip_app.ins_skipped.lock().unwrap() = Some(session_at);
+        if let Some(w) = skip_weak.upgrade() {
+            w.set_inscription_open(false);
+            w.set_inscription_text(SharedString::from(""));
+            w.set_inscription_error(SharedString::from(""));
+        }
+    });
+
+    // The dialog's own text drives two derived values. Doing it here keeps the
+    // rule in one place: the button enables exactly when `journal::create`
+    // would accept the line, so the two can never disagree about "blank".
+    {
+        let sync_app = Arc::clone(&app);
+        let sync_weak = weak.clone();
+        win.on_inscription_text_changed(move |text| {
+            let t = text.to_string();
+            let trimmed = t.trim();
+            let count = trimmed.chars().count() as i32;
+            let over = count > journal::MAX_CHARS as i32;
+            if let Some(w) = sync_weak.upgrade() {
+                w.set_can_inscribe(!trimmed.is_empty() && !over);
+                w.set_inscription_count(SharedString::from(format!(
+                    "{}{} / {}",
+                    count,
+                    if over { "  ⚠" } else { "" },
+                    journal::MAX_CHARS
+                )));
+            }
+            let _ = &sync_app;
+        });
+    }
+
+    let dismiss_weak = weak.clone();
+    win.on_dismiss_inscription(move || {
+        if let Some(w) = dismiss_weak.upgrade() {
+            w.set_inscription_open(false);
+            w.set_inscription_error(SharedString::from(""));
+        }
+    });
+
+    let delins_app = Arc::clone(&app);
+    let delins_weak = weak.clone();
+    win.on_delete_inscription(move |id| {
+        let id = id.to_string();
+        {
+            let mut st = delins_app.store.lock().unwrap();
+            st.remove_inscription(&id);
+        }
+        delins_app.cloud.mark_dirty();
+        if let Some(w) = delins_weak.upgrade() {
+            refresh_screens(&w, &delins_app);
+        }
+    });
+
+    // The search box writes into app state, not the window, so the tick that
+    // rebuilds the list cannot clear what was typed.
+    let search_app = Arc::clone(&app);
+    let search_weak = weak.clone();
+    win.on_search_inscriptions(move |q| {
+        *search_app.ins_query.lock().unwrap() = q.to_string();
+        if let Some(w) = search_weak.upgrade() {
+            let st = search_app.store.lock().unwrap();
+            push_inscriptions(&w, &search_app, &st);
+        }
+    });
+
+    // Export writes the Markdown next to the data file, which is where the user
+    // already knows to look, and reports the path rather than claiming success.
+    let exp_app = Arc::clone(&app);
+    let exp_weak = weak.clone();
+    win.on_export_inscriptions(move || {
+        let en = exp_app.settings.lock().unwrap().lang == "en";
+        let md = {
+            let st = exp_app.store.lock().unwrap();
+            let all = st.inscriptions_newest_first();
+            journal::export_markdown(&all, !en)
+        };
+        let path = Store::data_dir().join("inscriptions.md");
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let ok = std::fs::write(&path, md).is_ok();
+        if let Some(w) = exp_weak.upgrade() {
+            let msg = if ok {
+                if en {
+                    format!("Exported to {}", path.display())
+                } else {
+                    format!("برون‌بری در {}", path.display())
+                }
+            } else if en {
+                "Export failed.".to_string()
+            } else {
+                "برون‌بری انجام نشد.".to_string()
+            };
+            w.set_sync_status(SharedString::from(msg));
+        }
+    });
+
+    let copy_app = Arc::clone(&app);
+    let copy_weak = weak.clone();
+    win.on_copy_inscriptions(move || {
+        let en = copy_app.settings.lock().unwrap().lang == "en";
+        let md = {
+            let st = copy_app.store.lock().unwrap();
+            let all = st.inscriptions_newest_first();
+            journal::export_markdown(&all, !en)
+        };
+        let ok = copy_to_clipboard(&md);
+        if let Some(w) = copy_weak.upgrade() {
+            let msg = if ok {
+                if en { "Copied".to_string() } else { "رونوشت شد".to_string() }
+            } else if en {
+                "Not copied: no clipboard tool found.".to_string()
+            } else {
+                "رونوشت نشد: ابزار تخته‌گیره‌ای یافت نشد.".to_string()
+            };
+            w.set_sync_status(SharedString::from(msg));
         }
     });
 

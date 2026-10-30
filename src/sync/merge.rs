@@ -18,6 +18,7 @@
 //! result as B with A, and merging a result with itself changes nothing. That
 //! is what makes it safe to run on every sync tick without drift.
 
+use crate::journal::Inscription;
 use crate::state::store::{Data, SessionRecord, Task};
 use std::collections::BTreeMap;
 
@@ -27,6 +28,7 @@ pub fn merge(local: &Data, remote: &Data) -> Data {
         sessions: merge_sessions(&local.sessions, &remote.sessions),
         tasks: merge_tasks(&local.tasks, &remote.tasks),
         next_task_id: local.next_task_id.max(remote.next_task_id),
+        inscriptions: merge_inscriptions(&local.inscriptions, &remote.inscriptions),
     };
     // Keep the id counter ahead of every id actually in use, so a merge can
     // never hand out an id that already belongs to a task.
@@ -81,6 +83,37 @@ fn newer(candidate: &Task, existing: &Task) -> bool {
     // Same stamp, same deletion state: fall back to a stable ordering so both
     // devices converge on the same answer instead of keeping their own copy.
     candidate.title > existing.title
+}
+
+/// Union of both archives, keyed by id.
+///
+/// An inscription's id already encodes (session, text), so two devices that
+/// recorded the same session produce the same id and the union cannot double
+/// it. Deletion is a tombstone: `deleted: true` wins over the live copy,
+/// otherwise a discard on the desktop would be undone by the laptop's copy on
+/// the next sync — the same reasoning as tasks.
+fn merge_inscriptions(a: &[Inscription], b: &[Inscription]) -> Vec<Inscription> {
+    let mut map: BTreeMap<String, Inscription> = BTreeMap::new();
+    for ins in a.iter().chain(b.iter()) {
+        match map.get(&ins.id) {
+            None => {
+                map.insert(ins.id.clone(), ins.clone());
+            }
+            Some(existing) => {
+                // A tombstone always wins. Between two live copies the text is
+                // identical by construction (the id hashes it), so keeping the
+                // earlier `written_at` is enough to make the result stable.
+                if ins.deleted && !existing.deleted {
+                    map.insert(ins.id.clone(), ins.clone());
+                } else if !ins.deleted && !existing.deleted && ins.written_at < existing.written_at {
+                    map.insert(ins.id.clone(), ins.clone());
+                }
+            }
+        }
+    }
+    let mut out: Vec<Inscription> = map.into_values().collect();
+    out.sort_by(|x, y| x.session_at.cmp(&y.session_at).then_with(|| x.id.cmp(&y.id)));
+    out
 }
 
 #[cfg(test)]
@@ -179,6 +212,7 @@ mod tests {
             sessions: vec![sess(1, 25)],
             tasks: vec![task(1, "x", 5)],
             next_task_id: 2,
+            inscriptions: vec![],
         };
         let once = merge(&a, &a);
         let twice = merge(&once, &once);

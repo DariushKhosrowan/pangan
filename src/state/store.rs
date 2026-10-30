@@ -1,6 +1,7 @@
 //! Persistence layer: JSON store for session history, tasks, and app state.
 //! Data lives under the config dir (`~/.config/pangan/data.json` on Linux).
 
+use crate::journal::Inscription;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -46,6 +47,10 @@ pub struct Data {
     pub tasks: Vec<Task>,
     #[serde(default)]
     pub next_task_id: u64,
+    /// One written line per finished focus session. Append-only, like sessions:
+    /// the record of what was done is never edited away.
+    #[serde(default)]
+    pub inscriptions: Vec<Inscription>,
 }
 
 impl Data {
@@ -247,6 +252,72 @@ impl Store {
             *counts.entry(t.date.clone()).or_insert(0) += 1;
         }
         counts.into_iter().collect()
+    }
+
+    // ── inscriptions ──────────────────────────────────────────────────────
+    //
+    // The archive is append-only by design. There is no `edit_inscription`,
+    // because the point of a record cut in stone is that it says what you
+    // wrote on the day, not what you wish you had written later. A wrong entry
+    // can be deleted, never rewritten.
+
+    /// Keep an inscription. Returns false when it was already present.
+    ///
+    /// The id is derived from (session, text), so re-adding the same writing
+    /// for the same session — a retry, a sync arriving twice, a UI firing the
+    /// callback twice — cannot create a duplicate row.
+    pub fn add_inscription(&mut self, ins: Inscription) -> bool {
+        if self.data.inscriptions.iter().any(|i| i.id == ins.id) {
+            return false;
+        }
+        self.data.inscriptions.push(ins);
+        self.save();
+        true
+    }
+
+    /// The inscription written for one session, if any.
+    ///
+    /// A session can only carry one line; asking twice must not open the dialog
+    /// twice, and a user who skipped must not be asked again on the next tick.
+    pub fn inscription_for_session(&self, session_at: i64) -> Option<&Inscription> {
+        self.data
+            .inscriptions
+            .iter()
+            .find(|i| i.session_at == session_at && !i.deleted)
+    }
+
+    /// Every live inscription, newest first.
+    ///
+    /// Discarded entries stay in the store as tombstones so the discard can
+    /// sync (see `remove_inscription`), which means every read path has to
+    /// filter them. Routing through one method is what stops a new screen from
+    /// forgetting to.
+    pub fn inscriptions_newest_first(&self) -> Vec<Inscription> {
+        let mut out: Vec<Inscription> = self
+            .data
+            .inscriptions
+            .iter()
+            .filter(|i| !i.deleted)
+            .cloned()
+            .collect();
+        out.sort_by(|a, b| b.session_at.cmp(&a.session_at));
+        out
+    }
+
+    /// Discard an inscription by marking it, not by dropping the row.
+    ///
+    /// Same reasoning as `remove_task`: a row that simply disappears cannot be
+    /// told apart from a row the other device never received, so the other
+    /// device's copy would put it back on the next sync.
+    pub fn remove_inscription(&mut self, id: &str) -> bool {
+        match self.data.inscriptions.iter_mut().find(|i| i.id == id) {
+            Some(i) if !i.deleted => {
+                i.deleted = true;
+                self.save();
+                true
+            }
+            _ => false,
+        }
     }
 }
 

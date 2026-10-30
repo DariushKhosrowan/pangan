@@ -1,4 +1,4 @@
-import { LineEdit } from "std-widgets.slint";
+import { LineEdit, TextEdit } from "std-widgets.slint";
 import { Shahbaz, Faravahar, Derafsh, Senmurv, Boteh, BotehDivider, EmblemField, SteppedCrenellation, LotusRow, WingedDivider, ArchFrame } from "heritage.slint";
 import { SunRing } from "ring.slint";
 import { Digits } from "digits.slint";
@@ -169,7 +169,11 @@ export global Palette {
         ? (dark ? #6E9CDA : #264D89)
         : (dark ? #DAB263 : #7E5C17); // A shadow that works on both themes: a warm grey at low alpha in light, a
     // true black in dark. A grey shadow on a dark page reads as a smudge.
-    out property <color> shadow: dark ? #00000066 : #2A211433; out property <brush> danger: dark ? #C9635B : #B04A42; }
+    out property <color> shadow: dark ? #00000066 : #2A211433; out property <brush> danger: dark ? #C9635B : #B04A42;
+    // The dim behind a modal. Dark enough that the timer underneath reads as
+    // unavailable, light enough that the window still feels like the same app
+    // rather than a blackout.
+    out property <color> scrim: dark ? #05060ACC : #14121E66; }
 
 export struct TaskItem {
     id: int,
@@ -200,6 +204,22 @@ export struct DayCell {
 // so the grid is built as a list of rows of seven rather than one flat list.
 export struct DayRow {
     cells: [DayCell],
+}
+
+// One row of the inscription archive.
+export struct InscriptionItem {
+    id: string,
+    /// The line that was written.
+    text: string,
+    /// "HH:MM" on the day it belongs to.
+    time: string,
+    /// The day heading it sits under ("۱۴ آبان ۱۴۰۵"), or "" when it continues
+    /// the previous row's day — so the archive reads as day groups, not as a
+    /// flat list where the same date repeats on every line.
+    day: string,
+    /// Which focus session it belongs to (Unix seconds), used to attach a
+    /// deletion to the right row.
+    session: int,
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -1533,8 +1553,45 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in property <[float]> hour-bars: [];
     in property <bool> has-hour-profile: false;
 
+    // ---- The inscription (what this session actually produced) ----
+    //
+    // A finished focus block drains into the store, and the dialog opens with
+    // the session's timestamp. `inscription-session` is what ties the typed
+    // line to the right session: it is set from Rust at open time, and the
+    // callback sends it back, so a second session finishing while the dialog is
+    // up cannot have its line written onto the first one.
+    in-out property <bool> inscription-open: false;
+    in-out property <string> inscription-text: "";
+    in property <string> inscription-prompt: "";
+    in property <string> inscription-placeholder: "";
+    in property <int> inscription-limit: 280;
+    in property <string> inscription-error: "";
+    /// "12 / 280" — built in Rust because this Slint version has no string length.
+    in property <string> inscription-count: "";
+    /// True when the field holds something other than whitespace.
+    in property <bool> can-inscribe: false;
+    in-out property <string> inscription-search: "";
+    in property <[InscriptionItem]> inscriptions: [];
+    in property <string> archive-empty: "";
+    /// The session the open dialog belongs to (Unix seconds, 0 = none).
+    in property <int> inscription-session: 0;
+    /// Set by Rust when the last write succeeded, so the dialog can close.
+    in-out property <bool> inscription-saved: false;
+
     // ---- Callbacks to Rust ----
     callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-chronicle; callback close-chronicle; callback copy-code(string); callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback sync-connect; callback sync-disconnect; callback set-client-id(string); callback set-sync-auto(bool); callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback refresh-events; callback open-url(string); callback window-drag-start; callback set-compact-mode(bool); callback set-animations(bool); callback pick-day(string); callback shift-month(int); callback goto-today; callback add-task-on(string); callback delete-task(int); callback rename-task(int, string); callback move-task(int, int); callback step-day(int); callback set-report-period(int); callback step-report(int); callback report-today;
+    // ---- Inscription callbacks ----
+    callback inscribe(int, string);
+    callback skip-inscription(int);
+    callback dismiss-inscription;
+    callback delete-inscription(string);
+    callback search-inscriptions(string);
+    callback inscription-text-changed(string);
+    callback open-inscriptions;
+    callback close-inscriptions;
+    callback export-inscriptions;
+    callback copy-inscriptions;
+
     // Resize: the edge/corner grab zones report the pointer's screen position
     // and which edge is being dragged; Rust turns that into a new window size.
 
@@ -1836,10 +1893,11 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             width: parent.width; padding-bottom: 14px; spacing: 0px; // view switcher
             HorizontalLayout {
                 height: 40px; alignment: center; Segmented {
-                    options: [Strings.nav-timer, Strings.nav-today, Strings.nav-chronicle, Strings.nav-stats]; current: 0; selected(i) => {
+                    options: [Strings.nav-timer, Strings.nav-today, Strings.nav-chronicle, Strings.nav-inscriptions, Strings.nav-stats]; current: 0; selected(i) => {
                         if (i == 1) { root.open-today(); }
                         if (i == 2) { root.open-chronicle(); }
-                        if (i == 3) { root.open-report(); }
+                        if (i == 3) { root.open-inscriptions(); }
+                        if (i == 4) { root.open-report(); }
                     }
                 }
             }
@@ -2731,6 +2789,178 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         wrap: word-wrap;
                         line-height-factor: 1.55;
                         horizontal-alignment: Strings.fa ? right : left;
+                    }
+                }
+            }
+        }
+
+        // ═══ INSCRIPTIONS ═══
+        // The archive of written lines, one per finished focus session. It is a
+        // separate screen rather than a card on Stats because its job is not
+        // measurement: a number tells you how long you sat, this tells you what
+        // you did, and the two do not belong in the same column.
+        if root.show-view == "inscriptions" : VerticalLayout {
+            opacity: root.view-opacity;
+            y: root.view-offset;
+            padding: 0px;
+            spacing: 0px;
+
+            HorizontalLayout {
+                height: Space.header-height;
+                padding-left: Space.gutter;
+                padding-right: Space.gutter;
+                spacing: 8px;
+                alignment: start;
+
+                IconButton {
+                    icon: "back";
+                    size: 30px;
+                    icon-size: 15px;
+                    clicked => { root.close-inscriptions(); }
+                }
+                Text {
+                    text: Strings.ins-title;
+                    font-size: Type.title;
+                    font-weight: 600;
+                    color: Palette.text;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                IconButton {
+                    icon: "close";
+                    size: 30px;
+                    icon-size: 14px;
+                    clicked => { root.close-inscriptions(); }
+                }
+            }
+
+            Flickable {
+                vertical-stretch: 1;
+                width: parent.width;
+                content-height: ins-col.preferred-height;
+                interactive: ins-col.preferred-height > self.height;
+
+                ins-col := VerticalLayout {
+                    width: parent.width;
+                    padding-left: Space.gutter;
+                    padding-right: Space.gutter;
+                    padding-bottom: Space.gap * 2;
+                    spacing: Space.gap;
+
+                    Text {
+                        text: Strings.ins-sub;
+                        font-family: "Vazirmatn";
+                        font-size: Type.small;
+                        color: Palette.text-faint;
+                        wrap: word-wrap;
+                        line-height-factor: 1.5;
+                        horizontal-alignment: Strings.fa ? right : left;
+                    }
+
+                    // Search, plus the two ways out: a file on disk, or the
+                    // clipboard. Both are the same Markdown; the file is for
+                    // keeping, the clipboard is for pasting into a journal.
+                    HorizontalLayout {
+                        height: 38px;
+                        spacing: 6px;
+                        alignment: start;
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            height: 38px;
+                            border-radius: Radius.tile;
+                            background: Palette.surface-2;
+                            border-width: 1px;
+                            border-color: Palette.hairline;
+
+                            HorizontalLayout {
+                                padding-left: Space.tight;
+                                padding-right: Space.tight;
+                                LineEdit {
+                                    horizontal-stretch: 1;
+                                    text <=> root.inscription-search;
+                                    placeholder-text: Strings.ins-search;
+                                    font-size: Type.small;
+                                    edited(v) => { root.search-inscriptions(v); }
+                                    accepted(v) => { root.search-inscriptions(v); }
+                                }
+                            }
+                        }
+
+                        IconButton {
+                            icon: "edit";
+                            size: 34px;
+                            icon-size: 15px;
+                            clicked => { root.export-inscriptions(); }
+                        }
+                        IconButton {
+                            icon: "chart";
+                            size: 34px;
+                            icon-size: 15px;
+                            clicked => { root.copy-inscriptions(); }
+                        }
+                    }
+
+                    if root.inscriptions.length == 0 : Card {
+                        height: self.preferred-height;
+                        VerticalLayout {
+                            padding: 14px;
+                            Text {
+                                text: root.archive-empty;
+                                font-family: "Vazirmatn";
+                                font-size: Type.small;
+                                color: Palette.text-faint;
+                                wrap: word-wrap;
+                                line-height-factor: 1.5;
+                                horizontal-alignment: Strings.fa ? right : left;
+                            }
+                        }
+                    }
+
+                    for row[i] in root.inscriptions : VerticalLayout {
+                        spacing: 4px;
+
+                        // The day heading, only on the first row of each day.
+                        if row.day != "" : Text {
+                            text: row.day;
+                            font-family: "Vazirmatn";
+                            font-size: Type.caption;
+                            font-weight: 600;
+                            color: Palette.accent;
+                            horizontal-alignment: Strings.fa ? right : left;
+                        }
+
+                        Card {
+
+                            row-card := HorizontalLayout {
+                                padding: 14px;
+                                spacing: Space.gap;
+
+                                Text {
+                                    text: row.time;
+                                    font-size: Type.caption;
+                                    color: Palette.text-faint;
+                                }
+
+                                Text {
+                                    text: row.text;
+                                    font-family: "Vazirmatn";
+                                    font-size: Type.small;
+                                    color: Palette.text;
+                                    wrap: word-wrap;
+                                    line-height-factor: 1.5;
+                                    horizontal-stretch: 1;
+                                    horizontal-alignment: Strings.fa ? right : left;
+                                }
+
+                                IconButton {
+                                    icon: "trash";
+                                    size: 24px;
+                                    icon-size: 12px;
+                                    clicked => { root.delete-inscription(row.id); }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -4140,6 +4370,155 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
             }
         }
     }
+    // ─────────────────────────────────────────────────────────────────────
+    // The inscription dialog.
+    //
+    // It covers the whole window when a focus session finishes, because the
+    // question it asks — what did you just do — is only answerable in the
+    // minute after the session ends. The scrim also blocks the timer controls
+    // underneath: a stray click on Reset while typing would throw away the
+    // record the dialog exists to capture.
+    // ─────────────────────────────────────────────────────────────────────
+    if root.inscription-open : Rectangle {
+        width: parent.width; height: parent.height;
+        background: Palette.scrim;
+
+        // The scrim swallows clicks so they cannot reach the timer below.
+        TouchArea { }
+
+        Rectangle {
+            width: parent.width - Space.gutter * 2;
+            height: ins-dialog.preferred-height;
+            x: (parent.width - self.width) / 2;
+            y: Math.max(Space.gutter, (parent.height - self.height) / 2);
+            border-radius: Radius.panel;
+            background: Palette.surface;
+            border-width: 1px;
+            border-color: Palette.hairline;
+            drop-shadow-blur: Elev.card-blur;
+            drop-shadow-offset-y: Elev.card-y;
+            drop-shadow-color: Elev.card-shadow;
+
+            ins-dialog := VerticalLayout {
+                padding: 18px;
+                spacing: 12px;
+
+                Text {
+                    text: Strings.ins-prompt;
+                    font-family: "Vazirmatn";
+                    font-size: Type.body;
+                    font-weight: 600;
+                    color: Palette.text;
+                    wrap: word-wrap;
+                    horizontal-alignment: Strings.fa ? right : left;
+                }
+
+                Rectangle {
+                    height: 76px;
+                    border-radius: Radius.tile;
+                    background: Palette.surface-2;
+                    border-width: 1px;
+                    border-color: root.inscription-error != "" ? Palette.danger : Palette.hairline;
+
+                    ins-field := TextEdit {
+                        x: Space.tight; y: Space.tight;
+                        width: parent.width - Space.tight * 2;
+                        height: parent.height - Space.tight * 2;
+                        text <=> root.inscription-text;
+                        placeholder-text: root.inscription-placeholder;
+                        font-family: "Vazirmatn";
+                        font-size: Type.small;
+                        wrap: word-wrap;
+                        edited(v) => { root.inscription-text-changed(v); }
+                    }
+                }
+
+                // The count is always visible rather than appearing only when
+                // the limit is passed: a user who can see the room left writes
+                // a better line than one who is told off at the end.
+                HorizontalLayout {
+                    height: 16px;
+                    spacing: 6px;
+                    alignment: space-between;
+
+                    Text {
+                        text: root.inscription-error;
+                        font-size: Type.caption;
+                        color: Palette.danger;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.inscription-count;
+                        font-size: Type.caption;
+                        color: Palette.text-faint;
+                        vertical-alignment: center;
+                    }
+                }
+
+                HorizontalLayout {
+                    height: 38px;
+                    spacing: 8px;
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 38px;
+                        border-radius: Radius.tile;
+                        background: Palette.surface-2;
+                        ta-skip := TouchArea { clicked => { root.skip-inscription(root.inscription-session); } }
+                        states [
+                            h when ta-skip.has-hover : {
+                                background: Palette.surface-3;
+                                in { animate background { duration: Motion.quick; } }
+                            }
+                        ]
+                        Text {
+                            text: Strings.ins-skip;
+                            font-size: Type.small;
+                            color: Palette.text-dim;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 38px;
+                        border-radius: Radius.tile;
+                        // Disabled while the field is blank, so the primary
+                        // action never saves an empty inscription and then has
+                        // to explain why it refused. `can-inscribe` is pushed
+                        // from Rust, because this Slint version has no string
+                        // length or trim to test against.
+                        background: root.can-inscribe ? Palette.accent : Palette.surface-3;
+                        ta-inscribe := TouchArea {
+                            clicked => {
+                                if (root.can-inscribe) {
+                                    root.inscribe(root.inscription-session, root.inscription-text);
+                                }
+                            }
+                        }
+                        states [
+                            h when ta-inscribe.has-hover && root.can-inscribe : {
+                                background: Palette.accent-strong;
+                                in { animate background { duration: Motion.quick; } }
+                            }
+                        ]
+                        Text {
+                            text: Strings.ins-inscribe;
+                            font-size: Type.small;
+                            font-weight: 600;
+                            color: root.can-inscribe ? Palette.on-accent : Palette.text-faint;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // Resize handles — a frameless window gets no WM resize border, so these
     // eight invisible grab zones give the edges and corners back. They sit on
