@@ -170,6 +170,11 @@ export global Palette {
         : (dark ? #DAB263 : #7E5C17); // A shadow that works on both themes: a warm grey at low alpha in light, a
     // true black in dark. A grey shadow on a dark page reads as a smudge.
     out property <color> shadow: dark ? #00000066 : #2A211433; out property <brush> danger: dark ? #C9635B : #B04A42;
+    // A kept block, drawn in the same muted manner as `danger` so the two read
+    // as a matched pair of judgements rather than one being a status colour and
+    // the other a warning. Deliberately not a saturated green: the app does not
+    // celebrate a kept promise, it records one.
+    out property <brush> success: dark ? #6FA97F : #3F7A52;
     // The dim behind a modal. Dark enough that the timer underneath reads as
     // unavailable, light enough that the window still feels like the same app
     // rather than a blackout.
@@ -254,6 +259,20 @@ export struct InscriptionItem {
     /// The intention this inscription answers, "" when the block had none.
     /// Shown above the written line so the pair reads as promise then outcome.
     decree: string,
+    /// What the user said this block was, already translated and formatted in
+    /// Rust ("انجام شد"), or "" when nothing has been said about it yet.
+    ///
+    /// Empty is the common case and means *ask*: the row shows the five seals
+    /// instead. A guess drawn the same as a stated fact is a guess the user
+    /// will trust, which is why the app never fills this in from the shape.
+    verdict: string,
+    /// True when the user said it; false when the app inferred it. Drives the
+    /// filled-vs-hollow seal, so the difference is visible at a glance rather
+    /// than only in the wording.
+    verdict-declared: bool,
+    /// The verdict's storage key ("kept", "partial", …), so the row can tell
+    /// which seal is the active one without comparing translated strings.
+    verdict-kind: string,
 }
 
 // One decree the span made and did not answer.
@@ -945,6 +964,109 @@ component StatCard inherits Rectangle {
             color: Palette.text-faint;
             visible: root.hint != "";
             wrap: word-wrap;
+        }
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// VerdictSeal — one tappable judgement on an archive row.
+//
+// Hollow until pressed, filled in the accent once the user has said it. The
+// shape carries the state on its own, before any word is read: an open outline
+// asks, a filled chip answers. `active` is also what marks the current choice
+// when the row is re-rendered, so the user can see which of the five they
+// pressed without comparing labels.
+// ───────────────────────────────────────────────────────────────────────────
+component VerdictSeal inherits Rectangle {
+    in property <string> kind: "";
+    in property <string> label: "";
+    in property <bool> active: false;
+    /// The storage key of the seal that was pressed.
+    callback picked(string);
+
+    height: 22px;
+    border-radius: 11px;
+    background: active ? Palette.accent-soft : transparent;
+    border-width: 1px;
+    border-color: active ? Palette.accent : Palette.hairline;
+
+    ta := TouchArea {
+        clicked => { root.picked(root.kind); }
+    }
+    states [
+        hot when ta.has-hover : {
+            background: Palette.surface-2;
+            border-color: Palette.accent;
+        }
+    ]
+
+    // The layout is what gives the chip its width: a Rectangle has no padding,
+    // so a bare Text child would sit at the origin and be clipped by the fixed
+    // 22px height.
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        alignment: center;
+        Text {
+            text: root.label;
+            font-family: "Vazirmatn";
+            font-size: Type.caption;
+            color: (ta.has-hover || root.active) ? Palette.accent : Palette.text-faint;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// VerdictChip — one verdict kind and how many blocks fell into it.
+//
+// A chip rather than a StatCard: five judgements side by side are a vocabulary,
+// and giving each one a card would draw them as five separate metrics when the
+// point is that together they cover what happened to a day.
+//
+// Zero is shown, not hidden. A tally with one chip silently missing its number
+// reads as a rendering fault, and "none of the blocks were cut short" is a real
+// fact about the week — one the user came to this card to learn. A zero chip is
+// drawn dim and unfilled so it stays out of the way without being absent.
+// ───────────────────────────────────────────────────────────────────────────
+component VerdictChip inherits Rectangle {
+    in property <string> label: "";
+    in property <int> count: 0;
+    in property <brush> tint: Palette.text-faint;
+
+    height: 24px;
+    border-radius: 12px;
+    background: count > 0 ? Palette.surface-2 : transparent;
+    border-width: 1px;
+    border-color: count > 0 ? tint : Palette.hairline;
+
+    // The count and the label are two Text nodes rather than one interpolated
+    // string: in an RTL layout the bidi algorithm reorders a numeral followed
+    // by Persian text, so "انجام شد ۲" written as one string renders as
+    // "۲ انجام شد" — the count jumping in front of its own label. Separate
+    // nodes are laid out by the HorizontalLayout, which cannot reorder them.
+    //
+    // Order matters here: the number goes first in the layout so it sits at the
+    // visual start of the chip in both languages, the way a count reads.
+    HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 9px;
+        spacing: 5px;
+        alignment: center;
+
+        Text {
+            text: Digits.num(root.count);
+            font-size: Type.caption;
+            font-weight: 700;
+            color: root.count > 0 ? root.tint : Palette.text-faint;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.label;
+            font-family: "Vazirmatn";
+            font-size: Type.caption;
+            color: root.count > 0 ? root.tint : Palette.text-faint;
+            vertical-alignment: center;
         }
     }
 }
@@ -1844,6 +1966,29 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in property <[ThemeItem]> reck-themes: [];
     /// A one-line verdict on the span, built in Rust where the digits are.
     in property <string> reck-summary: "";
+    // ── the same span's blocks, judged ────────────────────────────────────
+    //
+    // The counts above say what was written. These say what the writing was
+    // *worth*, in the only judgement that is not the app's to make. Kept
+    // separate from the decree/inscription counts on purpose: those measure
+    // whether words exist, and a block can have its words and still have been
+    // abandoned. Merging the two would hide exactly the gap the user came to
+    // the report to see.
+    in property <int> verdict-kept: 0;
+    in property <int> verdict-partial: 0;
+    in property <int> verdict-broken: 0;
+    in property <int> verdict-extended: 0;
+    in property <int> verdict-short: 0;
+    /// How many of the judged blocks the user actually judged, and how many
+    /// the app inferred. Stated as a ratio so the confidence is visible.
+    in property <int> verdict-declared: 0;
+    in property <int> verdict-total: 0;
+    /// Blocks that met what they were for — kept, or outgrew their decree.
+    /// The one number in this card that is a summary rather than a count, so
+    /// it is shown as a sentence, not as a sixth chip.
+    in property <int> verdict-met: 0;
+    /// True when there is nothing to judge in this span.
+    in property <bool> verdict-empty: true;
     in property <bool> reck-empty: true;
     in property <[float]> chart-bars: [];
     in property <[string]> chart-labels: [];
@@ -1953,6 +2098,12 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     callback skip-inscription(int);
     callback dismiss-inscription;
     callback delete-inscription(string);
+    /// The user judged a block: (session seconds, the kind's storage key).
+    ///
+    /// The kind travels as its stable string rather than an enum, because the
+    /// storage form is the one identity that survives a rename of the UI copy
+    /// and a round-trip through `data.json`.
+    callback declare-verdict(int, string);
     callback search-inscriptions(string);
     callback inscription-text-changed(string);
     callback open-inscriptions;
@@ -3838,6 +3989,123 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                         clicked => { root.delete-inscription(row.id); }
                                     }
                                 }
+
+                                // ── the verdict ──────────────────────────
+                                //
+                                // Five words under the line they judge. Shown
+                                // only for a session that has a writing or a
+                                // promise to judge — a row with neither has
+                                // nothing to say a verdict about.
+                                //
+                                // A declared verdict is drawn filled and the
+                                // five seals collapse to the one word; an
+                                // inferred one is drawn hollow and labelled,
+                                // so a guess can never be mistaken for the
+                                // user's own statement.
+                                if row.text != "" || row.decree != "" : HorizontalLayout {
+                                    spacing: 5px;
+                                    alignment: start;
+
+                                    // A declared verdict: one filled chip, and
+                                    // the five seals are not drawn at all. The
+                                    // user has already answered; re-asking
+                                    // would make the row look unresolved and
+                                    // would also let a stray press silently
+                                    // rewrite an answer they were only reading.
+                                    //
+                                    // Wrapped in a HorizontalLayout because a
+                                    // Rectangle has no padding of its own — the
+                                    // Text child would be laid out at the
+                                    // rectangle's origin, overflow to the left
+                                    // in RTL, and be clipped by the 22px
+                                    // height. The layout is what gives the chip
+                                    // its width.
+                                    // A filled field, not an outline. An outlined
+                                    // chip is the same shape as the seals it
+                                    // replaced, so it reads as one more option
+                                    // to press; a filled field reads as a value
+                                    // that has already been set. `on-accent` is
+                                    // the colour the rest of the app uses for
+                                    // text on a filled accent surface.
+                                    //
+                                    // Pressing it takes the word back. That is
+                                    // the only way to reach the five seals
+                                    // again once a verdict is declared, and an
+                                    // app that can record a judgement but never
+                                    // withdraw one is an app that argues with
+                                    // the user. The tooltip is the affordance:
+                                    // without it the chip looks like a label.
+                                    if row.verdict-declared : Rectangle {
+                                        height: 22px;
+                                        border-radius: 11px;
+                                        background: Palette.accent;
+                                        ta-undo := TouchArea {
+                                            clicked => { root.declare-verdict(row.session, ""); }
+                                        }
+                                        HorizontalLayout {
+                                            padding-left: 9px;
+                                            padding-right: 9px;
+                                            alignment: center;
+                                            Text {
+                                                text: row.verdict;
+                                                font-family: "Vazirmatn";
+                                                font-size: Type.caption;
+                                                font-weight: 600;
+                                                color: Palette.on-accent;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+
+                                    if !row.verdict-declared : HorizontalLayout {
+                                        spacing: 4px;
+                                        alignment: start;
+
+                                        // The five, in the order the words read
+                                        // best: done, half, not, over, short.
+                                        VerdictSeal {
+                                            kind: "kept";
+                                            label: Strings.verdict-kept;
+                                            active: row.verdict-kind == "kept";
+                                            picked(k) => { root.declare-verdict(row.session, k); }
+                                        }
+                                        VerdictSeal {
+                                            kind: "partial";
+                                            label: Strings.verdict-partial;
+                                            active: row.verdict-kind == "partial";
+                                            picked(k) => { root.declare-verdict(row.session, k); }
+                                        }
+                                        VerdictSeal {
+                                            kind: "broken";
+                                            label: Strings.verdict-broken;
+                                            active: row.verdict-kind == "broken";
+                                            picked(k) => { root.declare-verdict(row.session, k); }
+                                        }
+                                        VerdictSeal {
+                                            kind: "extended";
+                                            label: Strings.verdict-extended;
+                                            active: row.verdict-kind == "extended";
+                                            picked(k) => { root.declare-verdict(row.session, k); }
+                                        }
+                                        VerdictSeal {
+                                            kind: "short";
+                                            label: Strings.verdict-short;
+                                            active: row.verdict-kind == "short";
+                                            picked(k) => { root.declare-verdict(row.session, k); }
+                                        }
+
+                                        // When the app guessed, it says so
+                                        // quietly at the end of the seal row:
+                                        // the user is being asked, not told.
+                                        if row.verdict != "" : Text {
+                                            text: Strings.verdict-inferred;
+                                            font-size: Type.caption;
+                                            color: Palette.text-faint;
+                                            font-italic: true;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -4280,6 +4548,87 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 font-size: Type.small;
                                 color: Palette.text-dim;
                                 wrap: word-wrap;
+                            }
+
+                            // ── how the blocks were judged ───────────────
+                            // Five counts that are deliberately not summed into
+                            // one "delivered" number: that flattening is what
+                            // the seals exist to undo. The declared/total line
+                            // underneath says how much of this the user said
+                            // themselves and how much the app guessed at.
+                            if !root.verdict-empty : VerticalLayout {
+                                spacing: 7px;
+
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Text {
+                                        text: Strings.verdict-tally-title;
+                                        font-size: Type.caption;
+                                        font-weight: 700;
+                                        letter-spacing: Strings.fa ? 0px : Type.tracking;
+                                        color: Palette.text-faint;
+                                        horizontal-stretch: 1;
+                                        overflow: elide;
+                                    }
+                                    Text {
+                                        text: Digits.num(root.verdict-declared) + " "
+                                            + Strings.reck-of + " "
+                                            + Digits.num(root.verdict-total) + " "
+                                            + Strings.verdict-tally-declared;
+                                        font-size: Type.caption;
+                                        color: Palette.text-faint;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+                                }
+
+                                // The one summary sentence. Deliberately a
+                                // sentence and not a percentage: "9 of 12 met"
+                                // says what happened, while "75%" invites the
+                                // reader to grade a week that had reasons.
+                                if root.verdict-met > 0 : Text {
+                                    text: Digits.num(root.verdict-met) + " "
+                                        + Strings.reck-of + " "
+                                        + Digits.num(root.verdict-total) + " "
+                                        + Strings.verdict-met-suffix;
+                                    font-size: Type.small;
+                                    color: Palette.text-dim;
+                                    wrap: word-wrap;
+                                }
+
+                                // Seals, drawn as a wrapped row of chips. Each
+                                // is the same shape as the one in the archive,
+                                // so the word the user pressed is the word
+                                // they later see counted.
+                                HorizontalLayout {
+                                    spacing: 5px;
+                                    alignment: start;
+                                    VerdictChip {
+                                        label: Strings.verdict-kept;
+                                        count: root.verdict-kept;
+                                        tint: Palette.success;
+                                    }
+                                    VerdictChip {
+                                        label: Strings.verdict-partial;
+                                        count: root.verdict-partial;
+                                        tint: Palette.accent;
+                                    }
+                                    VerdictChip {
+                                        label: Strings.verdict-broken;
+                                        count: root.verdict-broken;
+                                        tint: Palette.danger;
+                                    }
+                                    VerdictChip {
+                                        label: Strings.verdict-extended;
+                                        count: root.verdict-extended;
+                                        tint: Palette.accent;
+                                    }
+                                    VerdictChip {
+                                        label: Strings.verdict-short;
+                                        count: root.verdict-short;
+                                        tint: Palette.text-faint;
+                                    }
+                                }
                             }
 
                             // The four counts. Two pairs rather than one row of

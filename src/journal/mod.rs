@@ -26,12 +26,14 @@
 pub mod decree;
 pub mod inscription;
 pub mod reckoning;
+pub mod verdict;
 
 // The inscription rules are called from the app layer by bare name because they
 // are the older half of the pair; the decree's are reached through `decree::`
 // so the two sets of `create`/`validate_text` cannot be confused at a call site.
 pub use decree::Decree;
 pub use inscription::{create, day_key, search, Inscription, MAX_CHARS};
+pub use verdict::{Verdict, VerdictKind};
 
 /// Render the whole record — promise and outcome — as Markdown.
 ///

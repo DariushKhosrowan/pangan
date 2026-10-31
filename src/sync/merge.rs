@@ -24,7 +24,7 @@
 //! result as B with A, and merging a result with itself changes nothing. That
 //! is what makes it safe to run on every sync tick without drift.
 
-use crate::journal::{Decree, Inscription};
+use crate::journal::{Decree, Inscription, Verdict};
 use crate::state::plans::Plan;
 use crate::state::rota::RotaEntry;
 use crate::state::store::{Data, SessionRecord, Task};
@@ -50,6 +50,7 @@ pub fn merge(local: &Data, remote: &Data) -> Data {
         next_task_id: local.next_task_id.max(remote.next_task_id),
         inscriptions: merge_inscriptions(&local.inscriptions, &remote.inscriptions),
         decrees: merge_decrees(&local.decrees, &remote.decrees),
+        verdicts: merge_verdicts(&local.verdicts, &remote.verdicts),
         rota: merge_rota(&local.rota, &remote.rota),
         next_rota_id: local.next_rota_id.max(remote.next_rota_id),
         plans: merge_plans(&local.plans, &remote.plans),
@@ -270,6 +271,54 @@ fn newer_plan(candidate: &Plan, existing: &Plan) -> bool {
     candidate.name > existing.name
 }
 
+/// Per-verdict merge: newest `declared_at` wins, a withdrawal beats an old word.
+///
+/// Keyed by `session_at` rather than by a row id, because one session holds at
+/// most one verdict — that is the invariant [`crate::journal::verdict::put`]
+/// enforces on the local path, and sync has to enforce the same one or two
+/// devices would drift into holding two answers to one question.
+///
+/// The tie-break is the kind's rank, not its name: two devices that judged the
+/// same block in the same second must converge on one answer, and any fixed
+/// order does that. Rank is used so the more forgiving judgement survives a
+/// true tie — a coin-flip between "I did it" and "I didn't" should not land on
+/// the accusation.
+fn merge_verdicts(a: &[Verdict], b: &[Verdict]) -> Vec<Verdict> {
+    let mut map: BTreeMap<i64, Verdict> = BTreeMap::new();
+    for v in a.iter().chain(b.iter()) {
+        match map.get(&v.session_at) {
+            None => {
+                map.insert(v.session_at, v.clone());
+            }
+            Some(existing) => {
+                if newer_verdict(v, existing) {
+                    map.insert(v.session_at, v.clone());
+                }
+            }
+        }
+    }
+    let mut out: Vec<Verdict> = map.into_values().collect();
+    out.sort_by(|x, y| {
+        x.session_at
+            .cmp(&y.session_at)
+            .then_with(|| x.declared_at.cmp(&y.declared_at))
+    });
+    out
+}
+
+/// Is `candidate` the copy of one verdict to keep?
+fn newer_verdict(candidate: &Verdict, existing: &Verdict) -> bool {
+    if candidate.declared_at != existing.declared_at {
+        return candidate.declared_at > existing.declared_at;
+    }
+    if candidate.deleted != existing.deleted {
+        return candidate.deleted;
+    }
+    // Equal stamps and equal tombstones: pick deterministically. `Kept` sorts
+    // before `Broken` in `rank`, so the gentler reading of an honest tie wins.
+    candidate.kind.rank() < existing.kind.rank()
+}
+
 /// Which of two copies of one rota entry to keep.
 ///
 /// Precedence, in order:
@@ -392,6 +441,7 @@ mod tests {
             next_plan_id: 0,
             inscriptions: vec![],
             decrees: vec![],
+            verdicts: vec![],
         };
         let once = merge(&a, &a);
         let twice = merge(&once, &once);
@@ -683,5 +733,111 @@ mod tests {
             ..Default::default()
         };
         assert!(merge(&a, &Data::default()).next_plan_id >= 9);
+    }
+
+    // ── verdicts ─────────────────────────────────────────────────────────
+
+    fn verdict(session_at: i64, kind: crate::journal::VerdictKind, at: i64) -> Verdict {
+        Verdict {
+            session_at,
+            kind,
+            declared_at: at,
+            deleted: false,
+        }
+    }
+
+    #[test]
+    fn verdicts_from_both_devices_both_survive() {
+        use crate::journal::VerdictKind;
+        let a = Data {
+            verdicts: vec![verdict(1, VerdictKind::Kept, 10)],
+            ..Default::default()
+        };
+        let b = Data {
+            verdicts: vec![verdict(2, VerdictKind::Partial, 20)],
+            ..Default::default()
+        };
+        assert_eq!(merge(&a, &b).verdicts.len(), 2);
+    }
+
+    #[test]
+    fn the_later_word_on_one_block_wins_and_the_merge_is_commutative() {
+        use crate::journal::VerdictKind;
+        let a = Data {
+            verdicts: vec![verdict(1, VerdictKind::Broken, 10)],
+            ..Default::default()
+        };
+        let b = Data {
+            verdicts: vec![verdict(1, VerdictKind::Kept, 20)],
+            ..Default::default()
+        };
+        assert_eq!(merge(&a, &b).verdicts[0].kind, VerdictKind::Kept);
+        assert_eq!(merge(&b, &a).verdicts[0].kind, VerdictKind::Kept);
+    }
+
+    #[test]
+    fn one_block_never_ends_up_with_two_verdicts() {
+        use crate::journal::VerdictKind;
+        // Both devices judged the same block; the union must be one row, or the
+        // tally would count one block twice.
+        let a = Data {
+            verdicts: vec![verdict(1, VerdictKind::Kept, 10)],
+            ..Default::default()
+        };
+        let b = Data {
+            verdicts: vec![verdict(1, VerdictKind::Short, 20)],
+            ..Default::default()
+        };
+        let out = merge(&a, &b);
+        assert_eq!(out.verdicts.len(), 1);
+        assert_eq!(out.verdicts[0].kind, VerdictKind::Short, "the newer word");
+    }
+
+    #[test]
+    fn a_withdrawn_verdict_is_not_resurrected_by_the_other_device() {
+        use crate::journal::VerdictKind;
+        let mut dead = verdict(1, VerdictKind::Kept, 20);
+        dead.deleted = true;
+        let a = Data {
+            verdicts: vec![verdict(1, VerdictKind::Kept, 10)],
+            ..Default::default()
+        };
+        let b = Data {
+            verdicts: vec![dead],
+            ..Default::default()
+        };
+        assert!(
+            merge(&a, &b).verdicts[0].deleted,
+            "a retraction must travel"
+        );
+        assert!(merge(&b, &a).verdicts[0].deleted);
+    }
+
+    #[test]
+    fn an_honest_tie_on_one_block_converges_instead_of_keeping_both() {
+        use crate::journal::VerdictKind;
+        // Same session, same second, different words. Any fixed order converges;
+        // the one chosen should not land on the accusation.
+        let a = Data {
+            verdicts: vec![verdict(1, VerdictKind::Kept, 50)],
+            ..Default::default()
+        };
+        let b = Data {
+            verdicts: vec![verdict(1, VerdictKind::Broken, 50)],
+            ..Default::default()
+        };
+        let ab = merge(&a, &b);
+        let ba = merge(&b, &a);
+        assert_eq!(ab.verdicts.len(), 1);
+        assert_eq!(ab.verdicts, ba.verdicts, "both orders reach the same store");
+        assert_eq!(ab.verdicts[0].kind, VerdictKind::Kept);
+    }
+
+    #[test]
+    fn merging_two_empty_verdict_lists_changes_nothing() {
+        let empty = Data::default();
+        let out = merge(&empty, &empty);
+        assert!(out.verdicts.is_empty());
+        assert_eq!(merge(&out, &out).verdicts.len(), 0);
     }
 }

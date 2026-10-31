@@ -390,6 +390,7 @@ mod tests {
             next_plan_id: 0,
             inscriptions: vec![],
             decrees: vec![],
+            verdicts: vec![],
         };
         let b = Data {
             sessions: vec![SessionRecord { at: 2, minutes: 25 }],
@@ -401,6 +402,7 @@ mod tests {
             next_plan_id: 0,
             inscriptions: vec![],
             decrees: vec![],
+            verdicts: vec![],
         };
         let first = merge::merge(&a, &b);
         let second = merge::merge(&first, &b);
@@ -461,6 +463,7 @@ mod tests {
             next_plan_id: 0,
             inscriptions: vec![],
             decrees: vec![],
+            verdicts: vec![],
         };
         let mut dev_a = device("desktop");
         let out_a = sync_once(&mut tokens, &local(a.clone()), &mut dev_a, &mut |_, _| {}).unwrap();
@@ -854,6 +857,7 @@ mod recovery_tests {
             next_plan_id: 0,
             inscriptions: vec![],
             decrees: vec![],
+            verdicts: vec![],
         };
         let mut dev = device("desktop");
         sync_once(&mut tokens, &local(good), &mut dev, &mut |_, _| {}).unwrap();
@@ -1329,6 +1333,7 @@ mod everything_syncs_tests {
             next_plan_id: 0,
             inscriptions: vec![],
             decrees: vec![],
+            verdicts: vec![],
         };
         let mut dev_a = device("desktop");
         let out_a = sync_once(
@@ -1528,6 +1533,7 @@ mod everything_syncs_tests {
             next_plan_id: 0,
             inscriptions: vec![],
             decrees: vec![],
+            verdicts: vec![],
         };
         let mut dev = device("desktop");
         let mut settled = data.clone();

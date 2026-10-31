@@ -354,6 +354,27 @@ export global Strings {
     out property <string> ins-delete: fa ? "دور انداختن" : "Discard";
     out property <string> ins-none-written: fa ? "بی‌نوشته ماند" : "nothing written";
 
+    // ── Verdicts: what the user says a block actually was ──────────────────
+    // Five words, chosen by the person who was there. The app can see that a
+    // decree got an inscription; only the user knows whether the block was
+    // done, half done, abandoned, or outgrew its own promise.
+    out property <string> verdict-kept: fa ? "انجام شد" : "Kept";
+    out property <string> verdict-partial: fa ? "نیمه" : "Partial";
+    out property <string> verdict-broken: fa ? "نشد" : "Not done";
+    out property <string> verdict-extended: fa ? "بیشتر" : "Ran over";
+    out property <string> verdict-short: fa ? "کوتاه" : "Cut short";
+    /// The label above the seals, in the archive row.
+    out property <string> verdict-ask: fa ? "چطور بود؟" : "How did it go?";
+    /// Said when the block has no verdict and the app is guessing.
+    out property <string> verdict-inferred: fa ? "حدس زده" : "inferred";
+    /// The reckoning header for the five counts.
+    out property <string> verdict-tally-title: fa ? "داوری بلوک‌ها" : "Blocks judged";
+    /// "۲ از ۵ را خودت داوری کردی" — the number is built in Rust.
+    out property <string> verdict-tally-declared: fa ? "خودت داوری کردی" : "you judged";
+    out property <string> verdict-tally-inferred: fa ? "از روی شکل حدس زده شد" : "inferred from shape";
+    /// "met what they were for" — follows a Rust-built "9 of 12".
+    out property <string> verdict-met-suffix: fa ? "به آنچه برایش بود رسید" : "met what they were for";
+
     // ── Decrees: the intention written before the block ────────────────────
     // An inscription records what was achieved; a decree records what the block
     // was *for*. The pair is the point: a decree still facing an empty

@@ -1014,6 +1014,40 @@ fn push_plans(win: &PanganWindow, app: &AppState, st: &Store) {
 /// produced no inscription. That second kind is the most useful row in the list
 /// — a block that was spoken for and did not deliver — and it would be invisible
 /// if the archive were built from inscriptions alone.
+/// The user-facing word for a verdict kind.
+///
+/// Lives here rather than in `strings.slint` because the archive row and the
+/// reckoning tally must never disagree about what a seal says: the row draws
+/// one word per session, the tally counts five. Two copies of these words in
+/// two files is two chances to rename one of them.
+fn verdict_word(kind: journal::VerdictKind, en: bool) -> &'static str {
+    match (kind, en) {
+        (journal::VerdictKind::Kept, false) => "انجام شد",
+        (journal::VerdictKind::Kept, true) => "Kept",
+        (journal::VerdictKind::Partial, false) => "نیمه",
+        (journal::VerdictKind::Partial, true) => "Partial",
+        (journal::VerdictKind::Broken, false) => "نشد",
+        (journal::VerdictKind::Broken, true) => "Not done",
+        (journal::VerdictKind::Extended, false) => "بیشتر",
+        (journal::VerdictKind::Extended, true) => "Ran over",
+        (journal::VerdictKind::Short, false) => "کوتاه",
+        (journal::VerdictKind::Short, true) => "Cut short",
+    }
+}
+
+/// The storage key for a verdict kind, as the UI sends it back.
+///
+/// Searched over [`journal::VerdictKind::ALL`] rather than matched arm by arm:
+/// a `match` here would compile happily after a sixth kind is added and would
+/// silently refuse it at runtime, while an `ALL` scan keeps the key-to-kind
+/// mapping and the definition of the vocabulary in one list.
+fn verdict_from_key(key: &str) -> Option<journal::VerdictKind> {
+    journal::VerdictKind::ALL
+        .iter()
+        .copied()
+        .find(|k| k.as_str() == key)
+}
+
 fn push_inscriptions(win: &PanganWindow, app: &AppState, st: &Store) {
     let en = app.settings.lock().unwrap().lang == "en";
     let query = app.ins_query.lock().unwrap().clone();
@@ -1054,20 +1088,20 @@ fn push_inscriptions(win: &PanganWindow, app: &AppState, st: &Store) {
             .get(&session_at)
             .map(|i| i.text.clone())
             .unwrap_or_default();
-        let (id, decree) = match by_session.get(&session_at) {
-            Some(ins) => (
+        // Both halves of the session's record, held as references so the
+        // verdict rule can see the shape it falls back to without cloning it.
+        let ins_ref = by_session.get(&session_at).copied();
+        let dec_ref = st.decree_for_session(session_at);
+        let (id, decree) = match (ins_ref, decree_by_session.get(&session_at)) {
+            (Some(ins), _) => (
                 ins.id.clone(),
-                st.decree_for_session(ins.session_at)
-                    .map(|d| d.text.clone())
-                    .unwrap_or_default(),
+                dec_ref.map(|d| d.text.clone()).unwrap_or_default(),
             ),
-            None => match decree_by_session.get(&session_at) {
-                // A decree with no inscription is addressed by its own id, and
-                // the row shows nothing in the `text` field: there was no
-                // written outcome, and inventing one would be a lie.
-                Some(dec) => (dec.id.clone(), dec.text.clone()),
-                None => continue,
-            },
+            // A decree with no inscription is addressed by its own id, and
+            // the row shows nothing in the `text` field: there was no
+            // written outcome, and inventing one would be a lie.
+            (None, Some(dec)) => (dec.id.clone(), dec.text.clone()),
+            (None, None) => continue,
         };
 
         let day_key = journal::day_key(session_at);
@@ -1080,6 +1114,22 @@ fn push_inscriptions(win: &PanganWindow, app: &AppState, st: &Store) {
             jalali_day_heading(&day_key, en)
         };
 
+        // What this block was, as the user said it — or, if they have not said,
+        // as the shape implies. A declared verdict fills the row's seal; an
+        // inferred one leaves the five open and says "inferred" beside them.
+        // The distinction is carried, not flattened: a guess drawn like a fact
+        // is a guess the user will trust.
+        let said = st.verdict_for(session_at).map(|v| v.kind);
+        let (verdict_label, verdict_declared, verdict_kind) =
+            match journal::verdict::effective(said, dec_ref, ins_ref) {
+                Some(e) => (
+                    verdict_word(e.kind, en).to_string(),
+                    e.declared,
+                    e.kind.as_str().to_string(),
+                ),
+                None => (String::new(), false, String::new()),
+            };
+
         items.push(InscriptionItem {
             id: SharedString::from(id),
             text: SharedString::from(text),
@@ -1087,6 +1137,9 @@ fn push_inscriptions(win: &PanganWindow, app: &AppState, st: &Store) {
             day: SharedString::from(day),
             session: session_at as i32,
             decree: SharedString::from(decree),
+            verdict: SharedString::from(verdict_label),
+            verdict_declared,
+            verdict_kind: SharedString::from(verdict_kind),
         });
     }
 
@@ -1264,6 +1317,29 @@ fn push_reckoning(
     } else {
         summary_fa(&r)
     }));
+
+    // ── how the span's blocks were judged ────────────────────────────────
+    //
+    // A separate count from the decree/inscription numbers above, not a
+    // replacement for them. Those measure whether words exist; this measures
+    // what the user says the blocks were worth, and a block can have its words
+    // and still have been abandoned. Showing only the first would let a week
+    // of write-throughs read as a week of delivery.
+    let t = journal::verdict::tally(
+        &st.data.decrees,
+        &st.data.inscriptions,
+        &st.data.verdicts,
+        range,
+    );
+    win.set_verdict_kept(t.kept as i32);
+    win.set_verdict_partial(t.partial as i32);
+    win.set_verdict_broken(t.broken as i32);
+    win.set_verdict_extended(t.extended as i32);
+    win.set_verdict_short(t.short as i32);
+    win.set_verdict_declared(t.declared as i32);
+    win.set_verdict_total(t.total() as i32);
+    win.set_verdict_met(t.met() as i32);
+    win.set_verdict_empty(t.is_empty());
 }
 
 fn summary_en(r: &journal::reckoning::WeeklyReckoning) -> String {
@@ -2682,6 +2758,48 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let delins_app = Arc::clone(&app);
     let delins_weak = weak.clone();
+    // ── verdicts: what the user says a block actually was ─────────────────
+    //
+    // Declared from the archive row, one press, and it replaces whatever was
+    // said before about the same session rather than adding a second word. The
+    // store owns that rule (`put`), so a re-declaration from the UI and one
+    // arriving through a sync cannot disagree about it.
+    let verdict_app = Arc::clone(&app);
+    let verdict_weak = weak.clone();
+    win.on_declare_verdict(move |session, key| {
+        // An empty key means "take the word back": pressing the filled chip is
+        // the only route back to the five seals once a verdict is declared.
+        // Handled here rather than as a second callback so the UI has one
+        // gesture to wire and one rule to learn.
+        if key.is_empty() {
+            let retracted = {
+                let mut st = verdict_app.store.lock().unwrap();
+                st.retract_verdict(session as i64)
+            };
+            if retracted {
+                verdict_app.cloud.mark_dirty();
+            }
+            if let Some(w) = verdict_weak.upgrade() {
+                refresh_screens(&w, &verdict_app);
+            }
+            return;
+        }
+        // An unknown key is a UI bug, not a user error: nothing is said and
+        // nothing is written, rather than storing a verdict no seal can show.
+        let Some(kind) = verdict_from_key(key.as_str()) else {
+            return;
+        };
+        {
+            let mut st = verdict_app.store.lock().unwrap();
+            if st.declare_verdict(session as i64, kind).is_ok() {
+                verdict_app.cloud.mark_dirty();
+            }
+        }
+        if let Some(w) = verdict_weak.upgrade() {
+            refresh_screens(&w, &verdict_app);
+        }
+    });
+
     win.on_delete_inscription(move |id| {
         let id = id.to_string();
         {

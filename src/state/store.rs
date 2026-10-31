@@ -59,6 +59,14 @@ pub struct Data {
     /// with no inscription facing it.
     #[serde(default)]
     pub decrees: Vec<Decree>,
+    /// What the user said each block actually was: kept, partial, broken,
+    /// extended or cut short. Keyed by `session_at`, the same key the decree and
+    /// the inscription join on — so a verdict still names its block after the
+    /// inscription's words are edited. A session with no row here is judged by
+    /// shape instead, and [`crate::journal::verdict::effective`] reports which
+    /// of the two it was.
+    #[serde(default)]
+    pub verdicts: Vec<crate::journal::Verdict>,
     /// The ordered queue of blocks a day is meant to hold, plus every entry the
     /// user has taken off it. See `state::rota` for why entries keep the day
     /// they were planned for instead of following the user forward.
@@ -579,6 +587,43 @@ impl Store {
         } else {
             false
         }
+    }
+
+    // ── verdicts: what the user says a block actually was ──────────────────
+
+    /// Say what a block was. Re-declaring the same session replaces the word.
+    ///
+    /// Both paths go through [`crate::journal::verdict::put`], so a verdict
+    /// declared from the UI and one folded in by a sync cannot end up with
+    /// different rules about whether the second one appends.
+    pub fn declare_verdict(
+        &mut self,
+        session_at: i64,
+        kind: crate::journal::VerdictKind,
+    ) -> Result<(), crate::journal::verdict::VerdictError> {
+        let v = crate::journal::verdict::declare(session_at, kind, chrono::Utc::now().timestamp())?;
+        crate::journal::verdict::put(&mut self.data.verdicts, v);
+        self.save();
+        Ok(())
+    }
+
+    /// Take a verdict back. The block returns to being judged by its shape.
+    pub fn retract_verdict(&mut self, session_at: i64) -> bool {
+        if crate::journal::verdict::retract(
+            &mut self.data.verdicts,
+            session_at,
+            chrono::Utc::now().timestamp(),
+        ) {
+            self.save();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// What the user said about one session, if anything.
+    pub fn verdict_for(&self, session_at: i64) -> Option<&crate::journal::Verdict> {
+        crate::journal::verdict::find(&self.data.verdicts, session_at)
     }
 }
 
