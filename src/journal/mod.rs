@@ -28,6 +28,7 @@ pub mod inscription;
 pub mod obstruction;
 pub mod orphans;
 pub mod prescription;
+pub mod prescription_ledger;
 pub mod reckoning;
 pub mod standing_promise;
 pub mod unjudged;

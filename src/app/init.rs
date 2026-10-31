@@ -2456,7 +2456,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     // exist yet (a scheduled hook — no UI). The review is a fixed document for
     // a fixed week; its absence is the only signal that it hasn't been written.
     {
-        let st = app.store.lock().unwrap();
+        let mut st = app.store.lock().unwrap();
         let today = chrono::Local::now().date_naive();
         let tz = crate::stats::report::local_tz_offset_secs();
         let break_secs = (settings.short_break_minutes * 60) as u32;
@@ -2476,6 +2476,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         // Same once-per-week convention for the full digest: the read-back plus
         // the diagnostics that have no UI home yet (plan autopsy, calibration,
         // top obstructions). It is a fixed document for a fixed week.
+        let locale_fa = settings.lang != crate::state::settings::LANG_FA;
         if let Some(path) = crate::journal::weekly_review::write_digest_if_new(
             &st.data.sessions,
             &st.data.decrees,
@@ -2487,9 +2488,39 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             today,
             tz,
             break_secs,
-            settings.lang != crate::state::settings::LANG_FA,
+            locale_fa,
         ) {
             crate::log::info(&format!("wrote weekly digest to {}", path.display()));
+            // Record the digest's prescriptions into the ledger now that the
+            // week's digest exists. Only rows with a target metric are kept.
+            let digest = crate::journal::weekly_review::compose_weekly(
+                &st.data.sessions,
+                &st.data.decrees,
+                &st.data.inscriptions,
+                &st.data.verdicts,
+                &st.data.breaks,
+                &st.data.obstructions,
+                &st.data.rota,
+                today,
+                tz,
+                break_secs,
+                locale_fa,
+            );
+            let week = digest.review.range.start.format("%Y-%m-%d").to_string();
+            let now = chrono::Local::now().timestamp();
+            let (rows, next_id) = crate::journal::prescription_ledger::record(
+                &st.data.prescriptions,
+                st.data.next_prescription_id,
+                &week,
+                now,
+                &digest.suggestions,
+            );
+            if rows.len() != st.data.prescriptions.len() {
+                st.data.prescriptions = rows;
+                st.data.next_prescription_id = next_id;
+                crate::log::info("recorded weekly prescriptions into the ledger");
+                st.save();
+            }
         }
     }
 

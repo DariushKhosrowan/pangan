@@ -106,6 +106,13 @@ pub struct Data {
     /// union, so there is no id counter here.
     #[serde(default)]
     pub breaks: Vec<crate::timer::break_record::BreakRecord>,
+    /// The prescription ledger: one row per suggestion the weekly digest has
+    /// issued. See `journal::prescription_ledger`.
+    #[serde(default)]
+    pub prescriptions: Vec<crate::journal::prescription_ledger::Prescription>,
+    /// Hands out prescription ids.
+    #[serde(default)]
+    pub next_prescription_id: u64,
 }
 
 fn default_schema_version() -> u32 {
@@ -128,6 +135,8 @@ impl Default for Data {
             plans: Vec::new(),
             next_plan_id: 0,
             breaks: Vec::new(),
+            prescriptions: Vec::new(),
+            next_prescription_id: 0,
         }
     }
 }

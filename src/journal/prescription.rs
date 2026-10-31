@@ -18,6 +18,7 @@
 
 use crate::journal::week_drift::WeekDrift;
 use crate::stats::report::{BreakAdherence, DurationCalibration};
+use serde::{Deserialize, Serialize};
 
 /// Minimum rated sessions before calibration can advise a block length.
 pub const MIN_CALIBRATION_SAMPLES: u32 = 5;
@@ -35,7 +36,8 @@ pub const MAX_SUGGESTIONS: usize = 3;
 pub const BREAK_ADHERENCE_WARN_RATE: f32 = 0.7;
 
 /// What kind of evidence a suggestion is built on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SuggestionKind {
     /// Block-length calibration.
     Calibration,
@@ -54,6 +56,9 @@ pub enum SuggestionKind {
 pub struct Suggestion {
     /// What kind of evidence this suggestion is built on.
     pub kind: SuggestionKind,
+    /// The metric this suggestion targets — the number that would move if the
+    /// advice were followed. Used by the ledger for follow-up detection.
+    pub target_metric: Option<&'static str>,
     /// The advice, already rendered in the requested locale.
     pub text: String,
     /// The sample size backing this suggestion.
@@ -124,6 +129,7 @@ fn calibration_suggestion(cal: &DurationCalibration, fa: bool) -> Option<Suggest
         };
         return Some(Suggestion {
             kind: SuggestionKind::Calibration,
+            target_metric: Some("kept_rate"),
             text,
             sample_n: cal.total_rated,
         });
@@ -139,6 +145,7 @@ fn calibration_suggestion(cal: &DurationCalibration, fa: bool) -> Option<Suggest
         };
         return Some(Suggestion {
             kind: SuggestionKind::Calibration,
+            target_metric: Some("kept_rate"),
             text,
             sample_n: cal.total_rated,
         });
@@ -167,6 +174,7 @@ fn break_suggestion(adh: &BreakAdherence, fa: bool) -> Option<Suggestion> {
     };
     Some(Suggestion {
         kind: SuggestionKind::Break,
+        target_metric: Some("break_adherence"),
         text,
         sample_n: total,
     })
@@ -187,6 +195,7 @@ fn honest_hour_suggestion(hour: u8, samples: u32, fa: bool) -> Option<Suggestion
     };
     Some(Suggestion {
         kind: SuggestionKind::HonestHour,
+        target_metric: Some("kept_rate"),
         text,
         sample_n: samples,
     })
@@ -209,6 +218,7 @@ fn unjudged_suggestion(count: u32, fa: bool) -> Option<Suggestion> {
     };
     Some(Suggestion {
         kind: SuggestionKind::Unjudged,
+        target_metric: Some("unjudged"),
         text,
         sample_n: count,
     })
@@ -233,6 +243,7 @@ fn drift_suggestion(d: &WeekDrift, baseline_sessions: u32, fa: bool) -> Option<S
     };
     Some(Suggestion {
         kind: SuggestionKind::Drift,
+        target_metric: Some(d.metric),
         text,
         sample_n: baseline_sessions,
     })

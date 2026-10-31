@@ -58,6 +58,11 @@ pub fn merge(local: &Data, remote: &Data) -> Data {
         plans: merge_plans(&local.plans, &remote.plans),
         next_plan_id: local.next_plan_id.max(remote.next_plan_id),
         breaks: crate::timer::break_record::merge(&local.breaks, &remote.breaks),
+        prescriptions: crate::journal::prescription_ledger::merge(
+            &local.prescriptions,
+            &remote.prescriptions,
+        ),
+        next_prescription_id: local.next_prescription_id.max(remote.next_prescription_id),
     };
     // Keep the id counters ahead of every id actually in use, so a merge can
     // never hand out an id that already belongs to a row. This matters more for
@@ -78,6 +83,13 @@ pub fn merge(local: &Data, remote: &Data) -> Data {
     // would make an empty plan list change on every merge.
     let highest_plan = out.plans.iter().map(|p| p.id).max().unwrap_or(0);
     out.next_plan_id = out.next_plan_id.max(highest_plan);
+    // Prescriptions are handed out by a counter that means "the last id
+    // handed out", exactly like the rota and plans counters. The floor is
+    // therefore the highest id itself — using `highest + 1` would make an
+    // empty ledger's counter climb on every merge, which is a change to a
+    // store that held nothing.
+    let highest_prescription = out.prescriptions.iter().map(|p| p.id).max().unwrap_or(0);
+    out.next_prescription_id = out.next_prescription_id.max(highest_prescription);
     out
 }
 
@@ -499,6 +511,8 @@ mod tests {
             decrees: vec![],
             verdicts: vec![],
             obstructions: vec![],
+            prescriptions: vec![],
+            next_prescription_id: 0,
         };
         let once = merge(&a, &a);
         let twice = merge(&once, &once);
