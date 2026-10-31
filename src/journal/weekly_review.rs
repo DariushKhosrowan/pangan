@@ -613,6 +613,10 @@ pub struct WeeklyDigest {
     /// Feedback on past advice: how each ledged prescription fared against the
     /// metric it targeted. Three buckets — resolved, stubborn, reopened.
     pub outcomes: crate::journal::prescription_outcome::OutcomeBuckets,
+    /// Break quality across the whole record: breaks bucketed by actual length,
+    /// with the kept-rate of the block that follows each length. Empty until
+    /// enough rated observations accumulate.
+    pub break_quality: crate::timer::break_quality::BreakQuality,
 }
 
 /// Compose the week's full digest from the store's slices.
@@ -733,6 +737,7 @@ pub fn compose_weekly(
         prescriptions,
         &now_week,
     );
+    let break_quality = crate::timer::break_quality::break_quality(breaks, sessions, verdicts);
     WeeklyDigest {
         review,
         autopsy,
@@ -741,6 +746,7 @@ pub fn compose_weekly(
         drift,
         suggestions,
         outcomes,
+        break_quality,
     }
 }
 
@@ -979,6 +985,60 @@ pub fn render_digest(digest: &WeeklyDigest, locale_fa: bool) -> String {
         }
     }
 
+    // 7. Break quality — the break-side calibration. Are breaks helping or
+    // hurting? Each actual break length is bucketed and paired with the
+    // kept-rate of the block that follows it. Silent until a bucket clears the
+    // sample floor; never fabricates a correlation from thin data.
+    let bq = &digest.break_quality;
+    let has_rate = bq.buckets.iter().any(|b| b.kept_rate.is_some());
+    if has_rate {
+        out.push_str(if fa {
+            "## کیفیت استراحت\n\n"
+        } else {
+            "## Break quality\n\n"
+        });
+        for b in &bq.buckets {
+            if let Some(rate) = b.kept_rate {
+                let pct = (rate * 100.0).round() as i64;
+                out.push_str(&format!(
+                    "  - {} — {}: {}٪ ({} استراحت)\n",
+                    b.label,
+                    if fa {
+                        "بلوک بعدی"
+                    } else {
+                        "next block"
+                    },
+                    num(pct),
+                    num(b.breaks as i64),
+                ));
+            }
+        }
+        let obs_line = if fa {
+            format!(
+                "> بر پایهٔ {} مشاهدهٔ داوری‌شده.\n\n",
+                num(bq.total_rated as i64)
+            )
+        } else {
+            format!(
+                "> Based on {} rated observations.\n\n",
+                num(bq.total_rated as i64)
+            )
+        };
+        out.push_str(&obs_line);
+        if let Some(best) = bq.best_break_length {
+            let line = if fa {
+                format!("> بهترین: استراحت‌های {} دقیقه‌ای بهترن.\n\n", best)
+            } else {
+                format!(
+                    "> Best: breaks in the {} range lead to the most kept blocks.\n\n",
+                    best
+                )
+            };
+            out.push_str(&line);
+        }
+        out.push('\n');
+    }
+
     out
 }
 
@@ -1042,6 +1102,91 @@ mod tests {
 
     fn today() -> NaiveDate {
         chrono::NaiveDate::from_ymd_opt(2026, 10, 31).unwrap()
+    }
+
+    /// The digest renders a Break quality section once enough rated break→next-
+    /// block observations accumulate, and stays silent below the sample floor.
+    #[test]
+    fn digest_renders_break_quality_when_sampled() {
+        use crate::journal::VerdictKind;
+        use crate::timer::break_record::{BreakRecord, BreakRel};
+
+        // 6 five-minute breaks, each followed by a kept block.
+        let mut breaks = Vec::new();
+        let mut sessions: Vec<SessionRecord> = Vec::new();
+        let mut verdicts = Vec::new();
+        let mut t = SAT - 14 * 86_400; // well before this week
+        for _ in 0..6 {
+            let b_end = t + 300;
+            let s_at = b_end + 1200;
+            breaks.push(BreakRecord {
+                started_at: t,
+                ended_at: Some(b_end),
+                planned_secs: 300,
+                kind: BreakRel::Short,
+            });
+            sessions.push(sess(s_at, 25));
+            verdicts.push(crate::journal::verdict::declare(s_at, VerdictKind::Kept, s_at).unwrap());
+            t = s_at + 2000;
+        }
+
+        let d = compose_weekly(
+            &sessions,
+            &[],
+            &[],
+            &verdicts,
+            &breaks,
+            &[],
+            &[],
+            &[],
+            today(),
+            12600,
+            300,
+            false,
+        );
+        // The whole record only has these six rated break observations, so a
+        // bucket clears the floor and the section renders.
+        assert!(
+            d.break_quality
+                .buckets
+                .iter()
+                .any(|b| b.kept_rate.is_some()),
+            "a bucket reports a rate"
+        );
+        let md = render_digest(&d, false);
+        assert!(md.contains("## Break quality"), "the section renders");
+        assert!(
+            md.contains("Based on 6 rated observations"),
+            "observations noted"
+        );
+        assert!(
+            md.contains("> Best: breaks in the 5–9 range"),
+            "the best break length is called out"
+        );
+        // Farsi rendering uses Persian digits but the same structure.
+        let md_fa = render_digest(&d, true);
+        assert!(md_fa.contains("## کیفیت استراحت"), "Farsi section renders");
+        assert!(md_fa.contains("۶"), "Farsi uses Persian digits");
+
+        // Any empty record stays silent — no fabricated correlation.
+        let d0 = compose_weekly(
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            today(),
+            12600,
+            300,
+            false,
+        );
+        assert!(
+            !render_digest(&d0, false).contains("## Break quality"),
+            "empty record renders no break quality"
+        );
     }
 
     #[test]
