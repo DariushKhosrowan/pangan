@@ -629,6 +629,13 @@ pub struct WeeklyDigest {
     /// finishes, compared against the size they typically planned this week.
     /// None until the record holds enough history to judge.
     pub realism: Option<crate::journal::realism::RealismInfo>,
+    /// Purpose drift: whether blocks did what their decrees promised, across
+    /// the whole record. None until enough paired blocks exist to judge.
+    pub purpose_drift: Option<crate::journal::purpose_drift::DriftStat>,
+    /// The local hour with the worst purpose drift (if any hour qualifies).
+    pub purpose_drift_hour: Option<(u8, crate::journal::purpose_drift::DriftStat)>,
+    /// The duration bucket with the worst purpose drift (if any qualifies).
+    pub purpose_drift_duration: Option<(&'static str, crate::journal::purpose_drift::DriftStat)>,
 }
 
 /// Compose the week's full digest from the store's slices.
@@ -777,6 +784,25 @@ pub fn compose_weekly(
         ceiling,
         current_plan_size: week_typical,
     });
+    // Purpose drift: the record's own texts, compared. None until the record
+    // holds enough paired blocks for an honest rate.
+    let purpose_drift = crate::journal::purpose_drift::drift_overall(
+        decrees,
+        inscriptions,
+        crate::journal::purpose_drift::DEFAULT_THRESHOLD,
+        crate::journal::purpose_drift::MIN_SAMPLES,
+    );
+    let purpose_drift_hour = crate::journal::purpose_drift::worst_hour_drift(
+        decrees,
+        inscriptions,
+        tz_offset_secs,
+        crate::journal::purpose_drift::DEFAULT_THRESHOLD,
+    );
+    let purpose_drift_duration = crate::journal::purpose_drift::worst_duration_drift(
+        decrees,
+        inscriptions,
+        crate::journal::purpose_drift::DEFAULT_THRESHOLD,
+    );
     WeeklyDigest {
         review,
         autopsy,
@@ -789,6 +815,9 @@ pub fn compose_weekly(
         bounce,
         promise_quality,
         realism,
+        purpose_drift,
+        purpose_drift_hour,
+        purpose_drift_duration,
     }
 }
 
@@ -870,6 +899,45 @@ pub fn render_digest(digest: &WeeklyDigest, locale_fa: bool) -> String {
     // 1. The read-back (blocks + summary).
     out.push_str(&render_markdown(&digest.review, fa));
     out.push('\n');
+
+    // 1.5 Purpose drift — whether blocks did what their decrees promised. The
+    // record's own texts, compared. Only present once enough paired blocks
+    // exist to judge honestly.
+    if let Some(pd) = &digest.purpose_drift {
+        out.push_str(if fa {
+            "## انحراف از قصد\n\n"
+        } else {
+            "## Purpose drift\n\n"
+        });
+        out.push_str(&crate::journal::purpose_drift::purpose_drift_label(pd, fa));
+        out.push('\n');
+        if let Some((hour, _)) = &digest.purpose_drift_hour {
+            let h = *hour;
+            out.push_str(&format!(
+                "  - {}: {}",
+                if fa { "ساعت" } else { "hour" },
+                if fa {
+                    crate::calendar::jalali::fa_num(h as i64)
+                } else {
+                    h.to_string()
+                },
+            ));
+            out.push('\n');
+        }
+        if let Some((label, _)) = &digest.purpose_drift_duration {
+            out.push_str(&format!(
+                "  - {}: {}",
+                if fa {
+                    "طول بلوک"
+                } else {
+                    "block length"
+                },
+                label,
+            ));
+            out.push('\n');
+        }
+        out.push('\n');
+    }
 
     // 2. Plan autopsy: what became of what was planned.
     let (landed, abandoned, unreached) = crate::state::plan_autopsy::by_outcome(&digest.autopsy);
