@@ -1169,6 +1169,7 @@ pub fn best_kept_hour(stats: &[HourVerdictStat; 24], min_samples: u32) -> Option
 
 /// A block-length bucket in duration calibration.
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // logic API, not yet wired (UI locked)
 pub struct DurationBucket {
     /// The nominal length this bucket holds (minutes) — the lower edge for
     /// sessions that fall between two nominal values.
@@ -1189,6 +1190,7 @@ pub struct DurationBucket {
 
 /// The result of calibrating block length against the record.
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // logic API, not yet wired (UI locked)
 pub struct DurationCalibration {
     /// One bucket per nominal length in [`CALIBRATION_BUCKETS`].
     pub buckets: Vec<DurationBucket>,
@@ -1206,15 +1208,19 @@ pub struct DurationCalibration {
 }
 
 /// Nominal block lengths bucketed for calibration, in minutes.
+#[allow(dead_code)] // logic API, not yet wired (UI locked)
 pub const CALIBRATION_BUCKETS: [u64; 10] = [5, 10, 15, 20, 25, 30, 45, 60, 90, 120];
 
 /// Minimum rated sessions for a bucket to inform a finding.
+#[allow(dead_code)] // logic API, not yet wired (UI locked)
 pub const CALIBRATION_MIN_SAMPLES: u32 = 5;
 
 /// The kept-rate line below which a length is over-reach.
+#[allow(dead_code)] // logic API, not yet wired (UI locked)
 pub const CALIBRATION_OVERREACH_RATE: f32 = 0.5;
 
 /// The ordinal score for one verdict kind — Kept=5 … Broken=1.
+#[allow(dead_code)] // logic API, not yet wired (UI locked)
 fn verdict_score(kind: crate::journal::VerdictKind) -> u8 {
     match kind {
         crate::journal::VerdictKind::Kept => 5,
@@ -1226,6 +1232,7 @@ fn verdict_score(kind: crate::journal::VerdictKind) -> u8 {
 }
 
 /// Which bucket a planned length lands in.
+#[allow(dead_code)] // logic API, not yet wired (UI locked)
 fn bucket_index(minutes: u64) -> usize {
     let idx = CALIBRATION_BUCKETS.partition_point(|&n| n <= minutes);
     if idx == 0 {
@@ -1241,6 +1248,7 @@ fn bucket_index(minutes: u64) -> usize {
 /// reports the kept rate per bucket plus two findings: the *sweet spot* (the
 /// length the user keeps best) and the *overreach floor* (the first length at
 /// which honesty collapses). Pure: existing rows in, a value out, no I/O.
+#[allow(dead_code)] // logic API, not yet wired (UI locked)
 pub fn duration_calibration(
     sessions: &[SessionRecord],
     verdicts: &[crate::journal::Verdict],
@@ -1358,6 +1366,7 @@ pub fn duration_calibration(
 ///
 /// Four states, in priority order: not enough data, a single comparable
 /// length, a detected overreach ceiling, or stable across all lengths.
+#[allow(dead_code)] // logic API, not yet wired (UI locked)
 pub fn calibration_label(c: &DurationCalibration, locale_fa: bool) -> String {
     let comparable = c
         .buckets
@@ -2100,7 +2109,7 @@ mod tests {
         crate::journal::verdict::declare(at, kind, at).unwrap()
     }
 
-    fn calib_bucket<'a>(c: &'a DurationCalibration, nominal: u64) -> &'a DurationBucket {
+    fn calib_bucket(c: &DurationCalibration, nominal: u64) -> &DurationBucket {
         c.buckets.iter().find(|b| b.nominal == nominal).unwrap()
     }
 
@@ -2351,7 +2360,7 @@ mod tests {
         let v: Vec<_> = ats.iter().zip(kinds).map(|(&a, k)| calib_v(k, a)).collect();
         let c = duration_calibration(&s, &v);
         // 25 has only 2 rated (below min) → excluded; 30 is healthy → no floor
-        assert_eq!(calib_bucket(&c, 25).too_few_samples, true);
+        assert!(calib_bucket(&c, 25).too_few_samples);
         assert_eq!(c.overreach_floor, None);
     }
 }

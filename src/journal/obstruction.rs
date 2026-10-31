@@ -119,10 +119,7 @@ pub fn set_obstruction(
 }
 
 /// The live obstruction for a session, if any.
-pub fn obstruction_for<'a>(
-    existing: &'a [Obstruction],
-    session_at: i64,
-) -> Option<&'a Obstruction> {
+pub fn obstruction_for(existing: &[Obstruction], session_at: i64) -> Option<&Obstruction> {
     existing
         .iter()
         .filter(|o| o.session_at == session_at && !o.deleted)
@@ -133,6 +130,7 @@ pub fn obstruction_for<'a>(
 ///
 /// Live rows only, keyed by normalized text. Ties are broken by earliest first
 /// seen, so the ordering is deterministic.
+#[allow(dead_code)] // logic API, not yet wired (UI locked)
 pub fn top_obstructions(
     existing: &[Obstruction],
     from: i64,
@@ -217,9 +215,7 @@ mod tests {
 
     #[test]
     fn set_rejects_overlong() {
-        let long: String = std::iter::repeat('ا')
-            .take(OBSTRUCTION_MAX_CHARS + 1)
-            .collect();
+        let long: String = "ا".repeat(OBSTRUCTION_MAX_CHARS + 1);
         let err = set_obstruction(&[], 100, &long, NOW).unwrap_err();
         assert!(matches!(err, ObstructionError::TooLong { .. }));
     }
