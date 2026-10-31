@@ -625,6 +625,10 @@ pub struct WeeklyDigest {
     /// Promise quality: whether quantified decrees are kept at a different
     /// rate than vague ones, and by how much. None until a judgment exists.
     pub promise_quality: Option<PromiseQuality>,
+    /// Plan realism ceiling: the largest daily rota size the user reliably
+    /// finishes, compared against the size they typically planned this week.
+    /// None until the record holds enough history to judge.
+    pub realism: Option<crate::journal::realism::RealismInfo>,
 }
 
 /// Compose the week's full digest from the store's slices.
@@ -748,6 +752,29 @@ pub fn compose_weekly(
     let break_quality = crate::timer::break_quality::break_quality(breaks, sessions, verdicts);
     let bounce = bounce_stats(sessions, verdicts, today, tz_offset_secs);
     let promise_quality = crate::journal::promise_quality::promise_quality(decrees, verdicts);
+    // Plan realism ceiling: the largest daily plan size the user reliably
+    // finishes, compared against the size they typically wrote this week. The
+    // week's typical size is the planned blocks over the days that had plans —
+    // what they actually put down, not a guessed ideal.
+    let historical = crate::journal::realism::historical_day_tallies(rota, &today_s);
+    let mut week_days_with_plans: std::collections::BTreeSet<&str> =
+        std::collections::BTreeSet::new();
+    for r in &autopsy {
+        week_days_with_plans.insert(r.day.as_str());
+    }
+    let week_typical = if week_days_with_plans.is_empty() {
+        0
+    } else {
+        (autopsy.len() as u32) / (week_days_with_plans.len() as u32)
+    };
+    let realism = crate::journal::realism::realism_ceiling(
+        &historical,
+        crate::journal::realism::DEFAULT_MIN_WEEKS,
+    )
+    .map(|ceiling| crate::journal::realism::RealismInfo {
+        ceiling,
+        current_plan_size: week_typical,
+    });
     WeeklyDigest {
         review,
         autopsy,
@@ -759,6 +786,7 @@ pub fn compose_weekly(
         break_quality,
         bounce,
         promise_quality,
+        realism,
     }
 }
 
@@ -904,7 +932,24 @@ pub fn render_digest(digest: &WeeklyDigest, locale_fa: bool) -> String {
         out.push('\n');
     }
 
-    // 3. Duration calibration (lifetime).
+    // 3. Plan realism ceiling — the largest daily plan size the user reliably
+    // finishes, compared against what they typically wrote this week. Only
+    // present once the record has enough history to judge honestly.
+    if let Some(r) = &digest.realism {
+        out.push_str(if fa {
+            "## سقف واقع‌بینانهٔ برنامه\n\n"
+        } else {
+            "## Plan realism ceiling\n\n"
+        });
+        out.push_str(&crate::journal::realism::realism_label(
+            Some(r.ceiling),
+            r.current_plan_size,
+            fa,
+        ));
+        out.push_str("\n\n");
+    }
+
+    // 4. Duration calibration (lifetime).
     out.push_str(if fa {
         "## کالیبراسیون طول\n\n"
     } else {
@@ -1699,6 +1744,71 @@ mod tests {
         let md = render_digest(&d, false);
         assert!(md.contains("Unreached **1**"), "unreached count: {md}");
         assert!(md.contains("work"), "the missed block label appears");
+    }
+
+    #[test]
+    fn digest_renders_realism_ceiling_when_history_is_mature() {
+        // Three distinct past weeks, each with days planned at size 3 and fully
+        // kept, so the ceiling is 3 and the section renders.
+        let mut rota = Vec::new();
+        let mut id = 1u64;
+        let mut new = |day: &str| {
+            let e = crate::state::rota::RotaEntry {
+                id,
+                day: day.to_string(),
+                label: format!("block {id}"),
+                task_id: None,
+                decree: String::new(),
+                minutes: 25,
+                created_at: SAT + id as i64,
+                opened_at: 1, // opened, so it can be claimed as done
+                session_at: SAT + id as i64 + 60,
+                outcome: Some("done".to_string()),
+                deleted: false,
+            };
+            id += 1;
+            e
+        };
+        for d in ["2026-10-03", "2026-10-04", "2026-10-05"] {
+            rota.push(new(d));
+            rota.push(new(d));
+            rota.push(new(d));
+        }
+        for d in ["2026-10-10", "2026-10-11", "2026-10-12"] {
+            rota.push(new(d));
+            rota.push(new(d));
+            rota.push(new(d));
+        }
+        for d in ["2026-10-17", "2026-10-18", "2026-10-19"] {
+            rota.push(new(d));
+            rota.push(new(d));
+            rota.push(new(d));
+        }
+        let d = compose_weekly(
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &rota,
+            &[],
+            today(),
+            12600,
+            300,
+            false,
+        );
+        assert_eq!(
+            d.realism.as_ref().map(|r| r.ceiling),
+            Some(3),
+            "the ceiling should be 3"
+        );
+        let md = render_digest(&d, false);
+        assert!(
+            md.contains("## Plan realism ceiling"),
+            "section renders: {md}"
+        );
+        assert!(md.contains("3 blocks a day"), "ceiling named: {md}");
     }
 
     #[test]

@@ -55,6 +55,10 @@ pub struct DailyBriefing {
     /// Block-length calibration across the whole record, so the briefing can
     /// name the length to start with.
     pub calibration: DurationCalibration,
+    /// Plan realism ceiling: the largest daily rota size the user reliably
+    /// finishes, compared against today's plan size. None until the record
+    /// holds enough history to judge.
+    pub realism: Option<crate::journal::realism::RealismInfo>,
 }
 
 /// The most recent live prescription in the ledger, if any.
@@ -121,6 +125,18 @@ pub fn compose_daily(
 
     let calibration = crate::stats::report::duration_calibration(sessions, verdicts);
 
+    // Plan realism ceiling: the largest daily plan size the user reliably
+    // finishes, compared against how many blocks they planned for *today*.
+    let historical = crate::journal::realism::historical_day_tallies(rota, &day_s);
+    let ceiling = crate::journal::realism::realism_ceiling(
+        &historical,
+        crate::journal::realism::DEFAULT_MIN_WEEKS,
+    );
+    let realism = ceiling.map(|c| crate::journal::realism::RealismInfo {
+        ceiling: c,
+        current_plan_size: today_rota.len() as u32,
+    });
+
     DailyBriefing {
         day,
         today_rota,
@@ -129,6 +145,7 @@ pub fn compose_daily(
         last_week_landed: last_week.summary.landed,
         active_prescription: active_prescription(prescriptions),
         calibration,
+        realism,
     }
 }
 
@@ -271,7 +288,24 @@ pub fn render_markdown(briefing: &DailyBriefing, locale_fa: bool) -> String {
         out.push_str(&format!("  - {}\n\n", p.text));
     }
 
-    // 5. The calibrated block length — the length to start with today.
+    // 5. Plan realism ceiling — the largest daily plan size the user reliably
+    // finishes, compared against today's plan size. Only present once the
+    // record has enough history to judge honestly.
+    if let Some(r) = &briefing.realism {
+        out.push_str(if fa {
+            "## سقف واقع‌بینانهٔ برنامه\n\n"
+        } else {
+            "## Plan realism ceiling\n\n"
+        });
+        out.push_str(&crate::journal::realism::realism_label(
+            Some(r.ceiling),
+            r.current_plan_size,
+            fa,
+        ));
+        out.push_str("\n\n");
+    }
+
+    // 6. The calibrated block length — the length to start with today.
     let cal_text = crate::stats::report::calibration_label(&briefing.calibration, fa);
     out.push_str(if fa {
         "## طول پیشنهادی بلوک\n\n"
@@ -528,5 +562,57 @@ mod tests {
             "the newest advice is rendered"
         );
         assert!(!md.contains("older advice"), "older advice is not surfaced");
+    }
+
+    #[test]
+    fn daily_briefing_renders_realism_ceiling_when_history_is_mature() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 31).unwrap();
+        // Three distinct past weeks, each with days fully kept at size 3.
+        let mut rota = Vec::new();
+        let mut id = 1u64;
+        let mut new = |day: &str| {
+            let e = crate::state::rota::RotaEntry {
+                id,
+                day: day.to_string(),
+                label: format!("block {id}"),
+                task_id: None,
+                decree: String::new(),
+                minutes: 25,
+                created_at: T + id as i64,
+                opened_at: 1,
+                session_at: T + id as i64 + 60,
+                outcome: Some("done".to_string()),
+                deleted: false,
+            };
+            id += 1;
+            e
+        };
+        for d in ["2026-10-03", "2026-10-04", "2026-10-05"] {
+            rota.push(new(d));
+            rota.push(new(d));
+            rota.push(new(d));
+        }
+        for d in ["2026-10-10", "2026-10-11", "2026-10-12"] {
+            rota.push(new(d));
+            rota.push(new(d));
+            rota.push(new(d));
+        }
+        for d in ["2026-10-17", "2026-10-18", "2026-10-19"] {
+            rota.push(new(d));
+            rota.push(new(d));
+            rota.push(new(d));
+        }
+        let b = compose_daily(&[], &[], &[], &[], &[], &rota, &[], today, TZ, 5 * 60);
+        assert_eq!(
+            b.realism.as_ref().map(|r| r.ceiling),
+            Some(3),
+            "the ceiling should be 3"
+        );
+        let md = render_markdown(&b, false);
+        assert!(
+            md.contains("## Plan realism ceiling"),
+            "section renders: {md}"
+        );
+        assert!(md.contains("3 blocks a day"), "ceiling named: {md}");
     }
 }
