@@ -30,6 +30,7 @@ pub mod orphans;
 pub mod prescription;
 pub mod prescription_ledger;
 pub mod prescription_outcome;
+pub mod prescription_policy;
 pub mod reckoning;
 pub mod standing_promise;
 pub mod unjudged;

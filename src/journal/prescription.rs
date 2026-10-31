@@ -95,7 +95,7 @@ fn num(n: i64, fa: bool) -> String {
 }
 
 /// A human noun for a drift metric, in the requested locale.
-fn metric_noun(metric: &str, fa: bool) -> String {
+pub fn metric_noun_for(metric: &str, fa: bool) -> String {
     match (fa, metric) {
         (true, "sessions") => "جلسه‌ها".to_string(),
         (true, "focus_minutes") => "دقیقهٔ تمرکز".to_string(),
@@ -229,7 +229,7 @@ fn drift_suggestion(d: &WeekDrift, baseline_sessions: u32, fa: bool) -> Option<S
     if baseline_sessions < MIN_DRIFT_SESSIONS {
         return None;
     }
-    let noun = metric_noun(d.metric, fa);
+    let noun = metric_noun_for(d.metric, fa);
     let text = if d.better {
         if fa {
             format!("{noun} بزرگ‌ترین بهبود شماست — این عادت را حفظ کنید.")

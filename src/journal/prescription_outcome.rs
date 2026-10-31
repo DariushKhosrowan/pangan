@@ -75,8 +75,9 @@ pub struct Outcome {
 /// The intended direction of a metric key.
 pub fn direction_for(metric: &str) -> Option<Direction> {
     match metric {
-        "sessions" | "focus_minutes" | "kept_rate" | "fulfilment_rate"
-        | "break_adherence" => Some(Direction::Higher),
+        "sessions" | "focus_minutes" | "kept_rate" | "fulfilment_rate" | "break_adherence" => {
+            Some(Direction::Higher)
+        }
         "unjudged" => Some(Direction::Lower),
         _ => None,
     }
@@ -93,7 +94,9 @@ pub fn goal_for(metric: &str, target_value: f32) -> Option<Goal> {
             // finish the job.
             Some(Goal::ReachRate(target_value + 0.20))
         }
-        "unjudged" => Some(Goal::StayUnder((target_value.max(1.0) * 0.5).max(0.0) as u32 + 1)),
+        "unjudged" => Some(Goal::StayUnder(
+            (target_value.max(1.0) * 0.5).max(0.0) as u32 + 1,
+        )),
         "sessions" | "focus_minutes" => Some(Goal::ReachCount((target_value * 1.2) as u32 + 1)),
         _ => None,
     }
@@ -156,12 +159,8 @@ pub fn classify(p: &Prescription, current: f32) -> Outcome {
                 OutcomeKind::Unchanged
             } else {
                 match (dir, current > start) {
-                    (Direction::Higher, true) | (Direction::Lower, false) => {
-                        OutcomeKind::Improved
-                    }
-                    (Direction::Higher, false) | (Direction::Lower, true) => {
-                        OutcomeKind::Worsened
-                    }
+                    (Direction::Higher, true) | (Direction::Lower, false) => OutcomeKind::Improved,
+                    (Direction::Higher, false) | (Direction::Lower, true) => OutcomeKind::Worsened,
                 }
             }
         }
@@ -184,7 +183,10 @@ pub fn classify(p: &Prescription, current: f32) -> Outcome {
 }
 
 /// Classify every live prescription.
-pub fn classify_all(prescriptions: &[Prescription], current: &dyn Fn(&str) -> Option<f32>) -> Vec<Outcome> {
+pub fn classify_all(
+    prescriptions: &[Prescription],
+    current: &dyn Fn(&str) -> Option<f32>,
+) -> Vec<Outcome> {
     prescriptions
         .iter()
         .filter(|p| !p.deleted)

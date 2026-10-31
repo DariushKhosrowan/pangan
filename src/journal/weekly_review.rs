@@ -723,6 +723,16 @@ pub fn compose_weekly(
             crate::journal::week_drift::value_of(&current_metrics, metric)
         }),
     );
+    // Make the coach learn: filter and escalate raw suggestions against the
+    // outcome buckets, so resolved advice isn't re-nagged and stubborn advice
+    // escalates to a warning instead of silently repeating.
+    let now_week = review.range.start.format("%Y-%m-%d").to_string();
+    let suggestions = crate::journal::prescription_policy::apply(
+        suggestions,
+        &outcomes,
+        prescriptions,
+        &now_week,
+    );
     WeeklyDigest {
         review,
         autopsy,
@@ -777,9 +787,7 @@ fn fmt_outcome_value(metric: &str, value: f32, fa: bool) -> String {
         }
     };
     match metric {
-        "kept_rate" | "fulfilment_rate" | "break_adherence" => {
-            fmt((value * 100.0).round() as i64)
-        }
+        "kept_rate" | "fulfilment_rate" | "break_adherence" => fmt((value * 100.0).round() as i64),
         "sessions" | "focus_minutes" | "unjudged" => num(value as i64),
         _ => num(value as i64),
     }
@@ -935,8 +943,22 @@ pub fn render_digest(digest: &WeeklyDigest, locale_fa: bool) -> String {
         });
         for (bucket, heading) in [
             (&o.resolved, if fa { "✅ مؤثر" } else { "✅ Resolved" }),
-            (&o.stubborn, if fa { "⚠️ مقاوم" } else { "⚠️ Stubborn" }),
-            (&o.reopened, if fa { "🔄 بازگشته" } else { "🔄 Reopened" }),
+            (
+                &o.stubborn,
+                if fa {
+                    "⚠️ مقاوم"
+                } else {
+                    "⚠️ Stubborn"
+                },
+            ),
+            (
+                &o.reopened,
+                if fa {
+                    "🔄 بازگشته"
+                } else {
+                    "🔄 Reopened"
+                },
+            ),
         ] {
             if bucket.is_empty() {
                 continue;
@@ -1306,7 +1328,20 @@ mod tests {
 
     #[test]
     fn render_digest_persian_digits_when_locale_fa() {
-        let d = compose_weekly(&[], &[], &[], &[], &[], &[], &[], &[], today(), 12600, 300, true);
+        let d = compose_weekly(
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            today(),
+            12600,
+            300,
+            true,
+        );
         let md = render_digest(&d, true);
         assert!(md.contains("خلاصهٔ هفتهٔ"), "Persian title: {md}");
         assert!(md.contains("کالبدشکافی"), "Persian autopsy header");
@@ -1358,8 +1393,8 @@ mod tests {
             .map(|s| verdict::declare(s.at, crate::journal::VerdictKind::Kept, s.at).unwrap())
             .collect();
         use crate::journal::prescription::SuggestionKind;
-        let mk = |id: u64, target: f32, sample: u32| {
-            crate::journal::prescription_ledger::Prescription {
+        let mk =
+            |id: u64, target: f32, sample: u32| crate::journal::prescription_ledger::Prescription {
                 id,
                 week: today().format("%Y-%m-%d").to_string(),
                 created_at: SAT,
@@ -1369,8 +1404,7 @@ mod tests {
                 text: "keep blocks honest".to_string(),
                 sample_n: sample,
                 deleted: false,
-            }
-        };
+            };
         let prescriptions = vec![mk(1, 0.41, 8), mk(2, 0.99, 8)];
         let d = compose_weekly(
             &sessions,
@@ -1387,7 +1421,11 @@ mod tests {
             false,
         );
         assert_eq!(d.outcomes.resolved.len(), 1, "low-target advice resolves");
-        assert_eq!(d.outcomes.stubborn.len(), 1, "near-ceiling advice is stubborn");
+        assert_eq!(
+            d.outcomes.stubborn.len(),
+            1,
+            "near-ceiling advice is stubborn"
+        );
         let md = render_digest(&d, false);
         assert!(md.contains("Prescription outcomes"), "section: {md}");
         assert!(md.contains("✅ Resolved"), "resolved bucket heading");
