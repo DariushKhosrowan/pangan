@@ -43,6 +43,26 @@ fn season_of_month(month: u32) -> usize {
     ((month - 1) / 3) as usize
 }
 
+/// The Gregorian day span of a Jalali season.
+///
+/// `year` is a Jalali year, `season` is 0..4 (spring..winter). The span runs
+/// from the 1st of the opening month to the last day of the closing month.
+pub fn season_bounds(year: i32, season: usize) -> Range {
+    let start_month = season_start_month(season);
+    let end_month = start_month + 2;
+    let (sy, sm, sd) = crate::calendar::jalali::to_gregorian(year, start_month, 1);
+    let (ey, em, ed) = crate::calendar::jalali::to_gregorian(
+        year,
+        end_month,
+        crate::calendar::jalali::month_len(year, end_month),
+    );
+    let start = NaiveDate::from_ymd_opt(sy, sm, sd)
+        .unwrap_or_else(|| NaiveDate::from_ymd_opt(1970, 1, 1).unwrap());
+    let end = NaiveDate::from_ymd_opt(ey, em, ed)
+        .unwrap_or_else(|| NaiveDate::from_ymd_opt(1970, 1, 1).unwrap());
+    Range { start, end }
+}
+
 /// The season containing `today`, plus the Jalali year it belongs to.
 #[derive(Clone, Debug)]
 pub struct SeasonRef {
@@ -63,20 +83,79 @@ pub fn season_of(today: NaiveDate) -> SeasonRef {
     let jy = crate::calendar::jalali::from_gregorian(today.year(), today.month(), today.day());
     let (year, month, _day) = (jy.0, jy.1, jy.2);
     let season = season_of_month(month);
-    let start_month = season_start_month(season);
-    let end_month = start_month + 2;
-    let (sy, sm, sd) = crate::calendar::jalali::to_gregorian(year, start_month, 1);
-    let (ey, em, ed) = crate::calendar::jalali::to_gregorian(
-        year,
-        end_month,
-        crate::calendar::jalali::month_len(year, end_month),
-    );
-    let start = NaiveDate::from_ymd_opt(sy, sm, sd).unwrap_or(today);
-    let end = NaiveDate::from_ymd_opt(ey, em, ed).unwrap_or(today);
+    let range = season_bounds(year, season);
     SeasonRef {
-        range: Range { start, end },
+        range,
         jalali_year: year,
         season,
+    }
+}
+
+/// One season span's raw aggregate (the numbers behind the summary).
+#[derive(Clone, Debug)]
+pub struct SeasonAgg {
+    /// Completed focus sessions in the season.
+    pub sessions: u32,
+    /// Total focus minutes in the season.
+    pub focus_minutes: u64,
+    /// The verdict tally (kept/partial/…), declared and inferred.
+    pub tally: crate::journal::verdict::Tally,
+    /// Promises written in the season.
+    pub planned: usize,
+    /// Promises answered by an inscription.
+    pub landed: usize,
+    /// Blocks left unjudged (promises dropped without being faced).
+    pub unjudged: u32,
+    /// The season span this aggregate describes.
+    pub range: Range,
+}
+
+/// Aggregate one span from the store slices.
+///
+/// `tz_offset_secs` is the local UTC offset, used to bucket sessions by local
+/// date into the span. Sessions are counted by their local date falling inside
+/// the span, matching every other screen.
+pub fn aggregate(
+    range: Range,
+    sessions: &[SessionRecord],
+    decrees: &[Decree],
+    inscriptions: &[Inscription],
+    verdicts: &[Verdict],
+    tz_offset_secs: i32,
+) -> SeasonAgg {
+    // Bucket sessions by local date into the span.
+    let mut span_sessions: Vec<&SessionRecord> = Vec::new();
+    for s in sessions {
+        if let Some(d) = date_of(s.at, tz_offset_secs) {
+            if range.contains(d) {
+                span_sessions.push(s);
+            }
+        }
+    }
+    let focus_minutes = span_sessions.iter().map(|s| s.minutes).sum();
+
+    let tally = crate::journal::verdict::tally(decrees, inscriptions, verdicts, range);
+    let reckoning = crate::journal::reckoning::build(decrees, inscriptions, &[], range);
+
+    // Unjudged blocks this span: sessions with no live verdict.
+    let judged: std::collections::HashSet<i64> = verdicts
+        .iter()
+        .filter(|v| !v.deleted)
+        .map(|v| v.session_at)
+        .collect();
+    let unjudged = span_sessions
+        .iter()
+        .filter(|s| !judged.contains(&s.at))
+        .count() as u32;
+
+    SeasonAgg {
+        sessions: span_sessions.len() as u32,
+        focus_minutes,
+        tally,
+        planned: reckoning.spoken,
+        landed: reckoning.answered,
+        unjudged,
+        range,
     }
 }
 
@@ -101,9 +180,8 @@ pub struct SeasonSummary {
 
 /// Assemble the season's summary from the store's slices.
 ///
-/// `tz_offset_secs` is the local UTC offset, used to bucket sessions by local
-/// date into the season's range. Sessions are counted by their local date
-/// falling inside the season span, matching every other screen.
+/// A season is the current Jalali season; the aggregate is computed over its
+/// span. See [`aggregate`] for the underlying span logic.
 pub fn summarize(
     sessions: &[SessionRecord],
     decrees: &[Decree],
@@ -113,41 +191,23 @@ pub fn summarize(
     tz_offset_secs: i32,
 ) -> SeasonSummary {
     let season = season_of(today);
-    let range = season.range;
-
-    // Bucket sessions by local date into the season.
-    let mut season_sessions: Vec<&SessionRecord> = Vec::new();
-    for s in sessions {
-        if let Some(d) = date_of(s.at, tz_offset_secs) {
-            if range.contains(d) {
-                season_sessions.push(s);
-            }
-        }
-    }
-    let focus_minutes = season_sessions.iter().map(|s| s.minutes).sum();
-
-    let tally = crate::journal::verdict::tally(decrees, inscriptions, verdicts, range);
-    let reckoning = crate::journal::reckoning::build(decrees, inscriptions, &[], range);
-
-    // Unjudged blocks this season: sessions in the season with no live verdict.
-    let judged: std::collections::HashSet<i64> = verdicts
-        .iter()
-        .filter(|v| !v.deleted)
-        .map(|v| v.session_at)
-        .collect();
-    let unjudged = season_sessions
-        .iter()
-        .filter(|s| !judged.contains(&s.at))
-        .count() as u32;
+    let agg = aggregate(
+        season.range,
+        sessions,
+        decrees,
+        inscriptions,
+        verdicts,
+        tz_offset_secs,
+    );
 
     SeasonSummary {
         season,
-        sessions: season_sessions.len() as u32,
-        focus_minutes,
-        tally,
-        planned: reckoning.spoken,
-        landed: reckoning.answered,
-        unjudged: unjudged.min(season_sessions.len() as u32),
+        sessions: agg.sessions,
+        focus_minutes: agg.focus_minutes,
+        tally: agg.tally,
+        planned: agg.planned,
+        landed: agg.landed,
+        unjudged: agg.unjudged,
     }
 }
 
@@ -273,12 +333,34 @@ pub fn write_season_if_new(
     if path.exists() {
         return None;
     }
-    let md = render_season(&s, locale_fa);
+    let mut md = render_season(&s, locale_fa);
+    // Append the season drift headline, if there is a measurable finding.
+    if let Some(d) = crate::journal::season_drift::drift(
+        &crate::journal::season_drift::current_metrics(
+            sessions,
+            decrees,
+            inscriptions,
+            verdicts,
+            today,
+            tz_offset_secs,
+        ),
+        &crate::journal::season_drift::previous_metrics(
+            sessions,
+            decrees,
+            inscriptions,
+            verdicts,
+            today,
+            tz_offset_secs,
+        ),
+    ) {
+        md.push_str("> ");
+        md.push_str(&crate::journal::season_drift::headline_label(&d, locale_fa));
+        md.push_str("\n\n");
+    }
     std::fs::create_dir_all(&dir).ok()?;
     crate::state::atomic_file::atomic_write(&path, md.as_bytes()).ok()?;
     Some(path)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

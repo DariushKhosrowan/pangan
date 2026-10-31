@@ -37,6 +37,7 @@ pub mod prescription_verdict;
 pub mod promise_quality;
 pub mod realism;
 pub mod reckoning;
+pub mod season_drift;
 pub mod season_summary;
 pub mod standing_promise;
 pub mod unjudged;
