@@ -404,7 +404,9 @@ pub fn best_focus_window(sessions: &[SessionRecord], tz_offset_secs: i32) -> Opt
     // Count completed sessions per local hour of day.
     let mut per_hour = [0u32; 24];
     for s in sessions {
-        let Some(h) = hour_of_local(s.at, tz_offset_secs) else { continue };
+        let Some(h) = hour_of_local(s.at, tz_offset_secs) else {
+            continue;
+        };
         per_hour[h as usize] += 1;
     }
     // Sliding 3-hour window.

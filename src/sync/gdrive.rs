@@ -942,7 +942,7 @@ pub(crate) mod drive_roundtrip {
         version: u64,
     }
 
-        fn fake_drive() -> (String, Arc<Mutex<Option<String>>>) {
+    fn fake_drive() -> (String, Arc<Mutex<Option<String>>>) {
         fake_drive_impl(None)
     }
 
@@ -953,7 +953,9 @@ pub(crate) mod drive_roundtrip {
         fake_drive_impl(Some(blocked))
     }
 
-    fn fake_drive_impl(blocked_space: Option<&'static str>) -> (String, Arc<Mutex<Option<String>>>) {
+    fn fake_drive_impl(
+        blocked_space: Option<&'static str>,
+    ) -> (String, Arc<Mutex<Option<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let stored: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -1121,7 +1123,6 @@ pub(crate) mod drive_roundtrip {
 
         (format!("http://{addr}"), stored)
     }
-
 
     #[test]
     fn upload_then_download_returns_exactly_what_was_sent() {
