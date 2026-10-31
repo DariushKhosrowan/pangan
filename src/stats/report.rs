@@ -1008,6 +1008,94 @@ pub fn narrative(s: &ReportStats, en: bool) -> String {
     out
 }
 
+/// Whether the pause between one focus session and the next fit the planned
+/// break length.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BreakKind {
+    /// The gap was within ±30% of the planned break.
+    Followed,
+    /// The gap underran the planned break by more than 30% — the break was
+    /// skipped or cut short.
+    Skipped,
+    /// The gap overran the planned break by more than 30% — the break
+    /// stretched out.
+    Stretched,
+}
+
+/// How the gap between two focus sessions compares to the planned break length.
+/// A panic that underruns the plan by more than 30% was skipped; one that
+/// overruns it by more than 30% was stretched; anything else was followed.
+pub fn classify_break(gap_secs: i64, planned_break_secs: u32) -> BreakKind {
+    let planned = planned_break_secs as i64;
+    let tol = (planned as f64 * 0.3) as i64;
+    let lo = planned - tol;
+    let hi = planned + tol;
+    if gap_secs < lo {
+        BreakKind::Skipped
+    } else if gap_secs > hi {
+        BreakKind::Stretched
+    } else {
+        BreakKind::Followed
+    }
+}
+
+/// Break adherence over the sample `sample` completed sessions.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BreakAdherence {
+    /// Breaks taken within tolerance of the plan.
+    pub followed: u32,
+    /// Breaks cut short — the next block started too soon.
+    pub skipped: u32,
+    /// Breaks that stretched beyond the plan.
+    pub stretched: u32,
+    /// `followed / (followed + skipped + stretched)`.
+    pub rate: f32,
+}
+
+/// Measure break adherence over the last `sample` completed sessions.
+///
+/// Returns `None` when the sample is too small (< 5 sessions) to mean anything.
+/// The final session in the sample has no successor to measure a gap against,
+/// so it is not counted as a break.
+pub fn break_adherence(
+    sessions: &[SessionRecord],
+    planned_break_secs: u32,
+    sample: usize,
+) -> Option<BreakAdherence> {
+    if sessions.len() < 5 {
+        return None;
+    }
+    let mut sorted: Vec<&SessionRecord> = sessions.iter().collect();
+    sorted.sort_by_key(|s| s.at);
+    let n = sorted.len().min(sample);
+    if n < 2 {
+        return None;
+    }
+    let mut followed = 0u32;
+    let mut skipped = 0u32;
+    let mut stretched = 0u32;
+    for pair in sorted[sorted.len() - n..].windows(2) {
+        let gap = pair[1].at - pair[0].at;
+        match classify_break(gap, planned_break_secs) {
+            BreakKind::Followed => followed += 1,
+            BreakKind::Skipped => skipped += 1,
+            BreakKind::Stretched => stretched += 1,
+        }
+    }
+    let total = followed + skipped + stretched;
+    let rate = if total == 0 {
+        0.0
+    } else {
+        followed as f32 / total as f32
+    };
+    Some(BreakAdherence {
+        followed,
+        skipped,
+        stretched,
+        rate,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1275,5 +1363,87 @@ mod tests {
         let r = report_at(&[], Period::Month, 0, day(2026, 10, 28), None, false, 0);
         assert!(r.best_hour_window.is_none());
         assert!(!narrative(&r, false).contains("بهترین بازهٔ تمرکز"));
+    }
+
+    // --- break adherence ---
+
+    fn sess(at: i64, minutes: u64) -> SessionRecord {
+        SessionRecord { at, minutes }
+    }
+
+    #[test]
+    fn classify_break_followed_within_tolerance() {
+        // 5-min break = 300s; ±30% → [210, 390].
+        assert_eq!(classify_break(300, 300), BreakKind::Followed);
+        assert_eq!(classify_break(210, 300), BreakKind::Followed);
+        assert_eq!(classify_break(390, 300), BreakKind::Followed);
+    }
+
+    #[test]
+    fn classify_break_skipped_below_lower_bound() {
+        assert_eq!(classify_break(209, 300), BreakKind::Skipped);
+        assert_eq!(classify_break(0, 300), BreakKind::Skipped);
+    }
+
+    #[test]
+    fn classify_break_stretched_above_upper_bound() {
+        assert_eq!(classify_break(391, 300), BreakKind::Stretched);
+    }
+
+    #[test]
+    fn break_adherence_none_under_five_sessions() {
+        let s: Vec<SessionRecord> = (0..4).map(|i| sess(1_700_000_000 + i * 300, 25)).collect();
+        assert!(break_adherence(&s, 300, 10).is_none());
+    }
+
+    #[test]
+    fn break_adherence_rate_formula() {
+        // 6 sessions → 5 gaps: 3 followed, 1 skipped, 1 stretched.
+        // base gap 300 (followed); one at 0 (skipped); one at 600 (stretched).
+        let mut s = Vec::new();
+        let mut t = 1_700_000_000i64;
+        for _ in 0..3 {
+            s.push(sess(t, 25));
+            t += 300;
+        }
+        s.push(sess(t, 25)); // gap 0 → skipped
+        t += 0;
+        s.push(sess(t, 25));
+        t += 600; // gap 600 → stretched
+        s.push(sess(t, 25));
+        let a = break_adherence(&s, 300, 10).unwrap();
+        assert_eq!(a.followed, 3);
+        assert_eq!(a.skipped, 1);
+        assert_eq!(a.stretched, 1);
+        assert!((a.rate - 0.6).abs() < 1e-6);
+    }
+
+    #[test]
+    fn break_adherence_respects_sample_size() {
+        // 6 sessions, 5 gaps; sample=3 → only the last 3 sessions → 2 gaps.
+        let mut s = Vec::new();
+        let mut t = 1_700_000_000i64;
+        for _ in 0..6 {
+            s.push(sess(t, 25));
+            t += 300;
+        }
+        let a = break_adherence(&s, 300, 3).unwrap();
+        assert_eq!(a.followed, 2);
+        assert_eq!(a.skipped + a.stretched, 0);
+    }
+
+    #[test]
+    fn break_adherence_ignores_last_session_without_followup() {
+        // 5 sessions → 4 gaps; all followed.
+        let mut s = Vec::new();
+        let mut t = 1_700_000_000i64;
+        for _ in 0..5 {
+            s.push(sess(t, 25));
+            t += 300;
+        }
+        let a = break_adherence(&s, 300, 10).unwrap();
+        assert_eq!(a.followed, 4);
+        assert_eq!(a.skipped + a.stretched, 0);
+        assert!((a.rate - 1.0).abs() < 1e-6);
     }
 }

@@ -2420,6 +2420,28 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let shared = Arc::new(Shared::new(cfg));
     let app = Arc::new(AppState::load(Arc::clone(&shared)));
 
+    // Write the current week's read-back once, if this week's file doesn't
+    // exist yet (a scheduled hook — no UI). The review is a fixed document for
+    // a fixed week; its absence is the only signal that it hasn't been written.
+    {
+        let st = app.store.lock().unwrap();
+        let today = chrono::Local::now().date_naive();
+        let tz = crate::stats::report::local_tz_offset_secs();
+        let break_secs = (settings.short_break_minutes * 60) as u32;
+        if let Some(path) = crate::journal::weekly_review::write_if_new(
+            &st.data.sessions,
+            &st.data.decrees,
+            &st.data.inscriptions,
+            &st.data.verdicts,
+            today,
+            tz,
+            break_secs,
+            settings.lang != crate::state::settings::LANG_FA,
+        ) {
+            crate::log::info(&format!("wrote weekly review to {}", path.display()));
+        }
+    }
+
     // If the app died mid-focus-block, bring the clock back where it was.
     // This must run before any UI snapshot is applied so the timer screen
     // starts on the recovered countdown, not on a fresh 25:00.

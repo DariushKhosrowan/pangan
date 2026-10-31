@@ -25,8 +25,10 @@
 
 pub mod decree;
 pub mod inscription;
+pub mod orphans;
 pub mod reckoning;
 pub mod verdict;
+pub mod weekly_review;
 
 // The inscription rules are called from the app layer by bare name because they
 // are the older half of the pair; the decree's are reached through `decree::`

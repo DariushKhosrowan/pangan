@@ -201,6 +201,29 @@ fn attempt_once(
     // Merge the data record by record.
     let merged_data = merge::merge(&local.data, &remote.data);
 
+    // After a merge, walk the merged record for orphaned journal rows — rows
+    // whose session_at no longer has a live session (a tombstoned session on
+    // one device leaving its paired decree/inscription on the other). Silently
+    // diverged records would inflate "spoken" counts against "delivered"
+    // forever, so log them rather than letting them pass unnoticed.
+    if !local.data.sessions.is_empty() || !remote.data.sessions.is_empty() {
+        let orphans = crate::journal::orphans::find_orphans(
+            &merged_data.sessions,
+            &merged_data.decrees,
+            &merged_data.inscriptions,
+            &merged_data.verdicts,
+        );
+        if crate::journal::orphans::has_orphans(&orphans) {
+            let n = crate::journal::orphans::total_count(&orphans);
+            crate::log::warn(&format!(
+                "sync merge left {n} orphaned journal row(s) without a live session ({} decree, {} inscription, {} verdict)",
+                orphans.decrees.len(),
+                orphans.inscriptions.len(),
+                orphans.verdicts.len()
+            ));
+        }
+    }
+
     // Merge the settings field by field. The local side is first brought up to
     // date with what the user has actually changed since the last cycle, so a
     // field they just edited carries a fresh stamp and wins; a field they did
