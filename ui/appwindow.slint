@@ -2123,6 +2123,10 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     /// Today's unjudged blocks, as a short line ("N unjudged from today").
     /// "" when today has no unjudged session, so the timer stays clean.
     in property <string> unjudged-label: "";
+    /// When today's remaining planned blocks would finish if the next one were
+    /// started now, as a short line ("Done by 18:30"). "" when nothing is
+    /// pending, so the timer stays clean.
+    in property <string> projected-finish-label: "";
     /// What the day's plans came to: "۲ انجام · ۱ رهاشده · ۲ مانده".
     ///
     /// Built in Rust because the digits are Persian and Slint cannot
@@ -2641,6 +2645,24 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                 x: 22px;
                 width: parent.width - 22px - 22px;
                 text: root.unjudged-label;
+                font-family: "Vazirmatn";
+                font-size: Type.caption;
+                color: Palette.text-faint;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            // ---- projected finish ----
+            // When today's remaining planned blocks would finish if the next
+            // were started now. A quiet horizon under the dots, so a day with
+            // a plan does not feel open-ended; collapses when nothing is
+            // pending.
+            if root.projected-finish-label != "" : Text {
+                height: 18px;
+                x: 22px;
+                width: parent.width - 22px - 22px;
+                text: root.projected-finish-label;
                 font-family: "Vazirmatn";
                 font-size: Type.caption;
                 color: Palette.text-faint;

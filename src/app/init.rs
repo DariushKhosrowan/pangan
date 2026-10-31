@@ -5,12 +5,11 @@ use std::sync::{
 };
 use std::time::Duration;
 
+use chrono::TimeZone;
 use slint::{
     CloseRequestResponse, ComponentHandle, Global, ModelRc, SharedString, Timer, TimerMode,
     VecModel,
 };
-#[allow(unused_imports)] // TimeZone is a trait; used only for the tz helpers here
-use chrono::TimeZone;
 
 use crate::app::automation;
 use crate::audio::sound;
@@ -1196,6 +1195,29 @@ fn push_rota(win: &PanganWindow, app: &AppState, st: &Store) {
             "{} بلوک بدون داوری از امروز",
             calendar::fa_num(unjudged_today as i64)
         )
+    }));
+
+    // Projected finish: if the next planned block were started now, when would
+    // today's remaining blocks be done? A quiet horizon so a planned day does
+    // not feel open-ended. Only pending (not-yet-started) blocks count — an
+    // opened block is already in flight and its minutes are spoken for. Zero
+    // pending produces an empty label so the line collapses.
+    let pending_minutes: u64 = entries
+        .iter()
+        .filter(|e| e.is_pending())
+        .map(|e| e.minutes)
+        .sum();
+    win.set_projected_finish_label(SharedString::from(if pending_minutes == 0 {
+        String::new()
+    } else {
+        let finish = chrono::Local::now() + chrono::Duration::minutes(pending_minutes as i64);
+        let h = finish.format("%H").to_string();
+        let m = finish.format("%M").to_string();
+        if en {
+            format!("Done by {h}:{m}")
+        } else {
+            format!("پایان تا {h}:{m}")
+        }
     }));
 }
 
