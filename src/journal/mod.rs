@@ -23,6 +23,7 @@
 //! Everything here is pure: no file I/O, no UI, no clock reads beyond the ones
 //! explicitly passed in. That is what lets the rules be tested directly.
 
+pub mod daily_briefing;
 pub mod decree;
 pub mod inscription;
 pub mod obstruction;

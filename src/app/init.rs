@@ -2540,6 +2540,26 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 st.save();
             }
         }
+        // The daily briefing: one page per day, written on first launch each
+        // day. The coach speaks weekly in the digest, but the user acts daily —
+        // this surfaces today's rota, the recent unjudged backlog, last week's
+        // kept-rate, the active prescription, and the calibrated block length
+        // at the moment of planning, before the day begins.
+        if let Some(path) = crate::journal::daily_briefing::write_if_new(
+            &st.data.sessions,
+            &st.data.decrees,
+            &st.data.inscriptions,
+            &st.data.verdicts,
+            &st.data.breaks,
+            &st.data.rota,
+            &st.data.prescriptions,
+            today,
+            tz,
+            break_secs,
+            locale_fa,
+        ) {
+            crate::log::info(&format!("wrote daily briefing to {}", path.display()));
+        }
     }
 
     // If the app died mid-focus-block, bring the clock back where it was.
