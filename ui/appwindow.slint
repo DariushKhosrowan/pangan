@@ -2458,6 +2458,22 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                 }
             }
 
+            // The current block's decree, kept visible in compact mode too.
+            // Compact is the focused state — the window is small because the
+            // work is filling it — and that is exactly when the sentence the
+            // block is working against should stay in sight. Collapses when
+            // no decree governs the block.
+            if root.current-decree != "" : Text {
+                height: 18px;
+                text: Strings.dec-strip + ": " + root.current-decree;
+                font-family: "Vazirmatn";
+                font-size: Type.caption;
+                color: Palette.text-dim;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
             HorizontalLayout {
                 spacing: 12px;
                 alignment: center;
