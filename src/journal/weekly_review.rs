@@ -639,6 +639,10 @@ pub struct WeeklyDigest {
     /// Which prescription kind actually works for this user, as a localized
     /// one-line summary. None until a kind has enough outcomes to judge.
     pub kind_effectiveness_label: Option<String>,
+    /// Cross-metric patterns: the strongest leading/following metric pairs,
+    /// as localized one-line labels. Empty until enough weeks exist to trust
+    /// a correlation.
+    pub patterns: Vec<String>,
 }
 
 /// Compose the week's full digest from the store's slices.
@@ -815,6 +819,23 @@ pub fn compose_weekly(
         inscriptions,
         crate::journal::purpose_drift::DEFAULT_THRESHOLD,
     );
+    // Cross-metric patterns: the strongest leading/following metric pairs
+    // across the trailing weeks. Empty until enough paired weeks exist.
+    let weeks = crate::journal::week_drift::gather_weeks(
+        sessions,
+        decrees,
+        inscriptions,
+        verdicts,
+        breaks,
+        today,
+        tz_offset_secs,
+        planned_break_secs,
+    );
+    let series = crate::stats::patterns::all_series(&weeks);
+    let patterns = crate::stats::patterns::find_patterns(&series, 0.6, 3)
+        .into_iter()
+        .map(|p| crate::stats::patterns::pattern_label(&p, locale_fa))
+        .collect::<Vec<String>>();
     WeeklyDigest {
         review,
         autopsy,
@@ -831,6 +852,7 @@ pub fn compose_weekly(
         purpose_drift_hour,
         purpose_drift_duration,
         kind_effectiveness_label,
+        patterns,
     }
 }
 
@@ -948,6 +970,21 @@ pub fn render_digest(digest: &WeeklyDigest, locale_fa: bool) -> String {
                 label,
             ));
             out.push('\n');
+        }
+        out.push('\n');
+    }
+
+    // 1.6 Cross-metric patterns — which metric leads, and which follows, as
+    // the record thickens. Empty until enough paired weeks exist to trust a
+    // correlation.
+    if !digest.patterns.is_empty() {
+        out.push_str(if fa {
+            "## همبستگی‌ها\n\n"
+        } else {
+            "## Patterns\n\n"
+        });
+        for p in &digest.patterns {
+            out.push_str(&format!("  - {}\n", p));
         }
         out.push('\n');
     }
