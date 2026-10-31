@@ -1096,6 +1096,121 @@ pub fn break_adherence(
     })
 }
 
+/// One hour's verdict tally.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct HourVerdictStat {
+    /// Local hour of day, 0–23.
+    pub hour: u8,
+    pub kept: u32,
+    pub partial: u32,
+    pub broken: u32,
+    pub extended: u32,
+    pub short: u32,
+    pub total: u32,
+}
+
+/// Tally verdicts by the local hour the session ended.
+///
+/// A session is bucketed by the local hour of its completion time (via
+/// `tz_offset_secs`), and its verdict (when one exists) is added to that
+/// hour's counts. Sessions without a verdict are still counted in `total`
+/// but in none of the kind columns, so `total` is "sessions that hour" while
+/// the kind counts are "of those, judged like this".
+pub fn verdict_by_hour(
+    verdicts: &[crate::journal::Verdict],
+    sessions: &[SessionRecord],
+    tz_offset_secs: i32,
+) -> [HourVerdictStat; 24] {
+    let mut out = [HourVerdictStat::default(); 24];
+    for h in 0..24 {
+        out[h].hour = h as u8;
+    }
+    let verdict_for: std::collections::HashMap<i64, crate::journal::VerdictKind> = verdicts
+        .iter()
+        .filter(|v| !v.deleted)
+        .map(|v| (v.session_at, v.kind))
+        .collect();
+    for s in sessions {
+        let Some(h) = hour_of(s.at, tz_offset_secs) else {
+            continue;
+        };
+        let stat = &mut out[h as usize];
+        stat.total += 1;
+        match verdict_for.get(&s.at) {
+            Some(crate::journal::VerdictKind::Kept) => stat.kept += 1,
+            Some(crate::journal::VerdictKind::Partial) => stat.partial += 1,
+            Some(crate::journal::VerdictKind::Broken) => stat.broken += 1,
+            Some(crate::journal::VerdictKind::Extended) => stat.extended += 1,
+            Some(crate::journal::VerdictKind::Short) => stat.short += 1,
+            None => {}
+        }
+    }
+    out
+}
+
+/// The hour with the highest kept/total ratio, given a minimum sample.
+pub fn best_kept_hour(stats: &[HourVerdictStat; 24], min_samples: u32) -> Option<u8> {
+    let mut best: Option<(f32, u8)> = None;
+    for stat in stats.iter().filter(|s| s.total >= min_samples) {
+        let ratio = stat.kept as f32 / stat.total as f32;
+        let better = match best {
+            None => true,
+            Some((best_ratio, best_hour)) => {
+                ratio > best_ratio + 1e-9
+                    || (ratio - best_ratio).abs() < 1e-9 && stat.hour < best_hour
+            }
+        };
+        if better {
+            best = Some((ratio, stat.hour));
+        }
+    }
+    best.map(|(_, h)| h)
+}
+
+/// The gap between the busiest hour and the most honest hour.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HonestyGap {
+    /// Hour where the most sessions completed.
+    pub fastest_hour: u8,
+    /// Hour with the highest kept ratio.
+    pub most_honest_hour: u8,
+    /// `most_honest_hour - fastest_hour` in the 0–23 ring.
+    pub delta: i8,
+}
+
+/// Compare the productive hour to the honest hour.
+///
+/// `None` when no hour reaches `min_samples` for honesty or there is no
+/// session at all.
+pub fn honesty_vs_completion_gap(
+    stats: &[HourVerdictStat; 24],
+    sessions: &[SessionRecord],
+    tz_offset_secs: i32,
+    min_samples: u32,
+) -> Option<HonestyGap> {
+    if sessions.is_empty() {
+        return None;
+    }
+    let fastest = {
+        let mut best_hour = 0u8;
+        let mut best_count = 0u32;
+        for stat in stats {
+            if stat.total > best_count {
+                best_count = stat.total;
+                best_hour = stat.hour;
+            }
+        }
+        best_hour
+    };
+    let most_honest = best_kept_hour(stats, min_samples)?;
+    let delta = ((most_honest as i16 - fastest as i16) % 24) as i8;
+    Some(HonestyGap {
+        fastest_hour: fastest,
+        most_honest_hour: most_honest,
+        delta,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1445,5 +1560,137 @@ mod tests {
         assert_eq!(a.followed, 4);
         assert_eq!(a.skipped + a.stretched, 0);
         assert!((a.rate - 1.0).abs() < 1e-6);
+    }
+
+    // --- verdict by hour ---
+
+    fn verdict_hour(
+        hour: u32,
+        kind: crate::journal::VerdictKind,
+        at: i64,
+    ) -> crate::journal::Verdict {
+        crate::journal::verdict::declare(at, kind, at).unwrap()
+    }
+
+    #[test]
+    fn verdict_by_hour_empty_returns_zero_stats() {
+        let stats = verdict_by_hour(&[], &[], 0);
+        assert!(stats.iter().all(|s| s.total == 0 && s.hour < 24));
+    }
+
+    #[test]
+    fn verdict_by_hour_groups_by_local_hour() {
+        // Two sessions ending in the same local hour but at distinct timestamps
+        // (so each carries its own verdict).
+        let at1 = ts_for(2026, 10, 28, 12);
+        let at2 = ts_for(2026, 10, 28, 12) + 60;
+        let s = vec![sess(at1, 25), sess(at2, 25)];
+        let v = vec![
+            verdict_hour(12, crate::journal::VerdictKind::Kept, at1),
+            verdict_hour(12, crate::journal::VerdictKind::Broken, at2),
+        ];
+        let stats = verdict_by_hour(&v, &s, 0);
+        assert_eq!(stats[12].total, 2);
+        assert_eq!(stats[12].kept, 1);
+        assert_eq!(stats[12].broken, 1);
+    }
+
+    #[test]
+    fn verdict_by_hour_respects_tz_offset_iran_half_hour() {
+        // A UTC noon session is 15:00 local in Iran (+03:30 → +12600s).
+        let s = vec![rec(2026, 10, 28, 25)];
+        let v = vec![verdict_hour(15, crate::journal::VerdictKind::Kept, s[0].at)];
+        let stats = verdict_by_hour(&v, &s, 12600);
+        assert_eq!(stats[15].total, 1);
+        assert_eq!(stats[12].total, 0, "UTC noon must bucket to local 15:00");
+    }
+
+    #[test]
+    fn verdict_by_hour_ignores_sessions_without_verdict() {
+        let s = vec![rec(2026, 10, 28, 25)];
+        let stats = verdict_by_hour(&[], &s, 0);
+        assert_eq!(stats[12].total, 1);
+        assert_eq!(stats[12].kept, 0);
+        assert_eq!(stats[12].broken, 0);
+    }
+
+    #[test]
+    fn best_kept_hour_none_below_min_samples() {
+        let stats = verdict_by_hour(&[], &[], 0);
+        assert!(best_kept_hour(&stats, 5).is_none());
+    }
+
+    #[test]
+    fn best_kept_hour_picks_highest_ratio() {
+        let mut stats = [HourVerdictStat::default(); 24];
+        for h in 0..24 {
+            stats[h].hour = h as u8;
+        }
+        stats[9] = HourVerdictStat {
+            hour: 9,
+            total: 10,
+            kept: 5,
+            ..Default::default()
+        }; // 0.5
+        stats[15] = HourVerdictStat {
+            hour: 15,
+            total: 10,
+            kept: 8,
+            ..Default::default()
+        }; // 0.8
+        assert_eq!(best_kept_hour(&stats, 3), Some(15));
+    }
+
+    #[test]
+    fn best_kept_hour_ties_broken_by_hour() {
+        let mut stats = [HourVerdictStat::default(); 24];
+        for h in 0..24 {
+            stats[h].hour = h as u8;
+        }
+        stats[8] = HourVerdictStat {
+            hour: 8,
+            total: 4,
+            kept: 2,
+            ..Default::default()
+        }; // 0.5
+        stats[20] = HourVerdictStat {
+            hour: 20,
+            total: 4,
+            kept: 2,
+            ..Default::default()
+        }; // 0.5
+        assert_eq!(best_kept_hour(&stats, 3), Some(8), "earlier hour wins ties");
+    }
+
+    #[test]
+    fn honesty_vs_completion_gap_detects_mismatch() {
+        let mut stats = [HourVerdictStat::default(); 24];
+        for h in 0..24 {
+            stats[h].hour = h as u8;
+        }
+        // Most sessions end at 9; most honest is 15.
+        stats[9] = HourVerdictStat {
+            hour: 9,
+            total: 20,
+            kept: 2,
+            ..Default::default()
+        };
+        stats[15] = HourVerdictStat {
+            hour: 15,
+            total: 5,
+            kept: 5,
+            ..Default::default()
+        };
+        let sessions = vec![rec(2026, 10, 28, 25)];
+        let gap = honesty_vs_completion_gap(&stats, &sessions, 0, 3).unwrap();
+        assert_eq!(gap.fastest_hour, 9);
+        assert_eq!(gap.most_honest_hour, 15);
+        assert_eq!(gap.delta, 6);
+    }
+
+    #[test]
+    fn honesty_vs_completion_gap_none_when_all_zero() {
+        let stats = verdict_by_hour(&[], &[], 0);
+        assert!(honesty_vs_completion_gap(&stats, &[], 0, 3).is_none());
     }
 }
