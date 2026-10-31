@@ -315,6 +315,7 @@ pub fn write_season_if_new(
     decrees: &[Decree],
     inscriptions: &[Inscription],
     verdicts: &[Verdict],
+    season_intentions: &[crate::journal::season_intention::SeasonIntention],
     today: NaiveDate,
     tz_offset_secs: i32,
     locale_fa: bool,
@@ -357,9 +358,61 @@ pub fn write_season_if_new(
         md.push_str(&crate::journal::season_drift::headline_label(&d, locale_fa));
         md.push_str("\n\n");
     }
+    // Season coherence: does the season's work actually serve what the user
+    // said the season was *for*? Measured against the season's live intention,
+    // over the decrees whose sessions fall inside the season span. A line is
+    // only added when the coherence engine has enough live decrees to report
+    // a rate — it would rather stay silent than infer from two data points.
+    if let Some(line) = coherence_headline(
+        decrees,
+        season_intentions,
+        &s.season,
+        tz_offset_secs,
+        locale_fa,
+    ) {
+        md.push_str("> ");
+        md.push_str(&line);
+        md.push_str("\n\n");
+    }
     std::fs::create_dir_all(&dir).ok()?;
     crate::state::atomic_file::atomic_write(&path, md.as_bytes()).ok()?;
     Some(path)
+}
+
+/// The season-coherence headline line for the season summary, if any.
+///
+/// Measures the season's live decrees against its live intention. Returns
+/// `None` when there is no live intention or not enough live decrees — the
+/// engine stays silent rather than infer from too little data.
+fn coherence_headline(
+    decrees: &[Decree],
+    season_intentions: &[crate::journal::season_intention::SeasonIntention],
+    season: &SeasonRef,
+    tz_offset_secs: i32,
+    locale_fa: bool,
+) -> Option<String> {
+    let intention = crate::journal::season_intention::latest_live_for_season(
+        season_intentions,
+        season.jalali_year,
+        season.season,
+    )?;
+    let in_season: Vec<Decree> = decrees
+        .iter()
+        .filter(|d| {
+            date_of(d.session_at, tz_offset_secs).is_some_and(|dt| season.range.contains(dt))
+        })
+        .cloned()
+        .collect();
+    let c = crate::journal::season_coherence::season_coherence(
+        &in_season,
+        Some(intention),
+        tz_offset_secs,
+        crate::journal::season_coherence::SEASON_COHERENCE_THRESHOLD,
+        crate::journal::season_coherence::MIN_LIVE_DECREES,
+    )?;
+    Some(crate::journal::season_coherence::coherence_label(
+        &c, locale_fa,
+    ))
 }
 #[cfg(test)]
 mod tests {
@@ -460,5 +513,54 @@ mod tests {
         );
         let en = render_season(&s, false);
         assert!(en.contains("No focus sessions"));
+    }
+
+    #[test]
+    fn coherence_headline_adds_line_when_intention_and_enough_decrees() {
+        let decree = |session_at: i64, text: &str| crate::journal::Decree {
+            id: format!("d{session_at}"),
+            session_at,
+            text: text.to_string(),
+            written_at: session_at - 1500,
+            deleted: false,
+        };
+        let intention = crate::journal::season_intention::SeasonIntention {
+            id: 1,
+            jalali_year: 1405,
+            season: 0,
+            body: "finish the book".to_string(),
+            created_at: 0,
+            deleted: false,
+        };
+        // Three coherent decrees inside spring 2026 + one incoherent.
+        let decrees = vec![
+            decree(1_775_779_200, "write the book"),
+            decree(1_775_865_600, "write the book"),
+            decree(1_775_952_000, "write the book"),
+            decree(1_776_038_400, "answered emails"),
+        ];
+        let season = season_of(NaiveDate::from_ymd_opt(2026, 4, 10).unwrap());
+        let line = coherence_headline(&decrees, &[intention], &season, 12600, false)
+            .expect("coherence head should be reported");
+        assert!(line.contains("% of decrees were coherent"));
+        assert!(line.contains("of 4"));
+    }
+
+    #[test]
+    fn coherence_headline_silent_when_no_intention() {
+        let decree = |session_at: i64, text: &str| crate::journal::Decree {
+            id: format!("d{session_at}"),
+            session_at,
+            text: text.to_string(),
+            written_at: session_at - 1500,
+            deleted: false,
+        };
+        let decrees = vec![
+            decree(1_775_779_200, "write the book"),
+            decree(1_775_865_600, "write the book"),
+            decree(1_775_952_000, "write the book"),
+        ];
+        let season = season_of(NaiveDate::from_ymd_opt(2026, 4, 10).unwrap());
+        assert!(coherence_headline(&decrees, &[], &season, 12600, false).is_none());
     }
 }

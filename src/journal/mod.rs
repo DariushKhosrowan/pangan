@@ -40,6 +40,7 @@ pub mod purpose_drift;
 pub mod realism;
 pub mod reckoning;
 pub mod season_close;
+pub mod season_coherence;
 pub mod season_drift;
 pub mod season_intention;
 pub mod season_summary;

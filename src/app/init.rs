@@ -2584,6 +2584,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             &st.data.decrees,
             &st.data.inscriptions,
             &st.data.verdicts,
+            &st.data.season_intentions,
             today,
             tz,
             locale_fa,
