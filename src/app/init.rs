@@ -347,7 +347,13 @@ fn apply_session_dots(win: &PanganWindow, shared: &Shared, app: &AppState) {
 }
 
 fn notify(body: &str) {
-    crate::platform::notify::send("Pangan", body);
+    if let Err(e) = crate::platform::notify::send("Pangan", body) {
+        // The OS-level cue did not fire (no daemon, no permission, Focus
+        // Assist). The user may miss the end of a block, so record it in the
+        // log rather than failing silently. Logged, not shown: this is a
+        // logic fix, and the UI is intentionally left unchanged.
+        crate::log::error(&format!("notification not shown: {e}"));
+    }
 }
 
 /// Begin the block a rota entry describes.
