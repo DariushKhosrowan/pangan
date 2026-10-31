@@ -106,7 +106,7 @@ preferences are written into `config.toml`.
 
 ## Architecture
 
-- `src/timer/` — platform-agnostic drift-free timer state machine
+- `src/timer/` — platform-agnostic drift-free timer state machine, plus crash-safe session recovery (`session_snapshot.rs`)
 - `src/state/` — settings, the session/task store, and the day's rota
 - `src/journal/` — decrees, inscriptions, and the reckoning that reads them back
 - `src/app/` — startup, the UI event loop, shell automation hooks
@@ -114,8 +114,28 @@ preferences are written into `config.toml`.
 - `src/calendar/` — Jalali calendar, Sasanian day names, chronicle, events
 - `src/audio/` — procedural Iranian instrument synthesis + WAV generation
 - `src/sync/` — Google Drive sync, three-way merge, and local backup
+- `src/log/` — leveled, rotating file logger to `~/.config/pangan/logs/app.log`
 - `src/platform/` — per-OS tray / notifications / hotkey / inhibit / autostart
 - `ui/appwindow.slint` — the Persepolis-themed Slint UI
+
+## Logging
+
+The app writes a leveled, timestamped log to `~/.config/pangan/logs/app.log`
+(rotated at 512 KB to `app.log.1`). Errors, sync events, sign-in steps, and
+crash-recovery decisions all land here, so a failing run leaves a trail that
+can be opened and read without a terminal. `sync.log` alongside `data.json`
+is kept for backward compatibility and mirrored into the app log.
+
+## Testing
+
+- `cargo test` — the full unit suite (308+ tests across timer, sync, stats,
+  calendar, journal, audio, log).
+- `tools/test.sh` — one-command gate: `cargo fmt --check`, `cargo clippy`,
+  the full test suite, and a release build. Run it before pushing.
+- CI (`.github/workflows/build.yml`) runs the build matrix plus a lint job
+  (formatting as a hard gate; clippy reports warnings).
+
+Crash recovery is verified by its own tests in `src/timer/session_snapshot.rs`.
 
 ## License
 

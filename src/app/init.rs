@@ -468,12 +468,14 @@ fn try_resume_from_snapshot(app: &Arc<AppState>, shared: &Arc<Shared>) {
 
     // A stale snapshot is wiped, not offered.
     if !snap.is_recoverable(now) {
+        crate::log::info("recovery: stale snapshot discarded (past grace window)");
         SessionSnapshot::clear();
         return;
     }
 
     // Only focus blocks are worth resurrecting; a break is transient.
     if snap.phase != Phase::Focus {
+        crate::log::info("recovery: non-focus snapshot discarded");
         SessionSnapshot::clear();
         return;
     }
@@ -486,6 +488,9 @@ fn try_resume_from_snapshot(app: &Arc<AppState>, shared: &Arc<Shared>) {
         *app.pending_decree.lock().unwrap() = Some((text, now));
     }
 
+    crate::log::info(&format!(
+        "recovery: resuming focus block, {remaining}s remaining (running={running})"
+    ));
     shared.begin_from_recovery(snap.planned_duration_secs, remaining, running);
     // The crash is handled; remove the snapshot so the next launch does not
     // re-offer it. Lifecycle events from here on write a fresh one.
@@ -2012,6 +2017,8 @@ fn sync_log(msg: &str) {
         let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
         let _ = writeln!(f, "[{ts}] {msg}");
     }
+    // Mirror into the structured app log so there is one place to look.
+    crate::log::info(&format!("sync: {msg}"));
 }
 
 fn device_flow_sign_in(

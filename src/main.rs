@@ -15,6 +15,7 @@ mod app;
 mod audio;
 mod calendar;
 mod journal;
+mod log;
 mod platform;
 mod state;
 mod stats;
@@ -26,7 +27,10 @@ pub(crate) mod ui {
 }
 
 fn main() {
+    log::init();
+    log::info("pangan starting");
     if let Err(e) = app::run() {
+        log::error(&format!("fatal: {e}"));
         eprintln!("pangan: fatal: {e}");
         std::process::exit(1);
     }

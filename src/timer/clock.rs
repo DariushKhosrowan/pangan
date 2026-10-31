@@ -441,7 +441,7 @@ impl Shared {
     /// snapshot. Kept on the clock so the recovery logic reads the same truth
     /// the countdown runs on.
     pub fn state_snapshot(&self) -> State {
-        self.state.lock().unwrap().clone()
+        *self.state.lock().unwrap()
     }
 
     /// Restore the countdown from a crash-recovery snapshot.
