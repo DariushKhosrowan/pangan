@@ -2560,6 +2560,20 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         ) {
             crate::log::info(&format!("wrote daily briefing to {}", path.display()));
         }
+        // The end-of-day follow-through: once the day is over, check whether it
+        // honored the morning briefing. We evaluate *yesterday* (a finished
+        // day) on each launch, writing one follow-up file per day.
+        if let Some(path) = crate::journal::briefing_followup::write_yesterday_if_new(
+            &st.data.sessions,
+            &st.data.verdicts,
+            &st.data.rota,
+            &st.data.prescriptions,
+            today,
+            tz,
+            locale_fa,
+        ) {
+            crate::log::info(&format!("wrote daily follow-up to {}", path.display()));
+        }
     }
 
     // If the app died mid-focus-block, bring the clock back where it was.
