@@ -2,6 +2,7 @@
 //! Data lives under the config dir (`~/.config/pangan/data.json` on Linux).
 
 use crate::journal::{Decree, Inscription};
+use crate::state::plans::{self, Plan, PlanError};
 use crate::state::rota::{self, RotaEntry, RotaError};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -68,6 +69,15 @@ pub struct Data {
     /// two unrelated id spaces together for no gain.
     #[serde(default)]
     pub next_rota_id: u64,
+    /// Day shapes written once and re-applied later — a rota *template*. Kept
+    /// apart from `rota` because a plan is not a day: it holds no day, no ids
+    /// and no history, only the shape a day can be given.
+    #[serde(default)]
+    pub plans: Vec<Plan>,
+    /// Hands out plan ids. Same reasoning as `next_rota_id`: its own id space,
+    /// its own counter, so a plan can never collide with a rota row.
+    #[serde(default)]
+    pub next_plan_id: u64,
 }
 
 impl Data {
@@ -504,6 +514,71 @@ impl Store {
         self.data.rota.push(fresh);
         self.save();
         Some(new_id)
+    }
+
+    // ── plans: day shapes kept for another day ─────────────────────────────
+    //
+    // A plan is the rota's memory. Every rule lives in `state::plans`; these
+    // methods own the id counter and the save, so the rules cannot drift
+    // between the store and a test.
+
+    /// Save today's rota under a name.
+    pub fn save_plan(&mut self, name: &str, day: &str) -> Result<u64, PlanError> {
+        let entries: Vec<RotaEntry> = self.rota_for_day(day);
+        let id = self.data.next_plan_id + 1;
+        let plan = plans::capture(
+            id,
+            name,
+            &entries,
+            chrono::Utc::now().timestamp(),
+            &self.data.plans,
+        )?;
+        self.data.next_plan_id = id;
+        self.data.plans.push(plan);
+        self.save();
+        Ok(id)
+    }
+
+    /// The live plans, most recently edited first.
+    pub fn live_plans(&self) -> Vec<Plan> {
+        plans::live(&self.data.plans).into_iter().cloned().collect()
+    }
+
+    /// One live plan by id.
+    pub fn plan(&self, id: u64) -> Option<Plan> {
+        plans::find(&self.data.plans, id).cloned()
+    }
+
+    /// Write a plan's blocks onto `day`. Returns how many rows were written.
+    ///
+    /// The counter is advanced only after every row has been built, so a plan
+    /// that is refused leaves the id space untouched: a refused application
+    /// that still burned ids would be invisible, and would one day show up as a
+    /// gap in a synced list.
+    pub fn apply_plan(&mut self, id: u64, day: &str) -> Result<usize, PlanError> {
+        let plan = self.plan(id).ok_or(PlanError::NotFound)?;
+        let first_id = self.data.next_rota_id + 1;
+        let rows = plans::apply(
+            &plan,
+            day,
+            first_id,
+            chrono::Utc::now().timestamp(),
+            &self.data.rota,
+        )?;
+        self.data.next_rota_id = self.data.next_rota_id + rows.len() as u64;
+        self.data.rota.extend(rows.iter().cloned());
+        self.save();
+        Ok(rows.len())
+    }
+
+    /// Take a plan off the list by marking it.
+    pub fn remove_plan(&mut self, id: u64) -> bool {
+        if plans::remove(&mut self.data.plans, id, chrono::Utc::now().timestamp()) {
+            self.save();
+            true
+        } else {
+            false
+        }
     }
 }
 

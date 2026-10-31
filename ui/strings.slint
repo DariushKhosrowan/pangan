@@ -270,6 +270,21 @@ export global Strings {
     // The two strings that carry a number are built in Rust (this is where the
     // Persian digits come from), so only their fragments live here.
     out property <string> rota-left-suffix: fa ? "مانده" : "left";
+
+    // ── Saved plans: a day shape kept for another day ──────────────────────
+    // "Saved plans" rather than "templates": what the user keeps is a *day*
+    // that worked, and the word for it should be the one they use for a day.
+    out property <string> plans-title: fa ? "روتین‌های ذخیره‌شده" : "Saved plans";
+    out property <string> plans-empty: fa
+        ? "هنوز روتینی ذخیره نشده — امروز را برنامه‌ریزی کنید و بعد ذخیره‌اش کنید"
+        : "No saved plans yet — plan a day, then save it";
+    out property <string> plans-save: fa ? "ذخیرهٔ امروز" : "Save today";
+    out property <string> plans-name-hint: fa ? "نام روتین…" : "Name this plan…";
+    out property <string> plans-apply: fa ? "به‌کار ببر" : "Apply";
+    out property <string> plans-delete: fa ? "حذف" : "Delete";
+    out property <string> plans-blocks-suffix: fa ? "بلوک" : "blocks";
+    out property <string> plans-minutes-suffix: fa ? "دقیقه" : "min";
+    out property <string> plans-error: fa ? "نتوانست" : "Could not";
     out property <string> rota-carry-prefix: fa
         ? "بلوک ناتمام از روزهای پیش:"
         : "Unfinished blocks from earlier days:";

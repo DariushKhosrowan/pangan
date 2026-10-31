@@ -386,6 +386,8 @@ mod tests {
             next_task_id: 2,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             decrees: vec![],
         };
@@ -395,6 +397,8 @@ mod tests {
             next_task_id: 3,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             decrees: vec![],
         };
@@ -453,6 +457,8 @@ mod tests {
             next_task_id: 2,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             decrees: vec![],
         };
@@ -490,6 +496,8 @@ mod tests {
             next_task_id: 3,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             ..b_now.clone()
         };
@@ -842,6 +850,8 @@ mod recovery_tests {
             next_task_id: 3,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             decrees: vec![],
         };
@@ -882,6 +892,8 @@ mod recovery_tests {
             next_task_id: 2,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -928,6 +940,8 @@ mod recovery_tests {
             next_task_id: 2,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -939,6 +953,8 @@ mod recovery_tests {
             next_task_id: 3,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -974,6 +990,8 @@ mod recovery_tests {
             next_task_id: 2,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -1022,6 +1040,8 @@ mod recovery_tests {
             next_task_id: 2,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -1051,6 +1071,8 @@ mod recovery_tests {
             next_task_id: 2,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -1110,6 +1132,8 @@ mod recovery_tests {
             next_task_id: 2,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -1135,6 +1159,8 @@ mod recovery_tests {
             next_task_id: 3,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -1145,6 +1171,8 @@ mod recovery_tests {
             next_task_id: 4,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -1297,6 +1325,8 @@ mod everything_syncs_tests {
             next_task_id: 3,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             decrees: vec![],
         };
@@ -1369,6 +1399,8 @@ mod everything_syncs_tests {
             next_task_id: 2,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -1437,6 +1469,8 @@ mod everything_syncs_tests {
             next_task_id: 2,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             ..Default::default()
         };
@@ -1490,6 +1524,8 @@ mod everything_syncs_tests {
             next_task_id: 2,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             decrees: vec![],
         };

@@ -948,6 +948,59 @@ fn push_rota(win: &PanganWindow, app: &AppState, st: &Store) {
     }));
 }
 
+/// Push the saved plans into the window: the rows, and whether today has
+/// anything worth saving as a new one.
+///
+/// Rebuilt from the store on every tick like every other list here, for the
+/// same reason: the store is the truth, and a window-side copy is one more
+/// thing that can disagree with it.
+///
+/// The "save today" affordance is hidden when today's rota holds nothing. An
+/// empty plan saves nothing, and a button that is present but always refuses
+/// teaches the user that the feature does not work rather than that today is
+/// empty.
+fn push_plans(win: &PanganWindow, app: &AppState, st: &Store) {
+    let en = app.settings.lock().unwrap().lang == "en";
+    let plans = st.live_plans();
+    let mut items: Vec<crate::ui::PlanItem> = Vec::with_capacity(plans.len());
+    let mut list_height = 0.0f32;
+    for p in &plans {
+        list_height += 42.0;
+        // "4 blocks · 135 min". Built here because this is where the Persian
+        // digits are, and Slint cannot interpolate a count into a string.
+        let summary = if en {
+            format!(
+                "{} block{} · {} min",
+                p.blocks.len(),
+                if p.blocks.len() == 1 { "" } else { "s" },
+                p.total_minutes()
+            )
+        } else {
+            format!(
+                "{} بلوک · {} دقیقه",
+                calendar::fa_num(p.blocks.len() as i64),
+                calendar::fa_num(p.total_minutes() as i64)
+            )
+        };
+        items.push(crate::ui::PlanItem {
+            id: p.id as i32,
+            name: SharedString::from(p.name.clone()),
+            summary: SharedString::from(summary),
+        });
+    }
+    win.set_plans(ModelRc::new(VecModel::from(items)));
+    win.set_plans_list_height(list_height);
+
+    let today = chrono::Local::now().date_naive();
+    let today_key = today.format("%Y-%m-%d").to_string();
+    let has_today = !st.rota_for_day(&today_key).is_empty();
+    win.set_plan_save_visible(has_today);
+    if !has_today {
+        // Nothing to save, so the name field cannot be half-filled either.
+        win.set_plan_can_save(false);
+    }
+}
+
 /// Push the inscription archive into the window, honouring the search box.
 ///
 /// The archive is rebuilt from the store on every tick rather than being edited
@@ -1259,6 +1312,7 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
     push_inscriptions(win, app, &st);
     push_decree_state(win, app, &st);
     push_rota(win, app, &st);
+    push_plans(win, app, &st);
     let en = app.settings.lock().unwrap().lang == "en";
     let period = *app.report_period.lock().unwrap();
     let offset = *app.report_offset.lock().unwrap();
@@ -2891,6 +2945,96 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         carry1_app.cloud.mark_dirty();
         if let Some(w) = carry1_weak.upgrade() {
             refresh_screens(&w, &carry1_app);
+        }
+    });
+
+    // ── saved plans ─────────────────────────────────────────────────────────
+    //
+    // A plan is the rota's memory: one day's shape written down once, applied
+    // to whatever day the user is standing in. Saving and applying are the two
+    // halves, and both are one press — the whole point of a saved plan is that
+    // re-deciding the day's shape costs nothing.
+
+    // Save today's rota under the typed name.
+    let plan_save_app = Arc::clone(&app);
+    let plan_save_weak = weak.clone();
+    win.on_save_plan(move |name| {
+        let day = chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string();
+        let res = {
+            let mut st = plan_save_app.store.lock().unwrap();
+            st.save_plan(&name, &day)
+        };
+        if let Some(w) = plan_save_weak.upgrade() {
+            match res {
+                Ok(_) => {
+                    w.set_plan_name(SharedString::from(""));
+                    w.set_plan_can_save(false);
+                    w.set_plan_error(SharedString::from(""));
+                    plan_save_app.cloud.mark_dirty();
+                }
+                // The refusal is shown, not swallowed: the user pressed a
+                // button and gets no visible result otherwise.
+                Err(e) => w.set_plan_error(SharedString::from(e.to_string())),
+            }
+            refresh_screens(&w, &plan_save_app);
+        }
+    });
+
+    // The name field drives the Save button, on the same trimmed-text rule the
+    // validator uses, so the button is never enabled for something the store
+    // will then refuse.
+    let plan_lbl_weak = weak.clone();
+    win.on_plan_name_changed(move |text| {
+        if let Some(w) = plan_lbl_weak.upgrade() {
+            w.set_plan_can_save(!text.trim().is_empty());
+        }
+    });
+
+    // Write a plan's blocks onto today.
+    //
+    // Applying to *today* rather than to the day the calendar screen is
+    // showing is deliberate: a saved shape is applied in the morning, to the
+    // day being started. Applying it to a day being browsed would let one press
+    // fill a Tuesday three weeks out with work that was meant for now.
+    let plan_apply_app = Arc::clone(&app);
+    let plan_apply_weak = weak.clone();
+    win.on_apply_plan(move |id| {
+        let day = chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string();
+        let res = {
+            let mut st = plan_apply_app.store.lock().unwrap();
+            st.apply_plan(id as u64, &day)
+        };
+        if let Some(w) = plan_apply_weak.upgrade() {
+            match res {
+                Ok(_) => {
+                    w.set_plan_error(SharedString::from(""));
+                    plan_apply_app.cloud.mark_dirty();
+                }
+                Err(e) => w.set_plan_error(SharedString::from(e.to_string())),
+            }
+            refresh_screens(&w, &plan_apply_app);
+        }
+    });
+
+    // Take a plan off the list. Marked, never dropped: the tombstone is what
+    // carries the deletion to the other device.
+    let plan_rm_app = Arc::clone(&app);
+    let plan_rm_weak = weak.clone();
+    win.on_delete_plan(move |id| {
+        {
+            let mut st = plan_rm_app.store.lock().unwrap();
+            st.remove_plan(id as u64);
+        }
+        plan_rm_app.cloud.mark_dirty();
+        if let Some(w) = plan_rm_weak.upgrade() {
+            w.set_plan_error(SharedString::from(""));
+            refresh_screens(&w, &plan_rm_app);
         }
     });
 

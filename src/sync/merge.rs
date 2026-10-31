@@ -25,6 +25,7 @@
 //! is what makes it safe to run on every sync tick without drift.
 
 use crate::journal::{Decree, Inscription};
+use crate::state::plans::Plan;
 use crate::state::rota::RotaEntry;
 use crate::state::store::{Data, SessionRecord, Task};
 use std::collections::BTreeMap;
@@ -51,6 +52,8 @@ pub fn merge(local: &Data, remote: &Data) -> Data {
         decrees: merge_decrees(&local.decrees, &remote.decrees),
         rota: merge_rota(&local.rota, &remote.rota),
         next_rota_id: local.next_rota_id.max(remote.next_rota_id),
+        plans: merge_plans(&local.plans, &remote.plans),
+        next_plan_id: local.next_plan_id.max(remote.next_plan_id),
     };
     // Keep the id counters ahead of every id actually in use, so a merge can
     // never hand out an id that already belongs to a row. This matters more for
@@ -66,6 +69,11 @@ pub fn merge(local: &Data, remote: &Data) -> Data {
     // whose data was already the merged result, every tick, forever.
     let highest_rota = out.rota.iter().map(|e| e.id).max().unwrap_or(0);
     out.next_rota_id = out.next_rota_id.max(highest_rota);
+    // Plans carry `updated_at` and are mutable, so the counter means the same
+    // thing the rota's does: the last id handed out. The same `+1` mistake
+    // would make an empty plan list change on every merge.
+    let highest_plan = out.plans.iter().map(|p| p.id).max().unwrap_or(0);
+    out.next_plan_id = out.next_plan_id.max(highest_plan);
     out
 }
 
@@ -220,6 +228,48 @@ fn merge_rota(a: &[RotaEntry], b: &[RotaEntry]) -> Vec<RotaEntry> {
     out
 }
 
+/// Per-plan merge: newest `updated_at` wins, a tombstone beats a live copy.
+///
+/// Same rule as tasks, for the same reason: a plan is a mutable named thing,
+/// and a deletion that loses to a stale copy is a deletion that comes back. The
+/// tie-break is the plan's name rather than its id, so two devices that edited
+/// the same plan in the same second still converge on one answer instead of
+/// keeping their own.
+fn merge_plans(a: &[Plan], b: &[Plan]) -> Vec<Plan> {
+    let mut map: BTreeMap<u64, Plan> = BTreeMap::new();
+    for p in a.iter().chain(b.iter()) {
+        match map.get(&p.id) {
+            None => {
+                map.insert(p.id, p.clone());
+            }
+            Some(existing) => {
+                if newer_plan(p, existing) {
+                    map.insert(p.id, p.clone());
+                }
+            }
+        }
+    }
+    let mut out: Vec<Plan> = map.into_values().collect();
+    out.sort_by(|x, y| {
+        x.updated_at
+            .cmp(&y.updated_at)
+            .then_with(|| x.name.cmp(&y.name))
+            .then_with(|| x.id.cmp(&y.id))
+    });
+    out
+}
+
+/// Is `candidate` the copy of one plan to keep?
+fn newer_plan(candidate: &Plan, existing: &Plan) -> bool {
+    if candidate.updated_at != existing.updated_at {
+        return candidate.updated_at > existing.updated_at;
+    }
+    if candidate.deleted != existing.deleted {
+        return candidate.deleted;
+    }
+    candidate.name > existing.name
+}
+
 /// Which of two copies of one rota entry to keep.
 ///
 /// Precedence, in order:
@@ -338,6 +388,8 @@ mod tests {
             next_task_id: 2,
             rota: vec![],
             next_rota_id: 0,
+            plans: vec![],
+            next_plan_id: 0,
             inscriptions: vec![],
             decrees: vec![],
         };
@@ -546,5 +598,90 @@ mod tests {
         let twice = merge(&once, &b);
         assert_eq!(once.rota.len(), 2);
         assert_eq!(twice.rota, once.rota, "merging again changes nothing");
+    }
+
+    // ── plans ────────────────────────────────────────────────────────────
+
+    fn plan(id: u64, name: &str, updated_at: i64) -> Plan {
+        Plan {
+            id,
+            name: name.into(),
+            blocks: vec![crate::state::plans::PlanBlock {
+                label: "block".into(),
+                minutes: 25,
+                decree: String::new(),
+            }],
+            created_at: 0,
+            updated_at,
+            deleted: false,
+        }
+    }
+
+    #[test]
+    fn plans_from_both_devices_both_survive() {
+        let a = Data {
+            plans: vec![plan(1, "desktop shape", 10)],
+            ..Default::default()
+        };
+        let b = Data {
+            plans: vec![plan(2, "laptop shape", 20)],
+            ..Default::default()
+        };
+        assert_eq!(merge(&a, &b).plans.len(), 2);
+    }
+
+    #[test]
+    fn the_newer_plan_edit_wins_and_the_merge_is_commutative() {
+        let a = Data {
+            plans: vec![plan(1, "old name", 10)],
+            ..Default::default()
+        };
+        let b = Data {
+            plans: vec![plan(1, "new name", 20)],
+            ..Default::default()
+        };
+        assert_eq!(merge(&a, &b).plans[0].name, "new name");
+        assert_eq!(merge(&b, &a).plans[0].name, "new name");
+    }
+
+    #[test]
+    fn a_deleted_plan_is_not_resurrected_by_the_other_device() {
+        let mut dead = plan(1, "gone", 20);
+        dead.deleted = true;
+        let a = Data {
+            plans: vec![plan(1, "gone", 10)],
+            ..Default::default()
+        };
+        let b = Data {
+            plans: vec![dead],
+            ..Default::default()
+        };
+        assert!(merge(&a, &b).plans[0].deleted, "a delete must travel");
+        assert!(merge(&b, &a).plans[0].deleted);
+    }
+
+    #[test]
+    fn merging_two_empty_plan_lists_is_a_no_op() {
+        // The counter rule that broke the sync engine for the rota applies
+        // here too: an empty list must not raise its own counter, or a device
+        // holding nothing rewrites and re-uploads on every tick.
+        let empty = Data::default();
+        let out = merge(&empty, &empty);
+        assert_eq!(out.next_plan_id, empty.next_plan_id);
+        // `Data` has no `PartialEq`, so compare the shape that matters here:
+        // the counters and collection lengths both sides must agree on.
+        let again = merge(&out, &out);
+        assert_eq!(again.next_plan_id, out.next_plan_id);
+        assert_eq!(again.plans.len(), out.plans.len());
+    }
+
+    #[test]
+    fn the_plan_counter_stays_ahead_of_every_id_in_use() {
+        let a = Data {
+            plans: vec![plan(9, "x", 1)],
+            next_plan_id: 2, // stale counter from an older file
+            ..Default::default()
+        };
+        assert!(merge(&a, &Data::default()).next_plan_id >= 9);
     }
 }
