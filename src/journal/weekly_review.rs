@@ -643,6 +643,10 @@ pub struct WeeklyDigest {
     /// as localized one-line labels. Empty until enough weeks exist to trust
     /// a correlation.
     pub patterns: Vec<String>,
+    /// True when the policy held back advice because its kind has
+    /// consistently failed (demoted). Surfaced so the user understands why
+    /// the coach went quiet.
+    pub suppressed_demoted_kind: bool,
 }
 
 /// Compose the week's full digest from the store's slices.
@@ -767,12 +771,18 @@ pub fn compose_weekly(
     // outcome buckets, so resolved advice isn't re-nagged and stubborn advice
     // escalates to a warning instead of silently repeating.
     let now_week = review.range.start.format("%Y-%m-%d").to_string();
-    let suggestions = crate::journal::prescription_policy::apply(
+    // Kinds that consistently fail (below a 50% resolution floor) are demoted:
+    // the policy issues them less often. Passing the candidates lets the
+    // policy drop them and tell the digest it did.
+    let demoted =
+        crate::journal::prescription_effectiveness::demotion_candidates(&kind_effectiveness, 0.5);
+    let (suggestions, suppressed_kind) = crate::journal::prescription_policy::apply(
         suggestions,
         &outcomes,
         prescriptions,
         prescription_verdicts,
         &now_week,
+        &demoted,
     );
     let break_quality = crate::timer::break_quality::break_quality(breaks, sessions, verdicts);
     let bounce = bounce_stats(sessions, verdicts, today, tz_offset_secs);
@@ -853,6 +863,7 @@ pub fn compose_weekly(
         purpose_drift_duration,
         kind_effectiveness_label,
         patterns,
+        suppressed_demoted_kind: suppressed_kind,
     }
 }
 
@@ -1108,6 +1119,13 @@ pub fn render_digest(digest: &WeeklyDigest, locale_fa: bool) -> String {
         });
         for s in &digest.suggestions {
             out.push_str(&format!("  - {}\n", s.text));
+        }
+        if digest.suppressed_demoted_kind {
+            out.push_str(if fa {
+                "  - *پیشنهادهای کم‌اثر این هفته ارسال نشد — نوعی که قبلاً مؤثر نبود کنار گذاشته شد.*\n"
+            } else {
+                "  - *Low-effectiveness advice was held back this week — a kind that has consistently failed was not re-issued.*\n"
+            });
         }
         out.push('\n');
     }

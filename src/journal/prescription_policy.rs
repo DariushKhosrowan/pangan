@@ -91,21 +91,31 @@ fn bucket_has_metric(bucket: &[Outcome], metric: &str) -> bool {
         .any(|o| o.prescription.target_metric.as_deref() == Some(metric))
 }
 
-/// Apply the three rules to a suggestion list.
+/// Apply the rules to a suggestion list.
 ///
 /// `now_week` is the current week's start (`"%Y-%m-%d"`), used to decide how
 /// recent an outcome is. `verdicts` are the user's Accept/Rebut/Defer
 /// responses to past prescriptions; a Rebut suppresses the metric entirely —
 /// the user rejected that advice, so re-suggesting it (even escalated) is
 /// worse than silence.
+///
+/// `demoted` lists the suggestion kinds whose advice has consistently failed
+/// for this user (below a resolution floor). Those kinds are dropped from
+/// the output unless that would leave the user with no suggestions at all —
+/// in which case the best demoted kind is allowed through once so the coach
+/// is never completely silent.
+///
+/// Returns the filtered suggestions and whether any demotion actually
+/// suppressed a kind (so the digest can tell the user why advice went quiet).
 pub fn apply(
     suggestions: Vec<Suggestion>,
     outcomes: &OutcomeBuckets,
     ledger: &[Prescription],
     verdicts: &[crate::journal::prescription_verdict::PrescriptionVerdict],
     now_week: &str,
-) -> Vec<Suggestion> {
-    suggestions
+    demoted: &[SuggestionKind],
+) -> (Vec<Suggestion>, bool) {
+    let filtered: Vec<Suggestion> = suggestions
         .into_iter()
         .filter_map(|mut s| {
             let Some(metric) = s.target_metric else {
@@ -152,7 +162,31 @@ pub fn apply(
 
             Some(s)
         })
-        .collect()
+        .collect();
+
+    // Rule (d): demote kinds that consistently fail. Drop them, but if that
+    // would leave the user with no advice at all, let the best demoted kind
+    // through once so the coach never goes silent.
+    let mut kept = Vec::with_capacity(filtered.len());
+    let mut demoted_seen = Vec::new();
+    for s in filtered {
+        if demoted.contains(&s.kind) {
+            demoted_seen.push(s);
+        } else {
+            kept.push(s);
+        }
+    }
+    let mut suppressed = false;
+    if kept.is_empty() {
+        if let Some(best) = demoted.first() {
+            if let Some(s) = demoted_seen.into_iter().find(|s| &s.kind == best) {
+                kept.push(s);
+            }
+        }
+    } else if !demoted_seen.is_empty() {
+        suppressed = true;
+    }
+    (kept, suppressed)
 }
 
 /// Build the escalated warning for a metric that won't budge.
@@ -244,7 +278,7 @@ mod tests {
             suggestion(SuggestionKind::Calibration, "kept_rate"),
             suggestion(SuggestionKind::Drift, "sessions"),
         ];
-        let out = apply(in_suggestions, &buckets, &[], &[], WEEK);
+        let (out, _) = apply(in_suggestions, &buckets, &[], &[], WEEK, &[]);
         assert_eq!(out.len(), 1, "kept_rate suppressed, sessions survives");
         assert_eq!(out[0].target_metric, Some("sessions"));
     }
@@ -257,7 +291,7 @@ mod tests {
             reopened: vec![],
         };
         let kept = suggestion(SuggestionKind::Calibration, "kept_rate");
-        let out = apply(vec![kept.clone()], &buckets, &[], &[], WEEK);
+        let (out, _) = apply(vec![kept.clone()], &buckets, &[], &[], WEEK, &[]);
         assert_eq!(
             out.len(),
             1,
@@ -272,12 +306,13 @@ mod tests {
             stubborn: vec![outcome(OutcomeKind::Stubborn, LAST_WEEK, "kept_rate")],
             reopened: vec![],
         };
-        let out = apply(
+        let (out, _) = apply(
             vec![suggestion(SuggestionKind::Calibration, "kept_rate")],
             &buckets,
             &[],
             &[],
             WEEK,
+            &[],
         );
         assert!(
             out.is_empty(),
@@ -296,7 +331,7 @@ mod tests {
         };
         // The stubborn outcome was a Calibration; this suggestion is Break.
         let s = suggestion(SuggestionKind::Break, "kept_rate");
-        let out = apply(vec![s], &buckets, &[], &[], WEEK);
+        let (out, _) = apply(vec![s], &buckets, &[], &[], WEEK, &[]);
         assert_eq!(out.len(), 1, "a new lever should not be blocked");
     }
 
@@ -314,7 +349,7 @@ mod tests {
             reopened: vec![],
         };
         let s = suggestion(SuggestionKind::Calibration, "kept_rate");
-        let out = apply(vec![s], &buckets, &ledger, &[], WEEK);
+        let (out, _) = apply(vec![s], &buckets, &ledger, &[], WEEK, &[]);
         assert_eq!(out.len(), 1, "escalated, not dropped");
         assert!(
             out[0].text.contains("⚠️"),
@@ -331,7 +366,7 @@ mod tests {
             reopened: vec![],
         };
         let in_suggestions = vec![suggestion(SuggestionKind::Drift, "sessions")];
-        let out = apply(in_suggestions.clone(), &buckets, &[], &[], WEEK);
+        let (out, _) = apply(in_suggestions.clone(), &buckets, &[], &[], WEEK, &[]);
         assert_eq!(out, in_suggestions);
     }
 
@@ -363,7 +398,7 @@ mod tests {
             suggestion(SuggestionKind::Calibration, "kept_rate"),
             suggestion(SuggestionKind::Drift, "sessions"),
         ];
-        let out = apply(in_suggestions, &buckets, &ledger, &verdicts, WEEK);
+        let (out, _) = apply(in_suggestions, &buckets, &ledger, &verdicts, WEEK, &[]);
         assert_eq!(
             out.len(),
             1,
@@ -396,7 +431,7 @@ mod tests {
             reopened: vec![],
         };
         let kept = suggestion(SuggestionKind::Calibration, "kept_rate");
-        let out = apply(vec![kept.clone()], &buckets, &ledger, &verdicts, WEEK);
+        let (out, _) = apply(vec![kept.clone()], &buckets, &ledger, &verdicts, WEEK, &[]);
         assert_eq!(out.len(), 1, "a stale rebut does not silence forever");
     }
 
@@ -423,7 +458,55 @@ mod tests {
             reopened: vec![],
         };
         let kept = suggestion(SuggestionKind::Calibration, "kept_rate");
-        let out = apply(vec![kept.clone()], &buckets, &ledger, &verdicts, WEEK);
+        let (out, _) = apply(vec![kept.clone()], &buckets, &ledger, &verdicts, WEEK, &[]);
         assert_eq!(out.len(), 1, "accepted advice is still allowed");
+    }
+
+    #[test]
+    fn policy_drops_demoted_kind_when_alternatives_exist() {
+        // Calibration is demoted (consistently failing); Break is not. With
+        // both present, only Calibration is dropped, and the flag is set.
+        let buckets = OutcomeBuckets {
+            resolved: vec![],
+            stubborn: vec![],
+            reopened: vec![],
+        };
+        let in_suggestions = vec![
+            suggestion(SuggestionKind::Calibration, "kept_rate"),
+            suggestion(SuggestionKind::Break, "break_adherence"),
+        ];
+        let (out, suppressed) = apply(
+            in_suggestions,
+            &buckets,
+            &[],
+            &[],
+            WEEK,
+            &[SuggestionKind::Calibration],
+        );
+        assert!(suppressed, "a demoted kind was dropped");
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].kind, SuggestionKind::Break);
+    }
+
+    #[test]
+    fn policy_allows_best_demoted_kind_when_nothing_else_survives() {
+        // Only a demoted kind is present → one suggestion is let through so
+        // the coach is never silent, and the suppressed flag stays false.
+        let buckets = OutcomeBuckets {
+            resolved: vec![],
+            stubborn: vec![],
+            reopened: vec![],
+        };
+        let in_suggestions = vec![suggestion(SuggestionKind::Calibration, "kept_rate")];
+        let (out, suppressed) = apply(
+            in_suggestions,
+            &buckets,
+            &[],
+            &[],
+            WEEK,
+            &[SuggestionKind::Calibration],
+        );
+        assert_eq!(out.len(), 1, "never go fully silent");
+        assert!(!suppressed, "a fallback was granted, nothing was hidden");
     }
 }

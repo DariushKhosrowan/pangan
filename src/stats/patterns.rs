@@ -166,6 +166,26 @@ pub fn find_patterns(
             .then(x.following.cmp(y.following))
             .then(x.lag.cmp(&y.lag))
     });
+    // Dedupe symmetric lag-0 pairs: A↔B and B↔A carry the same information
+    // (Pearson at lag 0 is symmetric). When both appear with essentially the
+    // same |correlation|, keep only the alphabetically-first direction.
+    let mut seen: Vec<(&str, &str)> = Vec::new();
+    patterns.retain(|p| {
+        if p.lag != 0 {
+            return true;
+        }
+        let (a, b) = if p.leading < p.following {
+            (p.leading, p.following)
+        } else {
+            (p.following, p.leading)
+        };
+        if seen.iter().any(|(x, y)| *x == a && *y == b) {
+            false
+        } else {
+            seen.push((a, b));
+            true
+        }
+    });
     patterns.truncate(max_patterns);
     patterns
 }
@@ -336,6 +356,35 @@ mod tests {
         let ka: Vec<String> = a.iter().map(key).collect();
         let kb: Vec<String> = b.iter().map(key).collect();
         assert_eq!(ka, kb);
+    }
+
+    #[test]
+    fn test_find_patterns_dedupes_symmetric_lag0_pair() {
+        // kept_rate and fulfilment_rate are identical → symmetric lag-0 pairs
+        // both rank top. The dedup must keep only one of the two directions.
+        let weeks: Vec<WeekMetrics> = (0..8)
+            .map(|i| {
+                let f = (i as f32 * std::f32::consts::PI / 2.0).sin();
+                let kept = 0.5 + 0.3 * f;
+                wk(10 + (i % 2) as u32, 25, kept, kept, 0.5, 1)
+            })
+            .collect();
+        let series = all_series(&weeks);
+        let pats = find_patterns(&series, 0.5, 100);
+        let lag0_pairs: Vec<(&str, &str)> = pats
+            .iter()
+            .filter(|p| p.lag == 0)
+            .map(|p| (p.leading, p.following))
+            .collect();
+        // No lag-0 pair appears in both directions.
+        for (a, b) in &lag0_pairs {
+            assert!(
+                !lag0_pairs.iter().any(|(x, y)| x == b && y == a),
+                "symmetric lag-0 pair {:?}/{:?} not deduped",
+                a,
+                b
+            );
+        }
     }
 
     #[test]
