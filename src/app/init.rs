@@ -2485,6 +2485,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             &st.data.breaks,
             &st.data.obstructions,
             &st.data.rota,
+            &st.data.prescriptions,
             today,
             tz,
             break_secs,
@@ -2501,6 +2502,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 &st.data.breaks,
                 &st.data.obstructions,
                 &st.data.rota,
+                &st.data.prescriptions,
                 today,
                 tz,
                 break_secs,
@@ -2508,12 +2510,28 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
             let week = digest.review.range.start.format("%Y-%m-%d").to_string();
             let now = chrono::Local::now().timestamp();
+            // The target metric's value at issue time, so the ledger can later
+            // measure whether the advice moved it.
+            let current_metrics = crate::journal::week_drift::week_metrics(
+                &st.data.sessions,
+                &st.data.decrees,
+                &st.data.inscriptions,
+                &st.data.verdicts,
+                &st.data.breaks,
+                today,
+                tz,
+                break_secs,
+            );
+            let value_of = |metric: &str| -> Option<f32> {
+                crate::journal::week_drift::value_of(&current_metrics, metric)
+            };
             let (rows, next_id) = crate::journal::prescription_ledger::record(
                 &st.data.prescriptions,
                 st.data.next_prescription_id,
                 &week,
                 now,
                 &digest.suggestions,
+                value_of,
             );
             if rows.len() != st.data.prescriptions.len() {
                 st.data.prescriptions = rows;

@@ -610,6 +610,9 @@ pub struct WeeklyDigest {
     pub drift: Option<crate::journal::week_drift::WeekDrift>,
     /// Suggestions for next week (empty until the record is mature enough).
     pub suggestions: Vec<crate::journal::prescription::Suggestion>,
+    /// Feedback on past advice: how each ledged prescription fared against the
+    /// metric it targeted. Three buckets — resolved, stubborn, reopened.
+    pub outcomes: crate::journal::prescription_outcome::OutcomeBuckets,
 }
 
 /// Compose the week's full digest from the store's slices.
@@ -629,6 +632,7 @@ pub fn compose_weekly(
     breaks: &[crate::timer::break_record::BreakRecord],
     obstructions: &[crate::journal::obstruction::Obstruction],
     rota: &[crate::state::rota::RotaEntry],
+    prescriptions: &[crate::journal::prescription_ledger::Prescription],
     today: NaiveDate,
     tz_offset_secs: i32,
     planned_break_secs: u32,
@@ -701,6 +705,24 @@ pub fn compose_weekly(
         drift_baseline_sessions: baseline_sessions,
     };
     let suggestions = crate::journal::prescription::prescribe(&input, locale_fa);
+    // Feedback on past advice: measure each stored prescription's target
+    // metric at this week's value and classify resolved/stubborn/reopened.
+    // Only prescriptions with a target metric and a live value are measured.
+    let current_metrics = crate::journal::week_drift::week_metrics(
+        sessions,
+        decrees,
+        inscriptions,
+        verdicts,
+        breaks,
+        today,
+        tz_offset_secs,
+        planned_break_secs,
+    );
+    let outcomes = crate::journal::prescription_outcome::bucketed(
+        crate::journal::prescription_outcome::classify_all(prescriptions, &|metric| {
+            crate::journal::week_drift::value_of(&current_metrics, metric)
+        }),
+    );
     WeeklyDigest {
         review,
         autopsy,
@@ -708,6 +730,7 @@ pub fn compose_weekly(
         top_obstructions: top,
         drift,
         suggestions,
+        outcomes,
     }
 }
 
@@ -736,6 +759,32 @@ pub(crate) fn week_utc_bounds(range: Range, tz_offset_secs: i32) -> (i64, i64) {
 }
 
 /// Render the digest as a single Markdown document.
+/// Format a metric value for the outcome line: rates as whole percentages,
+/// counts as integers (with Persian digits when in Farsi).
+fn fmt_outcome_value(metric: &str, value: f32, fa: bool) -> String {
+    let num = |n: i64| {
+        if fa {
+            crate::calendar::jalali::fa_num(n)
+        } else {
+            n.to_string()
+        }
+    };
+    let fmt = |n: i64| {
+        if fa {
+            format!("{}٪", num(n))
+        } else {
+            format!("{}%", num(n))
+        }
+    };
+    match metric {
+        "kept_rate" | "fulfilment_rate" | "break_adherence" => {
+            fmt((value * 100.0).round() as i64)
+        }
+        "sessions" | "focus_minutes" | "unjudged" => num(value as i64),
+        _ => num(value as i64),
+    }
+}
+
 pub fn render_digest(digest: &WeeklyDigest, locale_fa: bool) -> String {
     let fa = locale_fa;
     let mut out = String::new();
@@ -872,6 +921,42 @@ pub fn render_digest(digest: &WeeklyDigest, locale_fa: bool) -> String {
         out.push('\n');
     }
 
+    // 6. Prescription outcomes — feedback on past advice. This is the loop
+    // that closes: did last week's coaching move the needle? Three buckets:
+    // resolved (it worked), stubborn (repeated with no movement — surfaced as
+    // a warning), reopened (a formerly-improved metric regressed).
+    let o = &digest.outcomes;
+    let has = !o.resolved.is_empty() || !o.stubborn.is_empty() || !o.reopened.is_empty();
+    if has {
+        out.push_str(if fa {
+            "## سرانجام پیشنهادها\n\n"
+        } else {
+            "## Prescription outcomes\n\n"
+        });
+        for (bucket, heading) in [
+            (&o.resolved, if fa { "✅ مؤثر" } else { "✅ Resolved" }),
+            (&o.stubborn, if fa { "⚠️ مقاوم" } else { "⚠️ Stubborn" }),
+            (&o.reopened, if fa { "🔄 بازگشته" } else { "🔄 Reopened" }),
+        ] {
+            if bucket.is_empty() {
+                continue;
+            }
+            out.push_str(&format!("**{}**\n", heading));
+            for oc in bucket.iter().take(5) {
+                let metric = oc.prescription.target_metric.as_deref().unwrap_or("");
+                let from = oc.prescription.target_value;
+                let to = oc.current_value;
+                out.push_str(&format!(
+                    "  - {}: {} → {}\n",
+                    metric,
+                    fmt_outcome_value(metric, from, fa),
+                    fmt_outcome_value(metric, to, fa),
+                ));
+            }
+            out.push('\n');
+        }
+    }
+
     out
 }
 
@@ -889,6 +974,7 @@ pub fn write_digest_if_new(
     breaks: &[crate::timer::break_record::BreakRecord],
     obstructions: &[crate::journal::obstruction::Obstruction],
     rota: &[crate::state::rota::RotaEntry],
+    prescriptions: &[crate::journal::prescription_ledger::Prescription],
     today: NaiveDate,
     tz_offset_secs: i32,
     planned_break_secs: u32,
@@ -902,6 +988,7 @@ pub fn write_digest_if_new(
         breaks,
         obstructions,
         rota,
+        prescriptions,
         today,
         tz_offset_secs,
         planned_break_secs,
@@ -1116,6 +1203,7 @@ mod tests {
             &[],
             &[],
             &[],
+            &[],
             today(),
             12600,
             300,
@@ -1159,6 +1247,7 @@ mod tests {
             &[],
             &[],
             &rota,
+            &[],
             today(),
             12600,
             300,
@@ -1193,6 +1282,7 @@ mod tests {
             &[],
             &obstructions,
             &[],
+            &[],
             today(),
             12600,
             300,
@@ -1216,7 +1306,7 @@ mod tests {
 
     #[test]
     fn render_digest_persian_digits_when_locale_fa() {
-        let d = compose_weekly(&[], &[], &[], &[], &[], &[], &[], today(), 12600, 300, true);
+        let d = compose_weekly(&[], &[], &[], &[], &[], &[], &[], &[], today(), 12600, 300, true);
         let md = render_digest(&d, true);
         assert!(md.contains("خلاصهٔ هفتهٔ"), "Persian title: {md}");
         assert!(md.contains("کالبدشکافی"), "Persian autopsy header");
@@ -1242,6 +1332,7 @@ mod tests {
             &[],
             &[],
             &[],
+            &[],
             today(),
             12600,
             300,
@@ -1254,5 +1345,54 @@ mod tests {
             "headline: {md}"
         );
         assert!(md.starts_with("# Weekly digest"), "title first");
+    }
+
+    #[test]
+    fn digest_renders_prescription_outcome_buckets() {
+        // Six sessions, all kept → kept_rate = 1.0. Two prescriptions on the
+        // same metric: one issued far below (resolves), one issued near the
+        // ceiling (hasn't moved → stubborn after ≥3 weeks).
+        let sessions: Vec<SessionRecord> = (0..6).map(|i| sess(SAT + i * 60, 25)).collect();
+        let verdicts: Vec<crate::journal::Verdict> = sessions
+            .iter()
+            .map(|s| verdict::declare(s.at, crate::journal::VerdictKind::Kept, s.at).unwrap())
+            .collect();
+        use crate::journal::prescription::SuggestionKind;
+        let mk = |id: u64, target: f32, sample: u32| {
+            crate::journal::prescription_ledger::Prescription {
+                id,
+                week: today().format("%Y-%m-%d").to_string(),
+                created_at: SAT,
+                kind: SuggestionKind::Calibration,
+                target_metric: Some("kept_rate".to_string()),
+                target_value: target,
+                text: "keep blocks honest".to_string(),
+                sample_n: sample,
+                deleted: false,
+            }
+        };
+        let prescriptions = vec![mk(1, 0.41, 8), mk(2, 0.99, 8)];
+        let d = compose_weekly(
+            &sessions,
+            &[],
+            &[],
+            &verdicts,
+            &[],
+            &[],
+            &[],
+            &prescriptions,
+            today(),
+            12600,
+            300,
+            false,
+        );
+        assert_eq!(d.outcomes.resolved.len(), 1, "low-target advice resolves");
+        assert_eq!(d.outcomes.stubborn.len(), 1, "near-ceiling advice is stubborn");
+        let md = render_digest(&d, false);
+        assert!(md.contains("Prescription outcomes"), "section: {md}");
+        assert!(md.contains("✅ Resolved"), "resolved bucket heading");
+        assert!(md.contains("⚠️ Stubborn"), "stubborn bucket heading");
+        assert!(md.contains("41%"), "issue-time value rendered");
+        assert!(md.contains("100%"), "current value rendered");
     }
 }

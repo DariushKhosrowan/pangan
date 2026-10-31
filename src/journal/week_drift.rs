@@ -49,6 +49,22 @@ pub struct WeekMetrics {
     pub honest_hour: Option<u8>,
 }
 
+/// Resolve a metric key to this week's value, the same mapping the ledger
+/// uses to snapshot advice at issue time. Shared by the digest's outcome
+/// section and the ledger's `record` call so a prescription is always
+/// measured against the same number the advice was issued against.
+pub fn value_of(m: &WeekMetrics, metric: &str) -> Option<f32> {
+    match metric {
+        "sessions" => Some(m.sessions as f32),
+        "focus_minutes" => Some(m.focus_minutes as f32),
+        "kept_rate" => m.kept_rate,
+        "fulfilment_rate" => m.fulfilment_rate,
+        "break_adherence" => m.break_adherence,
+        "unjudged" => Some(m.unjudged as f32),
+        _ => None,
+    }
+}
+
 /// The headline finding: whichever metric drifted the most.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WeekDrift {

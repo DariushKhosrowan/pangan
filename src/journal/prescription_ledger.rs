@@ -38,6 +38,10 @@ pub struct Prescription {
     pub kind: crate::journal::prescription::SuggestionKind,
     /// The metric this advice targets (the row that would move if followed).
     pub target_metric: Option<String>,
+    /// The target metric's value at issue time — preserved so an outcome can
+    /// be measured against it later instead of recomputed from current data.
+    #[serde(default)]
+    pub target_value: f32,
     /// The advice text, in the locale it was issued in.
     pub text: String,
     /// The sample size that backed the suggestion at issue time.
@@ -50,13 +54,16 @@ pub struct Prescription {
 ///
 /// Only suggestions that have a target metric are recorded — a suggestion
 /// without a target cannot be followed up, so ledgering it would just be
-/// noise. Returns the new rows (ids drawn from `next_id`).
+/// noise. The target metric's value at issue time is resolved via `value_of`
+/// and stored so a later outcome can be measured against it. Returns the new
+/// rows (ids drawn from `next_id`).
 pub fn record(
     existing: &[Prescription],
     next_id: u64,
     week: &str,
     created_at: i64,
     suggestions: &[crate::journal::prescription::Suggestion],
+    value_of: impl Fn(&str) -> Option<f32>,
 ) -> (Vec<Prescription>, u64) {
     let mut id = next_id;
     let mut rows: Vec<Prescription> = Vec::new();
@@ -71,6 +78,7 @@ pub fn record(
             created_at,
             kind: s.kind,
             target_metric: Some(target.to_string()),
+            target_value: value_of(target).unwrap_or(0.0),
             text: s.text.clone(),
             sample_n: s.sample_n,
             deleted: false,
@@ -178,6 +186,7 @@ mod tests {
             created_at: created,
             kind: SuggestionKind::Calibration,
             target_metric: Some(metric.to_string()),
+            target_value: 0.5,
             text: "use 25-minute blocks".to_string(),
             sample_n: 7,
             deleted,
@@ -197,7 +206,7 @@ mod tests {
     fn test_record_prescriptions_empty_suggestions_writes_nothing() {
         // The required acceptance test: a week with zero suggestions produces
         // zero rows and does not increment the id counter.
-        let (rows, next) = record(&[], 42, "2026-10-31", 1000, &[]);
+        let (rows, next) = record(&[], 42, "2026-10-31", 1000, &[], |_| None);
         assert!(rows.is_empty());
         assert_eq!(next, 42, "counter must not move on an empty record");
     }
@@ -205,7 +214,13 @@ mod tests {
     #[test]
     fn record_assigns_ids_and_skips_untargeted_suggestions() {
         let suggestions = vec![sugg(Some("kept_rate")), sugg(None), sugg(Some("unjudged"))];
-        let (rows, next) = record(&[], 0, "2026-10-31", 1000, &suggestions);
+        let (rows, next) = record(&[], 0, "2026-10-31", 1000, &suggestions, |m| {
+            if m == "kept_rate" {
+                Some(0.41)
+            } else {
+                None
+            }
+        });
         assert_eq!(rows.len(), 2, "untargeted suggestion is skipped");
         assert_eq!(rows[0].id, 1);
         assert_eq!(rows[1].id, 2);
@@ -218,7 +233,7 @@ mod tests {
     fn record_appends_to_existing_with_next_id_offset() {
         let existing = vec![row(1, "2026-10-24", 100, "kept_rate", false)];
         let suggestions = vec![sugg(Some("kept_rate"))];
-        let (rows, next) = record(&existing, 1, "2026-10-31", 1000, &suggestions);
+        let (rows, next) = record(&existing, 1, "2026-10-31", 1000, &suggestions, |_| None);
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[1].id, 2, "id continues from the counter");
         assert_eq!(next, 2);
