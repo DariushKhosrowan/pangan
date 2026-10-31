@@ -125,7 +125,9 @@ impl Store {
             let _ = std::fs::create_dir_all(dir);
         }
         if let Ok(json) = serde_json::to_string_pretty(&self.data) {
-            let _ = std::fs::write(&self.path, json);
+            // Atomic write: temp file + fsync + rename + fsync parent. Never a
+            // truncated mix if we crash/power-loss/kill -9 mid-write.
+            let _ = crate::state::atomic_file::atomic_write(&self.path, json.as_bytes());
         }
     }
 
