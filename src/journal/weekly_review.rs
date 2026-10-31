@@ -18,6 +18,7 @@
 
 use crate::journal::{Decree, Inscription, Verdict, VerdictKind};
 use crate::state::store::SessionRecord;
+use crate::stats::bounce::{bounce_stats, BounceStats};
 use crate::stats::report::{
     best_focus_window, break_adherence, honest_hour_label, honesty_gap_label,
     hourly_verdict_summary, BreakAdherence, HourWindow, Range,
@@ -617,6 +618,9 @@ pub struct WeeklyDigest {
     /// with the kept-rate of the block that follows each length. Empty until
     /// enough rated observations accumulate.
     pub break_quality: crate::timer::break_quality::BreakQuality,
+    /// Bounce rate across the trailing window: how fast the user returns to a
+    /// kept block after a bad day. None until a recovery is measurable.
+    pub bounce: Option<BounceStats>,
 }
 
 /// Compose the week's full digest from the store's slices.
@@ -738,6 +742,7 @@ pub fn compose_weekly(
         &now_week,
     );
     let break_quality = crate::timer::break_quality::break_quality(breaks, sessions, verdicts);
+    let bounce = bounce_stats(sessions, verdicts, today, tz_offset_secs);
     WeeklyDigest {
         review,
         autopsy,
@@ -747,6 +752,7 @@ pub fn compose_weekly(
         suggestions,
         outcomes,
         break_quality,
+        bounce,
     }
 }
 
@@ -1039,6 +1045,51 @@ pub fn render_digest(digest: &WeeklyDigest, locale_fa: bool) -> String {
         out.push('\n');
     }
 
+    // 8. Bounce rate — how fast the user returns to a kept block after a bad
+    // day. A bad day is a local day with only Broken/Short sessions; bounce is
+    // the number of days until the next good day (≥1 Kept). Only present once
+    // at least one recovery is measurable — never fabricated from thin data.
+    if let Some(b) = &digest.bounce {
+        out.push_str(if fa {
+            "## نرخ بازگشت\n\n"
+        } else {
+            "## Bounce rate\n\n"
+        });
+        if let (Some(m), Some(p)) = (b.median, b.p75) {
+            let line = if fa {
+                format!(
+                    "> بازگشت میانه: {} روز · چارک سوم: {} روز.\n",
+                    num(m as i64),
+                    num(p as i64)
+                )
+            } else {
+                format!(
+                    "> Median bounce: {} days · 75th percentile: {} days.\n",
+                    m, p
+                )
+            };
+            out.push_str(&line);
+        }
+        if let Some(label) = b.band_label(fa) {
+            let line = if fa {
+                format!("> وضعیت: {}.\n", label)
+            } else {
+                format!("> Band: {}.\n", label)
+            };
+            out.push_str(&line);
+        }
+        let obs = if fa {
+            format!(
+                "> بر پایهٔ {} روز بد قابل‌اندازه‌گیری.\n\n",
+                num(b.bounces.len() as i64)
+            )
+        } else {
+            format!("> Based on {} measurable bad days.\n\n", b.bounces.len())
+        };
+        out.push_str(&obs);
+        out.push('\n');
+    }
+
     out
 }
 
@@ -1186,6 +1237,88 @@ mod tests {
         assert!(
             !render_digest(&d0, false).contains("## Break quality"),
             "empty record renders no break quality"
+        );
+    }
+
+    #[test]
+    fn digest_renders_bounce_when_recovery_is_measurable() {
+        use crate::journal::VerdictKind;
+        // A bad day (only a Broken session) followed by a good day the next
+        // day (a Kept session) → one measurable bounce of 1 day.
+        let mut sessions = Vec::new();
+        let mut verdicts = Vec::new();
+        let bad = today() - chrono::Duration::days(6); // within the 56-day window
+        let good = bad + chrono::Duration::days(1);
+        let at_local = |d: NaiveDate| {
+            use chrono::TimeZone;
+            let off = chrono::FixedOffset::east_opt(12600).unwrap();
+            off.from_local_datetime(&chrono::NaiveDateTime::new(
+                d,
+                chrono::NaiveTime::from_hms_opt(0, 30, 0).unwrap(),
+            ))
+            .single()
+            .unwrap()
+            .timestamp()
+        };
+        let bad_ts = at_local(bad);
+        let good_ts = at_local(good);
+        sessions.push(sess(bad_ts, 25));
+        sessions.push(sess(good_ts, 25));
+        verdicts
+            .push(crate::journal::verdict::declare(bad_ts, VerdictKind::Broken, bad_ts).unwrap());
+        verdicts
+            .push(crate::journal::verdict::declare(good_ts, VerdictKind::Kept, good_ts).unwrap());
+
+        let d = compose_weekly(
+            &sessions,
+            &[],
+            &[],
+            &verdicts,
+            &[],
+            &[],
+            &[],
+            &[],
+            today(),
+            12600,
+            300,
+            false,
+        );
+        assert!(
+            d.bounce.is_some(),
+            "a measurable recovery produces bounce stats"
+        );
+        let md = render_digest(&d, false);
+        assert!(md.contains("## Bounce rate"), "the section renders");
+        assert!(md.contains("Median bounce: 1 days"), "median reported");
+        assert!(md.contains("Band: resilient."), "band labelled");
+        assert!(
+            md.contains("Based on 1 measurable bad days."),
+            "floor noted"
+        );
+
+        // Farsi renders the same structure with Persian digit.
+        let md_fa = render_digest(&d, true);
+        assert!(md_fa.contains("## نرخ بازگشت"), "Farsi section renders");
+        assert!(md_fa.contains("۱"), "Farsi uses Persian digits");
+
+        // A record with no recovery stays silent — no fabricated bounce.
+        let d0 = compose_weekly(
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            today(),
+            12600,
+            300,
+            false,
+        );
+        assert!(
+            !render_digest(&d0, false).contains("## Bounce rate"),
+            "empty record renders no bounce"
         );
     }
 
