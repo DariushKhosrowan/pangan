@@ -56,6 +56,9 @@ pub struct WeeklySummary {
     pub best_window: Option<HourWindow>,
     /// Words that recur across the week's decrees, most frequent first.
     pub top_decree_tokens: Vec<(String, u32)>,
+    /// Promises written repeatedly across the last 30 days and never kept
+    /// (3+ occurrences, no Kept verdict).
+    pub standing_promises: Vec<crate::journal::standing_promise::StandingPromise>,
 }
 
 /// The whole week, ready to render.
@@ -179,6 +182,20 @@ pub fn build_week(
             .into_iter()
             .map(|r| (r.word, r.count))
             .collect(),
+        standing_promises: {
+            // The week's end (last local day, 23:59) is "now" for the
+            // lookback window, so a promise written today is still counted.
+            let end_of_week = chrono::NaiveDateTime::new(
+                range.end,
+                chrono::NaiveTime::from_hms_opt(23, 59, 59).unwrap(),
+            )
+            .and_utc()
+            .timestamp();
+            let mut ctx = crate::state::store::Data::default();
+            ctx.decrees = decrees.to_vec();
+            ctx.verdicts = verdicts.to_vec();
+            crate::journal::standing_promise::standing_promises(&ctx, end_of_week, 30 * 86_400, 3)
+        },
     };
 
     WeeklyReview {
@@ -322,6 +339,28 @@ fn render_summary(review: &WeeklyReview, fa: bool) -> String {
             },
             tokens.join(", ")
         ));
+    }
+    if !s.standing_promises.is_empty() {
+        out.push_str(&format!(
+            "{}\n",
+            if fa {
+                "وعده‌های برقرارمانده:"
+            } else {
+                "Standing promises:"
+            }
+        ));
+        for p in s.standing_promises.iter().take(5) {
+            out.push_str(&format!(
+                "  - {} ({}×, {})\n",
+                p.original_sample,
+                num(p.count as i64),
+                if fa {
+                    "برقرار مانده"
+                } else {
+                    "unmet"
+                }
+            ));
+        }
     }
     out
 }
