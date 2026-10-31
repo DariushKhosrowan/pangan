@@ -98,6 +98,7 @@ pub struct Snapshot {
     pub work_done: u32,
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct State {
     pub phase: Phase,
     pub running: bool,
@@ -105,6 +106,9 @@ pub struct State {
     pub total: Duration,
     pub work_done: u32,
     pub finish_at: Option<Instant>,
+    /// Unix seconds when the current focus block started, for crash recovery.
+    /// Zero while no block is in flight.
+    pub started_at: i64,
 }
 
 pub struct Shared {
@@ -140,6 +144,7 @@ impl Shared {
                 total,
                 work_done: 0,
                 finish_at: None,
+                started_at: 0,
             }),
             quit: std::sync::atomic::AtomicBool::new(false),
             cfg: Mutex::new(cfg),
@@ -323,6 +328,13 @@ impl Shared {
         if s.running {
             s.finish_at = Some(Instant::now() + s.remaining);
             if s.phase == Phase::Work {
+                // Stamp the block start so a crash mid-block can be recovered,
+                // even when the block was started from the plain timer rather
+                // than a rota entry. Kept on the first start only: pausing and
+                // resuming must not reset the clock the block began on.
+                if s.started_at == 0 {
+                    s.started_at = chrono::Utc::now().timestamp();
+                }
                 self.pending_events
                     .lock()
                     .unwrap()
@@ -405,6 +417,53 @@ impl Shared {
     pub fn should_inhibit(&self) -> bool {
         let s = self.state.lock().unwrap();
         s.running && s.phase == Phase::Work
+    }
+
+    /// The Unix second the current block started (0 if none is in flight).
+    pub fn started_at(&self) -> i64 {
+        self.state.lock().unwrap().started_at
+    }
+
+    /// Record when the block in flight started. The caller passes the real
+    /// wall-clock second so a crash can be recovered to the exact remainder.
+    pub fn set_started_at(&self, at: i64) {
+        self.state.lock().unwrap().started_at = at;
+    }
+
+    /// Clear the recorded start time (the block ended, was skipped, or the
+    /// clock was reset). The snapshot on disk is cleared at the call site so
+    /// this method stays a pure timer-state concern.
+    pub fn clear_started_at(&self) {
+        self.state.lock().unwrap().started_at = 0;
+    }
+
+    /// A copy of the timer's raw state, used to build a crash-recovery
+    /// snapshot. Kept on the clock so the recovery logic reads the same truth
+    /// the countdown runs on.
+    pub fn state_snapshot(&self) -> State {
+        self.state.lock().unwrap().clone()
+    }
+
+    /// Restore the countdown from a crash-recovery snapshot.
+    ///
+    /// `duration_secs` is the block's planned length, `remaining_secs` is what
+    /// is left of it (what the resume dialog promised), and `running` says
+    /// whether the block was in flight (true) or paused (false) when it was
+    /// snapshotted. The clock is rebuilt around those two numbers so the
+    /// remainder is exact and the progress bar reads correctly.
+    pub fn begin_from_recovery(&self, duration_secs: u64, remaining_secs: u64, running: bool) {
+        let mut s = self.state.lock().unwrap();
+        let total = Duration::from_secs(duration_secs.max(1));
+        s.phase = Phase::Work;
+        s.total = total;
+        s.remaining = Duration::from_secs(remaining_secs.min(duration_secs.max(1)));
+        s.running = running;
+        s.finish_at = if running {
+            Some(Instant::now() + s.remaining)
+        } else {
+            None
+        };
+        s.started_at = chrono::Utc::now().timestamp();
     }
 
     /// True when the clock is sitting at the start of an untouched focus block.

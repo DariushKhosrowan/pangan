@@ -394,11 +394,102 @@ fn start_planned_block(
     };
 
     shared.start_work_block(entry.minutes);
+    shared.set_started_at(chrono::Utc::now().timestamp());
+    write_session_snapshot(app, shared);
     app.cloud.mark_dirty();
     if let Some(w) = win.upgrade() {
         apply_snapshot(&w, shared);
         refresh_screens(&w, app);
     }
+}
+
+/// Persist a crash-recovery snapshot of the block currently in flight, if any.
+///
+/// Only a focus block (Work phase, running or freshly paused) is worth
+/// snapshotting — a break is not precious the way a focus block is, and a
+/// paused-then-quit focus block is exactly the case a user expects to find
+/// waiting when they return. The snapshot records the rota entry and decree
+/// that belong to the block so a recovered session still joins cleanly.
+fn write_session_snapshot(app: &Arc<AppState>, shared: &Arc<Shared>) {
+    use crate::timer::session_snapshot::{Phase, SessionSnapshot};
+
+    let started_at = shared.started_at();
+    if started_at == 0 {
+        SessionSnapshot::clear();
+        return;
+    }
+    let snap = {
+        let st = shared.state_snapshot();
+        let duration = st.total.as_secs();
+        let paused_remaining = st.remaining.as_secs();
+        let phase = match st.phase {
+            crate::timer::clock::Phase::Work => Phase::Focus,
+            crate::timer::clock::Phase::ShortBreak => Phase::ShortBreak,
+            crate::timer::clock::Phase::LongBreak => Phase::LongBreak,
+        };
+        let paused_at = if st.running {
+            None
+        } else {
+            Some(chrono::Utc::now().timestamp())
+        };
+        let (rota_entry_id, decree_text) = {
+            let pending = app.pending_decree.lock().unwrap().clone();
+            (None, pending.map(|(t, _)| t))
+        };
+        SessionSnapshot {
+            started_at,
+            planned_duration_secs: duration,
+            phase,
+            rota_entry_id,
+            decree_text,
+            paused_at,
+            paused_remaining_secs: if paused_at.is_some() {
+                paused_remaining
+            } else {
+                0
+            },
+        }
+    };
+    let _ = snap.save();
+}
+
+/// Attempt to resume a focus block that was interrupted by a crash.
+///
+/// Called once at launch. If the on-disk snapshot is still within its grace
+/// window it is offered (loaded back into the clock); otherwise it is quietly
+/// discarded so a stale file cannot resurrect an old block.
+fn try_resume_from_snapshot(app: &Arc<AppState>, shared: &Arc<Shared>) {
+    use crate::timer::session_snapshot::{Phase, SessionSnapshot};
+
+    let Some(snap) = SessionSnapshot::load() else {
+        return;
+    };
+    let now = chrono::Utc::now().timestamp();
+
+    // A stale snapshot is wiped, not offered.
+    if !snap.is_recoverable(now) {
+        SessionSnapshot::clear();
+        return;
+    }
+
+    // Only focus blocks are worth resurrecting; a break is transient.
+    if snap.phase != Phase::Focus {
+        SessionSnapshot::clear();
+        return;
+    }
+
+    let running = snap.paused_at.is_none();
+    let remaining = snap.remaining_secs(now);
+
+    // Re-park the decree so a resumed block still records its intention.
+    if let Some(text) = snap.decree_text.clone() {
+        *app.pending_decree.lock().unwrap() = Some((text, now));
+    }
+
+    shared.begin_from_recovery(snap.planned_duration_secs, remaining, running);
+    // The crash is handled; remove the snapshot so the next launch does not
+    // re-offer it. Lifecycle events from here on write a fresh one.
+    SessionSnapshot::clear();
 }
 
 /// Handle an action. `notify_msg` (if any) is shown from the event-loop thread.
@@ -410,12 +501,34 @@ fn run_action(
 ) {
     let notify_msg: Option<String> = match action {
         TrayAction::Toggle => {
+            let was_running = shared.snapshot().running;
             shared.toggle();
+            // On a focus block (running or freshly paused) we keep a recovery
+            // snapshot on disk. This keeps the snapshot current through pauses,
+            // and also captures a plain-timer block that never went through a
+            // rota entry.
+            if shared.started_at() != 0 {
+                if was_running && !shared.snapshot().running {
+                    // Paused: re-write with the frozen remaining time.
+                    write_session_snapshot(app, shared);
+                } else if !was_running && shared.snapshot().running {
+                    // Started from the plain timer.
+                    write_session_snapshot(app, shared);
+                }
+            }
             None
         }
-        TrayAction::Skip => shared.skip(),
+        TrayAction::Skip => {
+            // A skipped block is no longer on the clock; there is nothing to
+            // recover.
+            shared.clear_started_at();
+            crate::timer::session_snapshot::SessionSnapshot::clear();
+            shared.skip()
+        }
         TrayAction::Reset => {
             shared.reset();
+            shared.clear_started_at();
+            crate::timer::session_snapshot::SessionSnapshot::clear();
             // A reset that follows a started block rewrites the clock but not
             // the plan: without this the rota would keep claiming the block was
             // taken up and never learn it was abandoned, and the day's record
@@ -2282,6 +2395,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let shared = Arc::new(Shared::new(cfg));
     let app = Arc::new(AppState::load(Arc::clone(&shared)));
 
+    // If the app died mid-focus-block, bring the clock back where it was.
+    // This must run before any UI snapshot is applied so the timer screen
+    // starts on the recovered countdown, not on a fresh 25:00.
+    try_resume_from_snapshot(&app, &shared);
+
     // Sounds: warm all themes, then pick the active one.
     let sounds_dir = store::Store::data_dir().join("sounds");
     sound::Sounds::warm_all(&sounds_dir);
@@ -2373,6 +2491,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         if !recs.is_empty() {
+            // A block completed on the clock; there is nothing left to recover
+            // from a crash, so the recovery snapshot is retired.
+            tick_shared.clear_started_at();
+            crate::timer::session_snapshot::SessionSnapshot::clear();
             {
                 let mut st = tick_app.store.lock().unwrap();
                 st.add_sessions(&recs);
