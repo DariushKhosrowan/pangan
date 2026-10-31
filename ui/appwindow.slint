@@ -245,6 +245,27 @@ export struct InscriptionItem {
     decree: string,
 }
 
+// One decree the span made and did not answer.
+//
+// The most useful row in the archive: it is a block that was spoken for and then
+// produced no words. Shown on the report because that is where the user is
+// already asking what a period added up to.
+export struct UnfulfilledItem {
+    text: string,
+    /// The day it was planned for, already in the active calendar's digits.
+    day: string,
+}
+
+// One word that recurs across a span's decrees.
+export struct ThemeItem {
+    word: string,
+    /// How many decrees used it, in the active script's digits.
+    count: string,
+    /// 0..1, how strongly to fill the bar — the count relative to the strongest
+    /// theme, so the first row is always full and the shape is readable.
+    weight: float,
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // Radius — one corner scale for the whole app.
 //
@@ -1689,6 +1710,26 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in property <int> report-delta: 0;
     in property <bool> report-has-prev: false;
     in property <bool> report-empty: true;
+
+    // ---- the reckoning: what the written record adds up to ----
+    //
+    // The journal was write-only: a decree in, an inscription out, both then
+    // filed away. These properties are the read-back. They are pushed from Rust
+    // with the same span the rest of the report uses, so the reckoning cannot
+    // disagree with the numbers above it about where a week starts.
+    in property <int> reck-spoken: 0;
+    in property <int> reck-answered: 0;
+    in property <int> reck-written: 0;
+    in property <int> reck-unanswered: 0;
+    /// Blocks that produced words with no promise in front of them.
+    in property <int> reck-unspoken: 0;
+    in property <[UnfulfilledItem]> reck-unfulfilled: [];
+    /// How many there were in total, of which the list names a few.
+    in property <int> reck-unfulfilled-total: 0;
+    in property <[ThemeItem]> reck-themes: [];
+    /// A one-line verdict on the span, built in Rust where the digits are.
+    in property <string> reck-summary: "";
+    in property <bool> reck-empty: true;
     in property <[float]> chart-bars: [];
     in property <[string]> chart-labels: [];
     in property <[string]> chart-details: [];
@@ -3904,6 +3945,197 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             font-size: Type.small;
                             color: Palette.text-dim;
                             wrap: word-wrap;
+                        }
+                    }
+
+                    // ── the reckoning ────────────────────────────────────
+                    // What the written record adds up to over this same span.
+                    //
+                    // Last card on the screen on purpose: the numbers above say
+                    // how much was worked, and this says whether the work was
+                    // the work that was planned — which is a question you ask
+                    // after the volume, not instead of it.
+                    if !root.reck-empty : Rectangle {
+                        height: reck-col.preferred-height + Space.pad * 2;
+                        border-radius: Radius.card;
+                        background: Palette.surface;
+                        border-width: 1px;
+                        border-color: Palette.hairline;
+                        drop-shadow-blur: Elev.card-blur;
+                        drop-shadow-offset-y: Elev.card-y;
+                        drop-shadow-color: Elev.card-shadow;
+
+                        reck-col := VerticalLayout {
+                            padding: Space.pad;
+                            spacing: 10px;
+
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: Strings.reck-title;
+                                    font-size: Type.caption;
+                                    font-weight: 700;
+                                    letter-spacing: Strings.fa ? 0px : Type.tracking;
+                                    color: Palette.text-faint;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
+                                }
+                                // "3 of 8": the ratio is the point, and stating
+                                // both halves stops a bare "5" from being
+                                // read as either good or bad depending on what
+                                // the reader assumed the denominator was.
+                                Text {
+                                    text: Digits.num(root.reck-answered) + " "
+                                        + Strings.reck-of + " "
+                                        + Digits.num(root.reck-spoken);
+                                    font-size: Type.caption;
+                                    font-weight: 600;
+                                    color: Palette.text-dim;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // The verdict line, built in Rust.
+                            Text {
+                                text: root.reck-summary;
+                                font-size: Type.small;
+                                color: Palette.text-dim;
+                                wrap: word-wrap;
+                            }
+
+                            // The four counts. Two pairs rather than one row of
+                            // four: at this width four labels in a row elide.
+                            HorizontalLayout {
+                                spacing: Space.gap;
+                                StatCard {
+                                    label: Strings.reck-unanswered;
+                                    value: Digits.num(root.reck-unanswered);
+                                    horizontal-stretch: 1;
+                                }
+                                StatCard {
+                                    label: Strings.reck-unspoken;
+                                    value: Digits.num(root.reck-unspoken);
+                                    horizontal-stretch: 1;
+                                }
+                            }
+
+                            // ── promises that did not land ───────────────
+                            if root.reck-unfulfilled.length > 0 : VerticalLayout {
+                                spacing: 6px;
+
+                                Text {
+                                    text: Strings.reck-unfulfilled-title;
+                                    font-size: Type.caption;
+                                    font-weight: 700;
+                                    letter-spacing: Strings.fa ? 0px : Type.tracking;
+                                    color: Palette.text-faint;
+                                    overflow: elide;
+                                }
+
+                                for u[i] in root.reck-unfulfilled : Rectangle {
+                                    // A left rule instead of a full card: the
+                                    // rows are a list of facts, and framing each
+                                    // one would make five subdued notes look
+                                    // like five separate problems.
+                                    height: u-row.preferred-height + 10px;
+                                    background: transparent;
+
+                                    Rectangle {
+                                        width: 2px;
+                                        height: parent.height - 6px;
+                                        y: 3px;
+                                        border-radius: 1px;
+                                        background: Palette.danger;
+                                    }
+
+                                    u-row := VerticalLayout {
+                                        x: 10px;
+                                        width: parent.width - 12px;
+                                        y: 3px;
+                                        spacing: 1px;
+                                        Text {
+                                            text: u.text;
+                                            font-size: Type.small;
+                                            color: Palette.text-dim;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            text: u.day;
+                                            font-size: Type.caption;
+                                            color: Palette.text-faint;
+                                            overflow: elide;
+                                        }
+                                    }
+                                }
+
+                                // "and 3 more": the list is capped so it stays
+                                // a prompt, but the total behind it is not
+                                // hidden — that would be the report flattering
+                                // the user by omission.
+                                if root.reck-unfulfilled-total > root.reck-unfulfilled.length : Text {
+                                    text: Strings.reck-more + " "
+                                        + Digits.num(root.reck-unfulfilled-total
+                                            - root.reck-unfulfilled.length) + " "
+                                        + Strings.reck-more-suffix;
+                                    font-size: Type.caption;
+                                    color: Palette.text-faint;
+                                }
+                            }
+
+                            // ── the span's recurring words ───────────────
+                            if root.reck-themes.length > 0 : VerticalLayout {
+                                spacing: 6px;
+
+                                Text {
+                                    text: Strings.reck-themes-title;
+                                    font-size: Type.caption;
+                                    font-weight: 700;
+                                    letter-spacing: Strings.fa ? 0px : Type.tracking;
+                                    color: Palette.text-faint;
+                                    overflow: elide;
+                                }
+
+                                for t in root.reck-themes : VerticalLayout {
+                                    spacing: 3px;
+
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        Text {
+                                            text: t.word;
+                                            font-size: Type.small;
+                                            color: Palette.text-dim;
+                                            horizontal-stretch: 1;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            text: t.count;
+                                            font-size: Type.caption;
+                                            color: Palette.text-faint;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    // A bar, not a chart. Five words do not need
+                                    // axes; they need to be comparable, and a
+                                    // shared left edge does that with one rule.
+                                    Rectangle {
+                                        height: 3px;
+                                        border-radius: 2px;
+                                        background: Palette.surface-3;
+
+                                        Rectangle {
+                                            // A floor so a two-count theme is
+                                            // still visible next to a five: at
+                                            // this width a 40% bar is one pixel
+                                            // and reads as a rendering fault.
+                                            width: parent.width * Math.max(t.weight, 0.08);
+                                            height: parent.height;
+                                            border-radius: 2px;
+                                            background: Palette.accent;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

@@ -1123,6 +1123,131 @@ fn jalali_day_heading(day_key: &str, en: bool) -> String {
     }
 }
 
+/// Push the read-back of the written record: what the span promised, what it
+/// delivered, which promises did not land, and the words it was actually about.
+///
+/// Reads the same `Range` the report above uses (`stats::bounds`), so the
+/// reckoning can never tell a different story about where a week starts than
+/// the chart sitting directly over it.
+///
+/// Both lists are rebuilt from scratch on every tick, like everything else on
+/// this screen. The archive is a handful of rows and the cost is a few
+/// allocations every 300 ms — far cheaper than the alternative, which is a
+/// window-side copy that can disagree with the store it came from.
+fn push_reckoning(
+    win: &PanganWindow,
+    st: &Store,
+    period: stats::Period,
+    offset: i32,
+    today: chrono::NaiveDate,
+    earliest: Option<chrono::NaiveDate>,
+    en: bool,
+) {
+    let range = stats::bounds(period, offset, today, earliest);
+    let session_times: Vec<i64> = st.data.sessions.iter().map(|s| s.at).collect();
+    let r = journal::reckoning::build(
+        &st.data.decrees,
+        &st.data.inscriptions,
+        &session_times,
+        range,
+    );
+
+    win.set_reck_spoken(r.spoken as i32);
+    win.set_reck_answered(r.answered as i32);
+    win.set_reck_written(r.written as i32);
+    win.set_reck_unanswered(r.unanswered() as i32);
+    win.set_reck_unspoken(r.unspoken() as i32);
+    win.set_reck_unfulfilled_total(r.unfulfilled_total as i32);
+    // The card is hidden entirely when the span contains no writing at all.
+    // An empty reckoning is not "zero of zero kept" — it is a period the
+    // feature does not apply to, and showing it would be a card of dashes.
+    win.set_reck_empty(r.is_empty());
+
+    let mut unfulfilled: Vec<crate::ui::UnfulfilledItem> = Vec::with_capacity(r.unfulfilled.len());
+    for u in &r.unfulfilled {
+        // Only the day, not the time: the question a missed promise raises is
+        // "when was I going to do this", and the hour of a block that is over
+        // does not answer it.
+        let day = chrono::DateTime::from_timestamp(u.session_at, 0)
+            .map(|t| stats::jalali_label(t.with_timezone(&chrono::Local).date_naive(), en, false))
+            .unwrap_or_default();
+        unfulfilled.push(crate::ui::UnfulfilledItem {
+            text: SharedString::from(u.text.clone()),
+            day: SharedString::from(day),
+        });
+    }
+    win.set_reck_unfulfilled(ModelRc::new(VecModel::from(unfulfilled)));
+
+    // Bars are relative to the strongest theme, so the list reads as a shape.
+    // The peak is taken from the list rather than recomputed, because
+    // `recurring` is already sorted and already capped to what is shown.
+    let peak = r.recurring.first().map(|w| w.count).unwrap_or(1).max(1);
+    // Persian digits for the count column, Latin ones for English — the same
+    // rule every other number on this screen follows.
+    let num = |n: i64| -> String {
+        if en {
+            n.to_string()
+        } else {
+            calendar::fa_num(n)
+        }
+    };
+    let themes: Vec<crate::ui::ThemeItem> = r
+        .recurring
+        .iter()
+        .map(|w| crate::ui::ThemeItem {
+            word: SharedString::from(w.word.clone()),
+            count: SharedString::from(num(w.count as i64)),
+            weight: (w.count as f32 / peak as f32).clamp(0.0, 1.0),
+        })
+        .collect();
+    win.set_reck_themes(ModelRc::new(VecModel::from(themes)));
+
+    // The verdict line. One sentence, and deliberately not a score: the point
+    // of the reckoning is to show the shape of the span, not to grade it. A
+    // single number here would be read as a grade and would make the honest
+    // weeks look worse than the busy ones.
+    win.set_reck_summary(SharedString::from(if en {
+        summary_en(&r)
+    } else {
+        summary_fa(&r)
+    }));
+}
+
+fn summary_en(r: &journal::reckoning::WeeklyReckoning) -> String {
+    if r.spoken == 0 {
+        return String::new();
+    }
+    let mut s = format!("{} of {} decrees were answered", r.answered, r.spoken);
+    if r.unspoken() > 0 {
+        s.push_str(&format!(
+            "; {} block{} produced words nobody planned",
+            r.unspoken(),
+            if r.unspoken() == 1 { "" } else { "s" }
+        ));
+    }
+    s.push('.');
+    s
+}
+
+fn summary_fa(r: &journal::reckoning::WeeklyReckoning) -> String {
+    if r.spoken == 0 {
+        return String::new();
+    }
+    let mut s = format!(
+        "از {} فرمان، {} پاسخ گرفت",
+        calendar::fa_num(r.spoken as i64),
+        calendar::fa_num(r.answered as i64)
+    );
+    if r.unspoken() > 0 {
+        s.push_str(&format!(
+            "؛ {} بلوک بی‌فرمان نوشته شد",
+            calendar::fa_num(r.unspoken() as i64)
+        ));
+    }
+    s.push('؛');
+    s
+}
+
 /// Rebuild every screen from the store. The one entry point the tick calls.
 ///
 /// The Stats screen is driven entirely from here: the period and offset live in
@@ -1236,6 +1361,12 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
     win.set_hour_bars(ModelRc::new(VecModel::from(hours)));
     let has_hours = r.hours.iter().any(|m| *m > 0);
     win.set_has_hour_profile(has_hours);
+
+    // ── the reckoning ────────────────────────────────────────────────────
+    // The same span the report above is showing, read back through the written
+    // record. Done here rather than in Slint because this is where the report's
+    // own range lives, and because the digits and day names are here.
+    push_reckoning(win, &st, period, offset, today, earliest, en);
 
     // The old single-blob report text is still fed, because the main screen's
     // compact summary reads it.

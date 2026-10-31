@@ -274,6 +274,31 @@ export global Strings {
         ? "بلوک ناتمام از روزهای پیش:"
         : "Unfinished blocks from earlier days:";
 
+    // ── The reckoning: what the written record adds up to ──────────────────
+    // The archive was write-only. This is the read-back: over whatever period
+    // is on screen, how many intentions were written and how many were
+    // answered. Persian calls the read-back "حساب‌رسی" — the settling of
+    // accounts — because that is exactly what it is.
+    out property <string> reck-title: fa ? "حساب‌رسی" : "Reckoning";
+    out property <string> reck-spoken: fa ? "فرمان‌ها" : "Spoken for";
+    out property <string> reck-answered: fa ? "پاسخ‌گرفته" : "Answered";
+    out property <string> reck-unanswered: fa ? "بی‌پاسخ" : "Unanswered";
+    out property <string> reck-written: fa ? "سنگ‌نوشته‌ها" : "Written up";
+    out property <string> reck-unspoken: fa ? "بی‌فرمان" : "Unplanned";
+    out property <string> reck-unfulfilled-title: fa
+        ? "فرمان‌هایی که به سنگ نرسیدند"
+        : "Decrees that never reached the stone";
+    out property <string> reck-themes-title: fa
+        ? "واژه‌های پرتکرار هفته"
+        : "Words the span was about";
+    out property <string> reck-empty: fa
+        ? "این دوره فرمانی ندارد؛ با دعوت پیش از هر بلوک شروع کنید."
+        : "No decrees in this span — issue one before a block and it will be reckoned here.";
+    out property <string> reck-more: fa ? "و" : "and";
+    out property <string> reck-more-suffix: fa ? "فرمان دیگر" : "more";
+    out property <string> reck-of: fa ? "از" : "of";
+    out property <string> reck-decrees-unit: fa ? "فرمان" : "decrees";
+
     // ── Inscriptions: the written record ───────────────────────────────────
     // A stone inscription was how a Persian king answered "what did I
     // accomplish" so the answer would outlast him. Pangan asks the same

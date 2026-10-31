@@ -29,13 +29,21 @@ no audio files, everything generated mathematically.
   toggle, global hotkey, idle-inhibit, and fullscreen break-overlay toggles.
 - 📊 **Scientific reports** — daily / weekly / monthly analytics: sessions, focus
   minutes, consistency %, streaks, and a deep-work score.
+- 📜 **The written record** — a **decree** before each block (what it is *for*)
+  and an **inscription** after it (what it produced), paired on the session.
+  A promise with no outcome facing it is the most useful row in the archive.
+- ⚖️ **Reckoning** — the read-back, over whatever period is on screen: how many
+  intentions were kept, which ones were not, and the words the span was
+  actually about. A record nobody reads back is an archive, not a record.
+- 🗓️ **Day rota** — write the day down as a numbered list before it starts, then
+  begin each block with one press. Its length and its decree come with it.
 - ✅ **Tasks & scheduling** — add tasks (with optional date/time), tracked persistently.
 - 🖥️ **System tray** — live countdown, Start/Pause, Skip, Reset, Quit.
 - 🔔 **Desktop notifications** — when a focus/break session ends.
 - 🌙 **Screen-lock inhibit** — keep the desktop awake during focus sessions.
 - ☁️ **Google Drive sync** — sign in with Google once per device and your focus
-  history, tasks **and settings** stay the same everywhere. No account with us,
-  no server: the data lives in your own Drive (see `docs/google-sync.md`).
+  history, tasks, rota **and settings** stay the same everywhere. No account with
+  us, no server: the data lives in your own Drive (see `docs/google-sync.md`).
 
 ## Build
 
@@ -93,13 +101,14 @@ preferences are written into `config.toml`.
 
 ## Architecture
 
-- `src/clock.rs` — platform-agnostic drift-free timer state machine
-- `src/settings.rs` — full TOML settings model (incl. shortcuts + automation)
-- `src/automation.rs` — shell-command automation engine over timer events
-- `src/store.rs` — JSON persistence for sessions and tasks
-- `src/stats.rs` — daily/weekly/monthly report engine
-- `src/sound.rs` — procedural Iranian instrument synthesis + WAV generation
-- `src/sync.rs` — Google Sheets adapter (snapshot sync + two-way backup)
+- `src/timer/` — platform-agnostic drift-free timer state machine
+- `src/state/` — settings, the session/task store, and the day's rota
+- `src/journal/` — decrees, inscriptions, and the reckoning that reads them back
+- `src/app/` — startup, the UI event loop, shell automation hooks
+- `src/stats/` — daily/weekly/monthly report engine
+- `src/calendar/` — Jalali calendar, Sasanian day names, chronicle, events
+- `src/audio/` — procedural Iranian instrument synthesis + WAV generation
+- `src/sync/` — Google Drive sync, three-way merge, and local backup
 - `src/platform/` — per-OS tray / notifications / hotkey / inhibit / autostart
 - `ui/appwindow.slint` — the Persepolis-themed Slint UI
 

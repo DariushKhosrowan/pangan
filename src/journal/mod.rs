@@ -8,6 +8,9 @@
 //!   for. A promise, short enough to sit under the clock while it runs.
 //! * [`inscription`] — written *after* the block: one line saying what it
 //!   actually produced. Permanent and searchable.
+//! * [`reckoning`] — the read-back: over a span, how many promises were kept,
+//!   which ones were not, and the words the span was actually about. A record
+//!   nobody reads back is an archive, not a record.
 //!
 //! Kept as a pair on the same session, they answer both halves of the question.
 //! A decree with no inscription facing it is the most useful row in the whole
@@ -22,6 +25,7 @@
 
 pub mod decree;
 pub mod inscription;
+pub mod reckoning;
 
 // The inscription rules are called from the app layer by bare name because they
 // are the older half of the pair; the decree's are reached through `decree::`
