@@ -94,10 +94,18 @@ pub struct Data {
     /// and no history, only the shape a day can be given.
     #[serde(default)]
     pub plans: Vec<Plan>,
+
     /// Hands out plan ids. Same reasoning as `next_rota_id`: its own id space,
     /// its own counter, so a plan can never collide with a rota row.
     #[serde(default)]
     pub next_plan_id: u64,
+
+    /// Completed breaks — the other half of the Pomodoro method. Append-only,
+    /// like `sessions`: a completed break is a fact, not a row an editor
+    /// rewrites. Keyed by content (`started_at` + `kind`) and merged as a
+    /// union, so there is no id counter here.
+    #[serde(default)]
+    pub breaks: Vec<crate::timer::break_record::BreakRecord>,
 }
 
 fn default_schema_version() -> u32 {
@@ -119,6 +127,7 @@ impl Default for Data {
             next_rota_id: 0,
             plans: Vec::new(),
             next_plan_id: 0,
+            breaks: Vec::new(),
         }
     }
 }
@@ -183,6 +192,29 @@ impl Store {
                 .any(|s| s.at == r.at && s.minutes == r.minutes);
             if !dup {
                 self.data.sessions.push(r.clone());
+                added += 1;
+            }
+        }
+        if added > 0 {
+            self.save();
+        }
+        added
+    }
+
+    /// Append completed breaks (used by the event loop). Deduplicates by the
+    /// content key `(started_at, kind)` — the same break recorded twice is one
+    /// break, but two breaks that started in the same second with different
+    /// kinds are genuinely two.
+    pub fn add_breaks(&mut self, recs: &[crate::timer::break_record::BreakRecord]) -> usize {
+        let mut added = 0;
+        for r in recs {
+            let dup = self
+                .data
+                .breaks
+                .iter()
+                .any(|b| b.started_at == r.started_at && b.kind == r.kind);
+            if !dup {
+                self.data.breaks.push(r.clone());
                 added += 1;
             }
         }

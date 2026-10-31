@@ -106,7 +106,7 @@ pub struct Snapshot {
     pub work_done: u32,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct State {
     pub phase: Phase,
     pub running: bool,
@@ -121,6 +121,10 @@ pub struct State {
     /// Unix seconds when the current focus block started, for crash recovery.
     /// Zero while no block is in flight.
     pub started_at: i64,
+    /// The break currently in flight, if any. Used to record completed breaks
+    /// so the weekly review can measure break adherence against real breaks
+    /// instead of guessing from session gaps. `None` outside a break.
+    pub open_break: Option<crate::timer::break_record::BreakRecord>,
 }
 
 pub struct Shared {
@@ -138,6 +142,8 @@ pub struct Shared {
     pending_sessions: Mutex<Vec<SessionRecord>>,
     /// Count of completed breaks (rest periods) not yet consumed.
     pending_breaks: Mutex<u32>,
+    /// Completed break records not yet persisted by the event loop.
+    pending_break_records: Mutex<Vec<crate::timer::break_record::BreakRecord>>,
     /// Life-cycle automation events not yet fired by the event loop
     /// (e.g. "focus_start", "break_end", ...).
     pending_events: Mutex<Vec<String>>,
@@ -157,11 +163,13 @@ impl Shared {
                 work_done: 0,
                 finish_unix: None,
                 started_at: 0,
+                open_break: None,
             }),
             quit: std::sync::atomic::AtomicBool::new(false),
             cfg: Mutex::new(cfg),
             pending_sessions: Mutex::new(Vec::new()),
             pending_breaks: Mutex::new(0),
+            pending_break_records: Mutex::new(Vec::new()),
             pending_events: Mutex::new(Vec::new()),
         }
     }
@@ -179,6 +187,11 @@ impl Shared {
     /// Drain the count of completed breaks since the last call.
     pub fn take_breaks(&self) -> u32 {
         std::mem::take(&mut *self.pending_breaks.lock().unwrap())
+    }
+
+    /// Drain completed break records since the last call.
+    pub fn drain_break_records(&self) -> Vec<crate::timer::break_record::BreakRecord> {
+        std::mem::take(&mut *self.pending_break_records.lock().unwrap())
     }
 
     fn phase_total(&self, phase: Phase) -> Duration {
@@ -245,6 +258,18 @@ impl Shared {
             } else {
                 Phase::ShortBreak
             };
+            // Record the break that is beginning, so break adherence can be
+            // measured against real breaks rather than guessed from session
+            // gaps. The planned length is this phase's configured duration.
+            s.open_break = Some(crate::timer::break_record::begin(
+                crate::timer::clock::now_unix(),
+                self.phase_total(s.phase).as_secs() as u32,
+                if is_long {
+                    crate::timer::break_record::BreakRel::Long
+                } else {
+                    crate::timer::break_record::BreakRel::Short
+                },
+            ));
             // Automation: a focus session completed; a break begins.
             self.pending_events
                 .lock()
@@ -330,6 +355,12 @@ impl Shared {
                     self.pending_sessions.lock().unwrap().push(rec);
                 } else {
                     *self.pending_breaks.lock().unwrap() += 1;
+                    // The break just ended naturally — close its record so the
+                    // weekly review can measure real break adherence.
+                    if let Some(ob) = s.open_break.take() {
+                        let done = crate::timer::break_record::close(ob, now);
+                        self.pending_break_records.lock().unwrap().push(done);
+                    }
                 }
                 drop(s);
                 return self.advance(ended_work);
@@ -362,7 +393,17 @@ impl Shared {
     }
 
     pub fn skip(&self) -> Option<String> {
-        let phase = self.state.lock().unwrap().phase;
+        let mut s = self.state.lock().unwrap();
+        let phase = s.phase;
+        // Skipping a break closes its record (the break was cut short) so it
+        // can still be counted for adherence.
+        if phase != Phase::Work {
+            if let Some(ob) = s.open_break.take() {
+                let done = crate::timer::break_record::close(ob, crate::timer::clock::now_unix());
+                self.pending_break_records.lock().unwrap().push(done);
+            }
+        }
+        drop(s);
         self.advance(phase == Phase::Work)
     }
 
@@ -374,6 +415,7 @@ impl Shared {
         s.total = s.remaining;
         s.finish_unix = None;
         s.work_done = 0;
+        s.open_break = None;
     }
 
     /// Switch the language the snapshot labels are produced in.
@@ -457,7 +499,7 @@ impl Shared {
     /// snapshot. Kept on the clock so the recovery logic reads the same truth
     /// the countdown runs on.
     pub fn state_snapshot(&self) -> State {
-        *self.state.lock().unwrap()
+        self.state.lock().unwrap().clone()
     }
 
     /// Restore the countdown from a crash-recovery snapshot.
@@ -480,6 +522,7 @@ impl Shared {
             None
         };
         s.started_at = now_unix();
+        s.open_break = None;
     }
 
     /// True when the clock is sitting at the start of an untouched focus block.
@@ -823,5 +866,59 @@ mod tests {
         };
         // At wall time 1100 (1000s in), both agree on 500s remaining.
         assert_eq!(snap.remaining_secs(1100), 500);
+    }
+
+    #[test]
+    fn a_finished_break_is_recorded_with_planned_and_actual_length() {
+        let s = Shared::new(config());
+        // Finish a work session: this opens a break record.
+        s.state.lock().unwrap().finish_unix = Some(now_unix() - 1);
+        s.state.lock().unwrap().running = true;
+        assert!(s.tick().is_some());
+        assert!(
+            s.state.lock().unwrap().open_break.is_some(),
+            "break opens on work end"
+        );
+
+        // Let the break run out naturally.
+        s.state.lock().unwrap().finish_unix = Some(now_unix() - 1);
+        s.state.lock().unwrap().running = true;
+        assert!(s.tick().is_some());
+        let recs = s.drain_break_records();
+        assert_eq!(recs.len(), 1, "one break recorded");
+        let rec = &recs[0];
+        assert_eq!(rec.kind, crate::timer::break_record::BreakRel::Short);
+        assert_eq!(rec.planned_secs, 5 * 60);
+        assert!(rec.ended_at.is_some(), "break is complete");
+        assert!(
+            s.state.lock().unwrap().open_break.is_none(),
+            "break cleared"
+        );
+    }
+
+    #[test]
+    fn skipping_a_break_records_it_as_cut_short() {
+        let s = Shared::new(config());
+        s.state.lock().unwrap().finish_unix = Some(now_unix() - 1);
+        s.state.lock().unwrap().running = true;
+        assert!(s.tick().is_some());
+        assert!(s.state.lock().unwrap().open_break.is_some());
+
+        // Skip the break.
+        s.skip();
+        let recs = s.drain_break_records();
+        assert_eq!(recs.len(), 1, "a skipped break is still recorded");
+        assert!(recs[0].ended_at.is_some(), "skipped break is closed");
+    }
+
+    #[test]
+    fn reset_clears_any_open_break() {
+        let s = Shared::new(config());
+        s.state.lock().unwrap().finish_unix = Some(now_unix() - 1);
+        s.state.lock().unwrap().running = true;
+        assert!(s.tick().is_some());
+        assert!(s.state.lock().unwrap().open_break.is_some());
+        s.reset();
+        assert!(s.state.lock().unwrap().open_break.is_none());
     }
 }

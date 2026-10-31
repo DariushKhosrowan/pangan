@@ -3,6 +3,7 @@
 pub mod atomic_file;
 pub mod migration;
 pub mod outcome;
+pub mod plan_autopsy;
 pub mod plans;
 pub mod rota;
 pub mod settings;

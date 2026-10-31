@@ -55,6 +55,10 @@ pub struct WeeklySummary {
     pub spoken_not_delivered: usize,
     /// Break adherence over the week, when there are enough sessions.
     pub break_adherence: Option<BreakAdherence>,
+    /// Break adherence measured from *recorded* breaks (started_at/ended_at),
+    /// when the week has enough completed breaks. This is the honest number:
+    /// it does not guess from session gaps.
+    pub recorded_break_adherence: Option<BreakAdherence>,
     /// The best 3-hour focus window, when there are enough sessions.
     pub best_window: Option<HourWindow>,
     /// Words that recur across the week's decrees, most frequent first.
@@ -65,6 +69,9 @@ pub struct WeeklySummary {
     /// The hour the user was most honest this week, when enough sessions were
     /// judged. None until there is a qualifying sample.
     pub honest_hours: Option<crate::stats::report::HourlyVerdictSummary>,
+    /// Blocks that ended this week with no verdict — promises dropped without
+    /// being faced. Oldest first.
+    pub unjudged_blocks: Vec<crate::journal::unjudged::UnjudgedBlock>,
 }
 
 /// The whole week, ready to render.
@@ -76,6 +83,8 @@ pub struct WeeklyReview {
     pub blocks: Vec<WeeklyBlock>,
     /// The week's summary lines.
     pub summary: WeeklySummary,
+    /// Local UTC offset (seconds) used to bucket this week's datetimes.
+    pub tz_offset_secs: i32,
 }
 
 /// The Saturday-first week containing `today`.
@@ -103,6 +112,7 @@ pub fn build_week(
     decrees: &[Decree],
     inscriptions: &[Inscription],
     verdicts: &[Verdict],
+    breaks: &[crate::timer::break_record::BreakRecord],
     today: NaiveDate,
     tz_offset_secs: i32,
     planned_break_secs: u32,
@@ -176,6 +186,18 @@ pub fn build_week(
             let all: Vec<SessionRecord> = week_sessions.iter().map(|s| (**s).clone()).collect();
             break_adherence(&all, planned_break_secs, usize::MAX)
         },
+        recorded_break_adherence: {
+            let week_breaks: Vec<crate::timer::break_record::BreakRecord> = breaks
+                .iter()
+                .filter(|b| {
+                    date_of(b.started_at, tz_offset_secs)
+                        .map(|d| range.contains(d))
+                        .unwrap_or(false)
+                })
+                .cloned()
+                .collect();
+            crate::timer::break_record::adherence_summary(&week_breaks)
+        },
         best_window: best_focus_window(
             &week_sessions
                 .iter()
@@ -207,12 +229,44 @@ pub fn build_week(
             let sum = hourly_verdict_summary(verdicts, &all, tz_offset_secs, 3);
             (sum.best_kept_hour.is_some()).then_some(sum)
         },
+        unjudged_blocks: {
+            use chrono::TimeZone;
+            let offset = chrono::FixedOffset::east_opt(tz_offset_secs)
+                .unwrap_or_else(|| chrono::FixedOffset::east(0));
+            let start_utc = offset
+                .from_local_datetime(&chrono::NaiveDateTime::new(
+                    range.start,
+                    chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+                ))
+                .single()
+                .map(|dt| dt.timestamp())
+                .unwrap_or(0);
+            let end_utc = offset
+                .from_local_datetime(&chrono::NaiveDateTime::new(
+                    range.end,
+                    chrono::NaiveTime::from_hms_opt(23, 59, 59).unwrap(),
+                ))
+                .single()
+                .map(|dt| dt.timestamp())
+                .unwrap_or(0);
+            let now_end = end_utc.max(start_utc);
+            crate::journal::unjudged::unjudged_sessions(
+                sessions,
+                verdicts,
+                decrees,
+                now_end,
+                start_utc,
+                end_utc,
+                tz_offset_secs,
+            )
+        },
     };
 
     WeeklyReview {
         range,
         blocks,
         summary,
+        tz_offset_secs,
     }
 }
 
@@ -306,9 +360,9 @@ fn render_summary(review: &WeeklyReview, fa: bool) -> String {
         num(s.spoken_not_delivered as i64)
     ));
 
-    if let Some(b) = s.break_adherence {
+    if let Some(b) = s.recorded_break_adherence.or(s.break_adherence) {
         out.push_str(&format!(
-            "{} **{:.0}%** ({} / {} / {})\n",
+            "{} **{:.0}%** ({} / {} / {}){}\n",
             if fa {
                 "پایبندی به استراحت:"
             } else {
@@ -317,8 +371,59 @@ fn render_summary(review: &WeeklyReview, fa: bool) -> String {
             b.rate * 100.0,
             b.followed,
             b.skipped,
-            b.stretched
+            b.stretched,
+            if s.recorded_break_adherence.is_some() {
+                if fa {
+                    " (ثبت‌شده)"
+                } else {
+                    " (recorded)"
+                }
+            } else {
+                ""
+            }
         ));
+    }
+    if !s.unjudged_blocks.is_empty() {
+        let label = if fa {
+            "بلوک‌های بدون داوری:"
+        } else {
+            "Unjudged blocks:"
+        };
+        out.push_str(&format!(
+            "{} {}\n",
+            label,
+            crate::journal::unjudged::backlog_label(&s.unjudged_blocks, fa)
+        ));
+        // The three oldest unjudged blocks, called out explicitly.
+        for b in s.unjudged_blocks.iter().take(3) {
+            let date = date_of(b.session_at, review.tz_offset_secs)
+                .map(|d| crate::stats::report::jalali_label(d, !fa, true))
+                .unwrap_or_default();
+            let spoke = if b.has_decree {
+                if fa {
+                    " (دارای فرمان)"
+                } else {
+                    " (had a decree)"
+                }
+            } else {
+                ""
+            };
+            out.push_str(&format!(
+                "  - {} · {} دقیقه{}{}\n",
+                date,
+                if fa {
+                    crate::calendar::jalali::fa_num(b.minutes as i64)
+                } else {
+                    b.minutes.to_string()
+                },
+                spoke,
+                if fa {
+                    " — بی‌داوری"
+                } else {
+                    " — unjudged"
+                }
+            ));
+        }
     }
     if let Some(win) = s.best_window {
         out.push_str(&format!(
@@ -455,6 +560,7 @@ pub fn write_if_new(
     decrees: &[Decree],
     inscriptions: &[Inscription],
     verdicts: &[Verdict],
+    breaks: &[crate::timer::break_record::BreakRecord],
     today: NaiveDate,
     tz_offset_secs: i32,
     planned_break_secs: u32,
@@ -465,6 +571,7 @@ pub fn write_if_new(
         decrees,
         inscriptions,
         verdicts,
+        breaks,
         today,
         tz_offset_secs,
         planned_break_secs,
@@ -506,7 +613,7 @@ mod tests {
 
     #[test]
     fn build_week_empty_returns_zero_summary() {
-        let rev = build_week(&[], &[], &[], &[], today(), 12600, 300);
+        let rev = build_week(&[], &[], &[], &[], &[], today(), 12600, 300);
         assert!(rev.blocks.is_empty());
         assert_eq!(rev.summary.sessions, 0);
         assert_eq!(rev.summary.focus_minutes, 0);
@@ -519,7 +626,7 @@ mod tests {
         let s = vec![sess(SAT, 25)];
         let d = vec![decree::create(SAT, SAT - 1500, "write the report").unwrap()];
         let i = vec![inscription::create(SAT, SAT, "wrote the report").unwrap()];
-        let rev = build_week(&s, &d, &i, &[], today(), 12600, 300);
+        let rev = build_week(&s, &d, &i, &[], &[], today(), 12600, 300);
         assert_eq!(rev.blocks.len(), 1);
         let b = &rev.blocks[0];
         assert_eq!(b.decree.as_deref(), Some("write the report"));
@@ -534,7 +641,7 @@ mod tests {
     fn build_week_counts_spoken_not_delivered() {
         let s = vec![sess(SAT, 25)];
         let d = vec![decree::create(SAT, SAT - 1500, "an unkept promise").unwrap()];
-        let rev = build_week(&s, &d, &[], &[], today(), 12600, 300);
+        let rev = build_week(&s, &d, &[], &[], &[], today(), 12600, 300);
         assert_eq!(rev.summary.planned, 1);
         assert_eq!(rev.summary.landed, 0);
         assert_eq!(rev.summary.spoken_not_delivered, 1);
@@ -546,7 +653,7 @@ mod tests {
         // Sunday of the *following* week (SAT + 8 days) must be excluded.
         let outside = SAT + 8 * 86_400;
         let s = vec![sess(SAT, 25), sess(outside, 25)];
-        let rev = build_week(&s, &[], &[], &[], today(), 12600, 300);
+        let rev = build_week(&s, &[], &[], &[], &[], today(), 12600, 300);
         assert_eq!(rev.blocks.len(), 1);
         assert_eq!(rev.summary.sessions, 1);
     }
@@ -555,7 +662,7 @@ mod tests {
     fn render_markdown_persian_digits_when_locale_fa() {
         let s = vec![sess(SAT, 25)];
         let d = vec![decree::create(SAT, SAT - 1500, "نوشتن گزارش").unwrap()];
-        let rev = build_week(&s, &d, &[], &[], today(), 12600, 300);
+        let rev = build_week(&s, &d, &[], &[], &[], today(), 12600, 300);
         let md = render_markdown(&rev, true);
         assert!(
             md.contains("جلسه‌ها: **۱**"),
@@ -571,7 +678,7 @@ mod tests {
     fn render_markdown_includes_spoken_not_delivered_count() {
         let s = vec![sess(SAT, 25)];
         let d = vec![decree::create(SAT, SAT - 1500, "an unkept promise").unwrap()];
-        let rev = build_week(&s, &d, &[], &[], today(), 12600, 300);
+        let rev = build_week(&s, &d, &[], &[], &[], today(), 12600, 300);
         let md = render_markdown(&rev, false);
         assert!(md.contains("Spoken, not delivered: **1**"));
     }
@@ -579,7 +686,7 @@ mod tests {
     #[test]
     fn render_markdown_is_valid_utf8_and_no_crlf() {
         let s = vec![sess(SAT, 25)];
-        let rev = build_week(&s, &[], &[], &[], today(), 12600, 300);
+        let rev = build_week(&s, &[], &[], &[], &[], today(), 12600, 300);
         let md = render_markdown(&rev, false);
         assert!(std::str::from_utf8(md.as_bytes()).is_ok());
         assert!(!md.contains("\r\n"), "must use LF line endings");
@@ -596,7 +703,7 @@ mod tests {
             verdict::declare(SAT + 60, VerdictKind::Kept, SAT + 60).unwrap(),
             verdict::declare(SAT + 120, VerdictKind::Kept, SAT + 120).unwrap(),
         ];
-        let rev = build_week(&s, &[], &[], &v, today(), 12600, 300);
+        let rev = build_week(&s, &[], &[], &v, &[], today(), 12600, 300);
         assert!(rev.summary.honest_hours.is_some());
         let md = render_markdown(&rev, false);
         assert!(
@@ -608,9 +715,61 @@ mod tests {
     #[test]
     fn render_markdown_omits_honest_hours_without_verdicts() {
         let s = vec![sess(SAT, 25)];
-        let rev = build_week(&s, &[], &[], &[], today(), 12600, 300);
+        let rev = build_week(&s, &[], &[], &[], &[], today(), 12600, 300);
         assert!(rev.summary.honest_hours.is_none());
         let md = render_markdown(&rev, false);
         assert!(!md.contains("Most honest hour"));
+    }
+
+    #[test]
+    fn build_week_records_break_adherence_from_real_breaks() {
+        use crate::timer::break_record::{BreakRecord, BreakRel};
+        let mk = |started, ended, planned, kind| BreakRecord {
+            started_at: started,
+            ended_at: Some(ended),
+            planned_secs: planned,
+            kind,
+        };
+        // Three followed breaks within the week: start at SAT, SAT+1d, SAT+2d.
+        let s = vec![
+            sess(SAT, 25),
+            sess(SAT + 86_400, 25),
+            sess(SAT + 2 * 86_400, 25),
+        ];
+        let breaks = vec![
+            mk(SAT + 100, SAT + 400, 300, BreakRel::Short),
+            mk(SAT + 86_400 + 100, SAT + 86_400 + 400, 300, BreakRel::Short),
+            mk(
+                SAT + 2 * 86_400 + 100,
+                SAT + 2 * 86_400 + 400,
+                300,
+                BreakRel::Short,
+            ),
+        ];
+        let rev = build_week(&s, &[], &[], &[], &breaks, today(), 12600, 300);
+        let rec = rev.summary.recorded_break_adherence.unwrap();
+        assert_eq!(rec.followed, 3);
+        let md = render_markdown(&rev, false);
+        assert!(md.contains("(recorded)"), "recorded adherence is labelled");
+    }
+
+    #[test]
+    fn build_week_surfaces_unjudged_blocks_with_decree_flag() {
+        // Two sessions in the week: one judged, one not (but spoken for).
+        let s = vec![sess(SAT, 25), sess(SAT + 60, 25)];
+        let verdicts = vec![verdict::Verdict {
+            session_at: SAT,
+            kind: crate::journal::VerdictKind::Kept,
+            declared_at: SAT,
+            deleted: false,
+        }];
+        let decrees = vec![crate::journal::decree::create(SAT + 60, SAT + 50, "plan").unwrap()];
+        let rev = build_week(&s, &decrees, &[], &verdicts, &[], today(), 12600, 300);
+        assert_eq!(rev.summary.unjudged_blocks.len(), 1);
+        assert_eq!(rev.summary.unjudged_blocks[0].session_at, SAT + 60);
+        assert!(rev.summary.unjudged_blocks[0].has_decree);
+        let md = render_markdown(&rev, false);
+        assert!(md.contains("Unjudged blocks:"), "section header appears");
+        assert!(md.contains("had a decree"), "spoken-for block is flagged");
     }
 }

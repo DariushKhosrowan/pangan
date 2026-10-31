@@ -57,6 +57,7 @@ pub fn merge(local: &Data, remote: &Data) -> Data {
         next_rota_id: local.next_rota_id.max(remote.next_rota_id),
         plans: merge_plans(&local.plans, &remote.plans),
         next_plan_id: local.next_plan_id.max(remote.next_plan_id),
+        breaks: crate::timer::break_record::merge(&local.breaks, &remote.breaks),
     };
     // Keep the id counters ahead of every id actually in use, so a merge can
     // never hand out an id that already belongs to a row. This matters more for
@@ -493,6 +494,7 @@ mod tests {
             next_rota_id: 0,
             plans: vec![],
             next_plan_id: 0,
+            breaks: vec![],
             inscriptions: vec![],
             decrees: vec![],
             verdicts: vec![],
@@ -984,4 +986,44 @@ mod tests {
         assert!(out.verdicts.is_empty());
         assert_eq!(merge(&out, &out).verdicts.len(), 0);
     }
+}
+
+#[test]
+fn merge_breaks_unions_by_start_and_kind() {
+    use crate::timer::break_record::{BreakRecord, BreakRel};
+    let mk = |started, kind| BreakRecord {
+        started_at: started,
+        ended_at: Some(started + 300),
+        planned_secs: 300,
+        kind,
+    };
+    let a = Data {
+        breaks: vec![mk(1000, BreakRel::Short), mk(5000, BreakRel::Short)],
+        ..Default::default()
+    };
+    let b = Data {
+        breaks: vec![mk(1000, BreakRel::Short), mk(7000, BreakRel::Long)],
+        ..Default::default()
+    };
+    let merged = merge(&a, &b);
+    assert_eq!(merged.breaks.len(), 3, "dedupe by key; keep distinct");
+}
+
+#[test]
+fn merge_breaks_complete_beats_open() {
+    use crate::timer::break_record::{begin, BreakRel};
+    let a = Data {
+        breaks: vec![begin(1000, 300, BreakRel::Short)],
+        ..Default::default()
+    };
+    let b = Data {
+        breaks: vec![crate::timer::break_record::close(
+            begin(1000, 300, BreakRel::Short),
+            1300,
+        )],
+        ..Default::default()
+    };
+    let merged = merge(&a, &b);
+    assert_eq!(merged.breaks.len(), 1);
+    assert_eq!(merged.breaks[0].ended_at, Some(1300));
 }

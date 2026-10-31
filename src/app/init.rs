@@ -2465,6 +2465,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             &st.data.decrees,
             &st.data.inscriptions,
             &st.data.verdicts,
+            &st.data.breaks,
             today,
             tz,
             break_secs,
@@ -2561,6 +2562,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         let recs = tick_shared.drain_sessions();
         let breaks = tick_shared.take_breaks();
+        let break_records = tick_shared.drain_break_records();
         let events = tick_shared.drain_events();
         let volume = tick_app.settings.lock().unwrap().sound_volume;
         if !events.is_empty() {
@@ -2629,6 +2631,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         } else if breaks > 0 && tick_app.settings.lock().unwrap().sound_enabled {
             sound::play(&tick_sounds_rest, volume);
+        }
+
+        if !break_records.is_empty() {
+            let mut st = tick_app.store.lock().unwrap();
+            st.add_breaks(&break_records);
+            // A completed break is part of the user's history; sync it so the
+            // weekly review can read the same breaks on the other device.
+            tick_app.cloud.mark_dirty();
         }
 
         if let Some(win) = tick_weak.upgrade() {
