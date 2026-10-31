@@ -21,7 +21,6 @@
 //! week both have a measured value for it.
 
 use chrono::NaiveDate;
-use serde::{Deserialize, Serialize};
 
 /// How many weeks before the current one form the baseline mean.
 pub const TRAILING_WEEKS: usize = 4;
@@ -280,9 +279,8 @@ pub fn headline_label(d: &WeekDrift, locale_fa: bool) -> String {
     }
 }
 
-/// Gather up to [`MAX_WEEKS`] weeks ending at the week containing `today`,
-/// then produce the drift headline.
-pub fn compute_drift(
+/// Gather up to [`MAX_WEEKS`] weeks ending at the week containing `today`.
+pub fn gather_weeks(
     sessions: &[crate::state::store::SessionRecord],
     decrees: &[crate::journal::Decree],
     inscriptions: &[crate::journal::Inscription],
@@ -291,7 +289,7 @@ pub fn compute_drift(
     today: NaiveDate,
     tz_offset_secs: i32,
     planned_break_secs: u32,
-) -> Option<WeekDrift> {
+) -> Vec<WeekMetrics> {
     let current_start = crate::journal::weekly_review::week_bounds(today).start;
     let mut weeks = Vec::with_capacity(MAX_WEEKS);
     for i in 0..MAX_WEEKS {
@@ -307,7 +305,62 @@ pub fn compute_drift(
             planned_break_secs,
         ));
     }
-    drift(&weeks)
+    weeks
+}
+
+/// Total completed sessions across the baseline (all but the first) weeks.
+pub fn baseline_sessions(weeks: &[WeekMetrics]) -> u32 {
+    weeks.iter().skip(1).map(|w| w.sessions).sum()
+}
+
+/// Gather weeks, compute the drift headline, and report the baseline session
+/// total (the sample size behind the drift).
+pub fn analyze_weeks(
+    sessions: &[crate::state::store::SessionRecord],
+    decrees: &[crate::journal::Decree],
+    inscriptions: &[crate::journal::Inscription],
+    verdicts: &[crate::journal::Verdict],
+    breaks: &[crate::timer::break_record::BreakRecord],
+    today: NaiveDate,
+    tz_offset_secs: i32,
+    planned_break_secs: u32,
+) -> (Option<WeekDrift>, u32) {
+    let weeks = gather_weeks(
+        sessions,
+        decrees,
+        inscriptions,
+        verdicts,
+        breaks,
+        today,
+        tz_offset_secs,
+        planned_break_secs,
+    );
+    (drift(&weeks), baseline_sessions(&weeks))
+}
+
+/// Gather up to [`MAX_WEEKS`] weeks ending at the week containing `today`,
+/// then produce the drift headline.
+pub fn compute_drift(
+    sessions: &[crate::state::store::SessionRecord],
+    decrees: &[crate::journal::Decree],
+    inscriptions: &[crate::journal::Inscription],
+    verdicts: &[crate::journal::Verdict],
+    breaks: &[crate::timer::break_record::BreakRecord],
+    today: NaiveDate,
+    tz_offset_secs: i32,
+    planned_break_secs: u32,
+) -> Option<WeekDrift> {
+    analyze_weeks(
+        sessions,
+        decrees,
+        inscriptions,
+        verdicts,
+        breaks,
+        today,
+        tz_offset_secs,
+        planned_break_secs,
+    )
+    .0
 }
 
 #[cfg(test)]

@@ -608,6 +608,8 @@ pub struct WeeklyDigest {
     /// Week-over-week drift headline: which metric moved the most vs the
     /// trailing four-week average, and whether that is an improvement.
     pub drift: Option<crate::journal::week_drift::WeekDrift>,
+    /// Suggestions for next week (empty until the record is mature enough).
+    pub suggestions: Vec<crate::journal::prescription::Suggestion>,
 }
 
 /// Compose the week's full digest from the store's slices.
@@ -630,6 +632,7 @@ pub fn compose_weekly(
     today: NaiveDate,
     tz_offset_secs: i32,
     planned_break_secs: u32,
+    locale_fa: bool,
 ) -> WeeklyDigest {
     let review = build_week(
         sessions,
@@ -660,12 +663,51 @@ pub fn compose_weekly(
         tz_offset_secs,
         planned_break_secs,
     );
+    // The prescription reads pre-computed analytics: the calibration, the
+    // recorded break adherence, the honest hour (with its sample), the
+    // unjudged backlog, and the drift (with its baseline size).
+    let (drift_result, baseline_sessions) = crate::journal::week_drift::analyze_weeks(
+        sessions,
+        decrees,
+        inscriptions,
+        verdicts,
+        breaks,
+        today,
+        tz_offset_secs,
+        planned_break_secs,
+    );
+    let honest_hour = review
+        .summary
+        .honest_hours
+        .map(|h| h.best_kept_hour)
+        .flatten();
+    let honest_hour_samples = review
+        .summary
+        .honest_hours
+        .map(|h| h.best_kept_total)
+        .unwrap_or(0);
+    let input = crate::journal::prescription::PrescriptionInput {
+        calibration: &calibration,
+        break_adherence: review.summary.recorded_break_adherence.as_ref().or(
+            match review.summary.break_adherence.as_ref() {
+                Some(b) => Some(b),
+                None => None,
+            },
+        ),
+        honest_hour,
+        honest_hour_samples,
+        unjudged: review.summary.unjudged_blocks.len() as u32,
+        drift: drift_result.as_ref(),
+        drift_baseline_sessions: baseline_sessions,
+    };
+    let suggestions = crate::journal::prescription::prescribe(&input, locale_fa);
     WeeklyDigest {
         review,
         autopsy,
         calibration,
         top_obstructions: top,
         drift,
+        suggestions,
     }
 }
 
@@ -816,6 +858,20 @@ pub fn render_digest(digest: &WeeklyDigest, locale_fa: bool) -> String {
         out.push('\n');
     }
 
+    // 5. Suggestions for next week — the coach's line. Only present when the
+    // record is mature enough that a suggestion is honest.
+    if !digest.suggestions.is_empty() {
+        out.push_str(if fa {
+            "## پیشنهادها برای هفتهٔ آینده\n\n"
+        } else {
+            "## Suggestions for next week\n\n"
+        });
+        for s in &digest.suggestions {
+            out.push_str(&format!("  - {}\n", s.text));
+        }
+        out.push('\n');
+    }
+
     out
 }
 
@@ -849,6 +905,7 @@ pub fn write_digest_if_new(
         today,
         tz_offset_secs,
         planned_break_secs,
+        locale_fa,
     );
     let dir = crate::state::store::Store::data_dir().join("weekly");
     let filename = format!("digest-{}.md", digest.review.range.start);
@@ -1051,7 +1108,19 @@ mod tests {
 
     #[test]
     fn compose_weekly_empty_week_is_safe() {
-        let d = compose_weekly(&[], &[], &[], &[], &[], &[], &[], today(), 12600, 300);
+        let d = compose_weekly(
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            today(),
+            12600,
+            300,
+            false,
+        );
         assert!(d.review.blocks.is_empty());
         assert!(d.autopsy.is_empty());
         assert!(d.top_obstructions.is_empty());
@@ -1082,7 +1151,19 @@ mod tests {
             outcome: None,
             deleted: false,
         }];
-        let d = compose_weekly(&[], &[], &[], &[], &[], &[], &rota, today(), 12600, 300);
+        let d = compose_weekly(
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &rota,
+            today(),
+            12600,
+            300,
+            false,
+        );
         let (landed, abandoned, unreached) = crate::state::plan_autopsy::by_outcome(&d.autopsy);
         assert_eq!((landed, abandoned, unreached), (0, 0, 1));
         let md = render_digest(&d, false);
@@ -1115,6 +1196,7 @@ mod tests {
             today(),
             12600,
             300,
+            false,
         );
         assert!(d.calibration.sweet_spot.is_some() || d.calibration.total_rated >= 5);
         assert_eq!(d.top_obstructions[0].0, "no time");
@@ -1134,7 +1216,7 @@ mod tests {
 
     #[test]
     fn render_digest_persian_digits_when_locale_fa() {
-        let d = compose_weekly(&[], &[], &[], &[], &[], &[], &[], today(), 12600, 300);
+        let d = compose_weekly(&[], &[], &[], &[], &[], &[], &[], today(), 12600, 300, true);
         let md = render_digest(&d, true);
         assert!(md.contains("خلاصهٔ هفتهٔ"), "Persian title: {md}");
         assert!(md.contains("کالبدشکافی"), "Persian autopsy header");
@@ -1163,6 +1245,7 @@ mod tests {
             today(),
             12600,
             300,
+            false,
         );
         assert!(d.drift.is_some(), "a move from 0 to 6 sessions must drift");
         let md = render_digest(&d, false);
