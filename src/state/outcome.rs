@@ -187,6 +187,27 @@ impl DayTally {
     pub fn is_empty(&self) -> bool {
         self.planned == 0
     }
+
+    /// Plan fulfilment rate, 0.0–1.0: the share of the day's planned blocks
+    /// that became completed focus sessions.
+    ///
+    /// `None` when the day had no plans — an empty day is not a 0% day, any
+    /// more than it is a 100% one. A block the user deliberately put off and a
+    /// block that never started are both "not done", so fulfilment counts only
+    /// what actually landed; `done / planned` is the whole story.
+    ///
+    /// Intentionally exposed as a pure, unit-tested metric rather than wired
+    /// into a screen: the day card reads back what happened instead of grading
+    /// it, so a percentage has no home there yet. Callers (and future UI) use
+    /// this; nothing in the binary currently does.
+    #[allow(dead_code)]
+    pub fn fulfillment(&self) -> Option<f64> {
+        if self.planned == 0 {
+            None
+        } else {
+            Some(self.done as f64 / self.planned as f64)
+        }
+    }
 }
 
 /// Count a day's entries by outcome.
@@ -363,5 +384,50 @@ mod tests {
         for o in Outcome::ALL {
             assert_eq!(Outcome::parse(o.as_str()), Some(o));
         }
+    }
+
+    #[test]
+    fn fulfillment_is_none_when_there_were_no_plans() {
+        let t = DayTally::default();
+        assert_eq!(t.fulfillment(), None, "an empty day is not a 0% day");
+    }
+
+    #[test]
+    fn fulfillment_is_one_when_every_plan_landed() {
+        let t = DayTally {
+            planned: 4,
+            done: 4,
+            ..Default::default()
+        };
+        assert_eq!(t.fulfillment(), Some(1.0));
+    }
+
+    #[test]
+    fn fulfillment_counts_only_what_landed() {
+        // 5 planned: 3 done, 1 abandoned, 1 missed. Fulfilment is 3/5 — a
+        // block the user put off is still a block that did not land.
+        let t = DayTally {
+            planned: 5,
+            done: 3,
+            abandoned: 1,
+            missed: 1,
+            ..Default::default()
+        };
+        let f = t.fulfillment().unwrap();
+        assert!((f - 0.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn fulfillment_ignores_still_pending_blocks() {
+        // Pending blocks have not had their verdict yet; they are neither done
+        // nor failed, so they simply reduce the denominator's *potential* —
+        // the rate is still done over planned-for-the-day.
+        let t = DayTally {
+            planned: 4,
+            done: 2,
+            pending: 2,
+            ..Default::default()
+        };
+        assert_eq!(t.fulfillment(), Some(0.5));
     }
 }
