@@ -1185,7 +1185,6 @@ pub struct HonestyGap {
 pub fn honesty_vs_completion_gap(
     stats: &[HourVerdictStat; 24],
     sessions: &[SessionRecord],
-    tz_offset_secs: i32,
     min_samples: u32,
 ) -> Option<HonestyGap> {
     if sessions.is_empty() {
@@ -1209,6 +1208,106 @@ pub fn honesty_vs_completion_gap(
         most_honest_hour: most_honest,
         delta,
     })
+}
+
+/// The "when am I honest" answer, ready to render into a label.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct HourlyVerdictSummary {
+    /// The hour (0–23) with the highest kept/total ratio at or above the
+    /// minimum sample. None when no hour qualifies.
+    pub best_kept_hour: Option<u8>,
+    /// Kept count at the best hour (0 when `best_kept_hour` is None).
+    pub best_kept_kept: u32,
+    /// Total sessions at the best hour (0 when `best_kept_hour` is None).
+    pub best_kept_total: u32,
+    /// The busiest-vs-most-honest gap, when both exist.
+    pub gap: Option<HonestyGap>,
+}
+
+/// Wrap the three hourly-verdict probes into one summary the UI can render.
+pub fn hourly_verdict_summary(
+    verdicts: &[crate::journal::Verdict],
+    sessions: &[SessionRecord],
+    tz_offset_secs: i32,
+    min_samples: u32,
+) -> HourlyVerdictSummary {
+    let stats = verdict_by_hour(verdicts, sessions, tz_offset_secs);
+    let (best_kept_hour, best_kept_kept, best_kept_total) =
+        match best_kept_hour(&stats, min_samples) {
+            Some(h) => {
+                let s = &stats[h as usize];
+                (Some(h), s.kept, s.total)
+            }
+            None => (None, 0, 0),
+        };
+    let gap = honesty_vs_completion_gap(&stats, sessions, min_samples);
+    HourlyVerdictSummary {
+        best_kept_hour,
+        best_kept_kept,
+        best_kept_total,
+        gap,
+    }
+}
+
+/// "Most honest hour" label. Empty when there is no qualifying hour.
+///
+/// The hour and the kept/total counts render in Persian digits when
+/// `locale_fa` is set, matching the rest of the UI's num formatting.
+pub fn honest_hour_label(summary: &HourlyVerdictSummary, locale_fa: bool) -> String {
+    let Some(h) = summary.best_kept_hour else {
+        return String::new();
+    };
+    let num = |n: i64| {
+        if locale_fa {
+            crate::calendar::jalali::fa_num(n)
+        } else {
+            n.to_string()
+        }
+    };
+    if locale_fa {
+        format!(
+            "ساعت صادقانه: {} ({} از {})",
+            num(h as i64),
+            num(summary.best_kept_kept as i64),
+            num(summary.best_kept_total as i64)
+        )
+    } else {
+        format!(
+            "Most honest hour: {}:00 ({} of {})",
+            num(h as i64),
+            summary.best_kept_kept,
+            summary.best_kept_total
+        )
+    }
+}
+
+/// "Busiest hour ≠ most honest hour" warning. None when the two coincide or
+/// when there is no honest-hour data at all.
+pub fn honesty_gap_label(summary: &HourlyVerdictSummary, locale_fa: bool) -> Option<String> {
+    let gap = summary.gap?;
+    if gap.fastest_hour == gap.most_honest_hour {
+        return None;
+    }
+    let num = |n: i64| {
+        if locale_fa {
+            crate::calendar::jalali::fa_num(n)
+        } else {
+            n.to_string()
+        }
+    };
+    if locale_fa {
+        Some(format!(
+            "ساعت پرمشغله ({}) با ساعت صادقانه ({}) یکی نیست",
+            num(gap.fastest_hour as i64),
+            num(gap.most_honest_hour as i64)
+        ))
+    } else {
+        Some(format!(
+            "Busiest hour ({}) ≠ most honest hour ({})",
+            num(gap.fastest_hour as i64),
+            num(gap.most_honest_hour as i64)
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -1564,11 +1663,7 @@ mod tests {
 
     // --- verdict by hour ---
 
-    fn verdict_hour(
-        hour: u32,
-        kind: crate::journal::VerdictKind,
-        at: i64,
-    ) -> crate::journal::Verdict {
+    fn verdict_hour(kind: crate::journal::VerdictKind, at: i64) -> crate::journal::Verdict {
         crate::journal::verdict::declare(at, kind, at).unwrap()
     }
 
@@ -1586,8 +1681,8 @@ mod tests {
         let at2 = ts_for(2026, 10, 28, 12) + 60;
         let s = vec![sess(at1, 25), sess(at2, 25)];
         let v = vec![
-            verdict_hour(12, crate::journal::VerdictKind::Kept, at1),
-            verdict_hour(12, crate::journal::VerdictKind::Broken, at2),
+            verdict_hour(crate::journal::VerdictKind::Kept, at1),
+            verdict_hour(crate::journal::VerdictKind::Broken, at2),
         ];
         let stats = verdict_by_hour(&v, &s, 0);
         assert_eq!(stats[12].total, 2);
@@ -1599,7 +1694,7 @@ mod tests {
     fn verdict_by_hour_respects_tz_offset_iran_half_hour() {
         // A UTC noon session is 15:00 local in Iran (+03:30 → +12600s).
         let s = vec![rec(2026, 10, 28, 25)];
-        let v = vec![verdict_hour(15, crate::journal::VerdictKind::Kept, s[0].at)];
+        let v = vec![verdict_hour(crate::journal::VerdictKind::Kept, s[0].at)];
         let stats = verdict_by_hour(&v, &s, 12600);
         assert_eq!(stats[15].total, 1);
         assert_eq!(stats[12].total, 0, "UTC noon must bucket to local 15:00");
@@ -1682,7 +1777,7 @@ mod tests {
             ..Default::default()
         };
         let sessions = vec![rec(2026, 10, 28, 25)];
-        let gap = honesty_vs_completion_gap(&stats, &sessions, 0, 3).unwrap();
+        let gap = honesty_vs_completion_gap(&stats, &sessions, 3).unwrap();
         assert_eq!(gap.fastest_hour, 9);
         assert_eq!(gap.most_honest_hour, 15);
         assert_eq!(gap.delta, 6);
@@ -1691,6 +1786,86 @@ mod tests {
     #[test]
     fn honesty_vs_completion_gap_none_when_all_zero() {
         let stats = verdict_by_hour(&[], &[], 0);
-        assert!(honesty_vs_completion_gap(&stats, &[], 0, 3).is_none());
+        assert!(honesty_vs_completion_gap(&stats, &[], 3).is_none());
+    }
+
+    // --- hourly verdict summary (surfaced honest-hours) ---
+
+    #[test]
+    fn hourly_verdict_summary_returns_best_kept_hour() {
+        let at1 = ts_for(2026, 10, 28, 9);
+        let at2 = ts_for(2026, 10, 28, 9) + 60;
+        let at3 = ts_for(2026, 10, 28, 15);
+        let s = vec![sess(at1, 25), sess(at2, 25), sess(at3, 25)];
+        let v = vec![
+            verdict_hour(crate::journal::VerdictKind::Broken, at1),
+            verdict_hour(crate::journal::VerdictKind::Kept, at2),
+            verdict_hour(crate::journal::VerdictKind::Kept, at3),
+        ];
+        let sum = hourly_verdict_summary(&v, &s, 0, 1);
+        assert_eq!(sum.best_kept_hour, Some(15));
+        assert_eq!(sum.best_kept_kept, 1);
+        assert_eq!(sum.best_kept_total, 1);
+        assert_eq!(sum.gap.unwrap().most_honest_hour, 15);
+    }
+
+    #[test]
+    fn hourly_verdict_summary_none_below_min_samples() {
+        let s = vec![rec(2026, 10, 28, 25)];
+        let sum = hourly_verdict_summary(&[], &s, 0, 5);
+        assert_eq!(sum.best_kept_hour, None);
+        assert_eq!(honest_hour_label(&sum, false), "");
+    }
+
+    #[test]
+    fn honest_hour_label_persian_digits_when_locale_fa() {
+        let mut sum = HourlyVerdictSummary::default();
+        sum.best_kept_hour = Some(9);
+        sum.best_kept_kept = 4;
+        sum.best_kept_total = 5;
+        let fa = honest_hour_label(&sum, true);
+        assert!(fa.contains('۹'), "Persian digit for 9: {fa}");
+        assert!(fa.contains('۴'), "Persian digit for 4: {fa}");
+        assert!(fa.contains('۵'), "Persian digit for 5: {fa}");
+        let en = honest_hour_label(&sum, false);
+        assert!(en.contains("9:00"), "English hour: {en}");
+    }
+
+    #[test]
+    fn honesty_gap_label_none_when_hours_match() {
+        let mut sum = HourlyVerdictSummary::default();
+        sum.gap = Some(HonestyGap {
+            fastest_hour: 9,
+            most_honest_hour: 9,
+            delta: 0,
+        });
+        assert!(honesty_gap_label(&sum, false).is_none());
+        assert!(honesty_gap_label(&sum, true).is_none());
+    }
+
+    #[test]
+    fn honesty_gap_label_present_when_productive_and_honest_differ() {
+        let mut sum = HourlyVerdictSummary::default();
+        sum.gap = Some(HonestyGap {
+            fastest_hour: 9,
+            most_honest_hour: 15,
+            delta: 6,
+        });
+        let en = honesty_gap_label(&sum, false).unwrap();
+        assert!(en.contains('9'));
+        assert!(en.contains("15"));
+        let fa = honesty_gap_label(&sum, true).unwrap();
+        assert!(fa.contains('۹'));
+        assert!(fa.contains("۱۵"));
+    }
+
+    #[test]
+    fn hourly_verdict_summary_respects_iran_half_hour_offset() {
+        // UTC noon is 15:00 local in Iran (+03:30 = +12600s).
+        let at = ts_for(2026, 10, 28, 12);
+        let s = vec![sess(at, 25)];
+        let v = vec![verdict_hour(crate::journal::VerdictKind::Kept, at)];
+        let sum = hourly_verdict_summary(&v, &s, 12600, 1);
+        assert_eq!(sum.best_kept_hour, Some(15));
     }
 }

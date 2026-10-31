@@ -1644,6 +1644,38 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
     win.set_report_has_prev(r.has_prev);
     win.set_report_empty(r.sessions == 0);
 
+    // Honest hours: the hour the user was most reliable this period. Uses the
+    // same range as the report (so it cannot disagree with the chart about
+    // which span is in view), the same local-hour bucketing, and the verdicts
+    // that belong to the sessions in view.
+    {
+        let range = stats::bounds(period, offset, today, earliest);
+        let in_range: Vec<store::SessionRecord> = st
+            .data
+            .sessions
+            .iter()
+            .filter(|s| {
+                chrono::DateTime::from_timestamp(s.at, 0)
+                    .map(|d| {
+                        let local = d.with_timezone(&chrono::Local).date_naive();
+                        range.contains(local)
+                    })
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+        let summary = stats::hourly_verdict_summary(
+            &st.data.verdicts,
+            &in_range,
+            stats::local_tz_offset_secs(),
+            3,
+        );
+        win.set_report_honest_hour(SharedString::from(stats::honest_hour_label(&summary, en)));
+        win.set_report_honest_gap(SharedString::from(
+            stats::honesty_gap_label(&summary, en).unwrap_or_default(),
+        ));
+    }
+
     // The chart. Bars are normalised to the peak so a quiet week still reads as
     // a shape rather than as seven invisible stubs; an all-zero span keeps a
     // floor so the baseline is still visible.

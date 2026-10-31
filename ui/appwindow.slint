@@ -1978,6 +1978,8 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in property <int> report-consistency: 0;
     in property <int> report-best: 0;
     in property <string> report-best-label: "";
+    in property <string> report-honest-hour: "";
+    in property <string> report-honest-gap: "";
     in property <int> report-streak: 0;
     in property <int> report-longest: 0;
     in property <int> report-prev-minutes: 0;
@@ -4556,6 +4558,19 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     color: Palette.text-faint;
                                     horizontal-alignment: i == 0 ? start : (i == 4 ? end : center);
                                 }
+                            }
+
+                            if root.report-honest-hour != "" : Text {
+                                text: root.report-honest-hour;
+                                font-size: Type.caption;
+                                color: Palette.text-dim;
+                                wrap: word-wrap;
+                            }
+                            if root.report-honest-gap != "" : Text {
+                                text: root.report-honest-gap;
+                                font-size: Type.caption;
+                                color: Palette.text-faint;
+                                wrap: word-wrap;
                             }
                         }
                     }

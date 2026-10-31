@@ -18,7 +18,10 @@
 
 use crate::journal::{Decree, Inscription, Verdict, VerdictKind};
 use crate::state::store::SessionRecord;
-use crate::stats::report::{best_focus_window, break_adherence, BreakAdherence, HourWindow, Range};
+use crate::stats::report::{
+    best_focus_window, break_adherence, honest_hour_label, honesty_gap_label,
+    hourly_verdict_summary, BreakAdherence, HourWindow, Range,
+};
 use chrono::{Datelike, NaiveDate};
 
 /// One block's worth of the week, as it reads back.
@@ -59,6 +62,9 @@ pub struct WeeklySummary {
     /// Promises written repeatedly across the last 30 days and never kept
     /// (3+ occurrences, no Kept verdict).
     pub standing_promises: Vec<crate::journal::standing_promise::StandingPromise>,
+    /// The hour the user was most honest this week, when enough sessions were
+    /// judged. None until there is a qualifying sample.
+    pub honest_hours: Option<crate::stats::report::HourlyVerdictSummary>,
 }
 
 /// The whole week, ready to render.
@@ -195,6 +201,11 @@ pub fn build_week(
             ctx.decrees = decrees.to_vec();
             ctx.verdicts = verdicts.to_vec();
             crate::journal::standing_promise::standing_promises(&ctx, end_of_week, 30 * 86_400, 3)
+        },
+        honest_hours: {
+            let all: Vec<SessionRecord> = week_sessions.iter().map(|s| (**s).clone()).collect();
+            let sum = hourly_verdict_summary(verdicts, &all, tz_offset_secs, 3);
+            (sum.best_kept_hour.is_some()).then_some(sum)
         },
     };
 
@@ -340,7 +351,7 @@ fn render_summary(review: &WeeklyReview, fa: bool) -> String {
             tokens.join(", ")
         ));
     }
-    if !s.standing_promises.is_empty() {
+    if crate::journal::standing_promise::has_stood_unmet(&s.standing_promises) {
         out.push_str(&format!(
             "{}\n",
             if fa {
@@ -360,6 +371,15 @@ fn render_summary(review: &WeeklyReview, fa: bool) -> String {
                     "unmet"
                 }
             ));
+        }
+    }
+    if let Some(h) = &s.honest_hours {
+        let honest = honest_hour_label(h, fa);
+        if !honest.is_empty() {
+            out.push_str(&format!("{}\n", honest));
+        }
+        if let Some(gap) = honesty_gap_label(h, fa) {
+            out.push_str(&format!("  {gap}\n"));
         }
     }
     out
@@ -464,7 +484,7 @@ pub fn write_if_new(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::journal::{decree, inscription};
+    use crate::journal::{decree, inscription, verdict, VerdictKind};
 
     /// 2026-10-31 is a Saturday (the start of an Iranian week).
     const SAT: i64 = 1_793_431_800;
@@ -564,5 +584,33 @@ mod tests {
         assert!(std::str::from_utf8(md.as_bytes()).is_ok());
         assert!(!md.contains("\r\n"), "must use LF line endings");
         assert!(!md.contains('\r'));
+    }
+
+    #[test]
+    fn render_markdown_includes_honest_hours_when_judged() {
+        // Three sessions with a Kept verdict in the same local hour → an
+        // honest hour emerges and shows in the markdown.
+        let s = vec![sess(SAT, 25), sess(SAT + 60, 25), sess(SAT + 120, 25)];
+        let v = vec![
+            verdict::declare(SAT, VerdictKind::Kept, SAT).unwrap(),
+            verdict::declare(SAT + 60, VerdictKind::Kept, SAT + 60).unwrap(),
+            verdict::declare(SAT + 120, VerdictKind::Kept, SAT + 120).unwrap(),
+        ];
+        let rev = build_week(&s, &[], &[], &v, today(), 12600, 300);
+        assert!(rev.summary.honest_hours.is_some());
+        let md = render_markdown(&rev, false);
+        assert!(
+            md.contains("Most honest hour"),
+            "markdown should surface honest hours: {md}"
+        );
+    }
+
+    #[test]
+    fn render_markdown_omits_honest_hours_without_verdicts() {
+        let s = vec![sess(SAT, 25)];
+        let rev = build_week(&s, &[], &[], &[], today(), 12600, 300);
+        assert!(rev.summary.honest_hours.is_none());
+        let md = render_markdown(&rev, false);
+        assert!(!md.contains("Most honest hour"));
     }
 }

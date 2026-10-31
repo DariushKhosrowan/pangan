@@ -9,7 +9,7 @@
 //!
 //! Pure: takes slices and explicit parameters, no I/O, no clock reads.
 
-use crate::journal::{Decree, Verdict, VerdictKind};
+use crate::journal::{Verdict, VerdictKind};
 use crate::state::store::Data;
 
 /// One intention that has been repeated and not kept.
@@ -133,8 +133,7 @@ pub fn has_stood_unmet(promises: &[StandingPromise]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::journal::decree;
-    use crate::journal::verdict;
+    use crate::journal::{decree, verdict, Decree};
 
     const NOW: i64 = 1_793_431_800;
 
