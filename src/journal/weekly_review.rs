@@ -588,6 +588,257 @@ pub fn write_if_new(
     Some(path)
 }
 
+/// The week's full digest: the read-back plus every diagnostic that reads the
+/// same store.
+///
+/// The `WeeklyReview` is the week's narrative; the rest are the analytics that
+/// have no home of their own yet. The digest is what puts them all on one
+/// page, so the user can face the whole week — not just the blocks.
+#[derive(Clone, Debug)]
+pub struct WeeklyDigest {
+    /// The week's read-back (blocks, summary lines).
+    pub review: WeeklyReview,
+    /// Plan autopsy: what became of every planned block in the week.
+    pub autopsy: Vec<crate::state::plan_autopsy::AutopsyRow>,
+    /// Duration calibration across the whole record (not just the week — a
+    /// week rarely carries enough rated sessions to calibrate).
+    pub calibration: crate::stats::report::DurationCalibration,
+    /// The most common obstructions in the week, most frequent first.
+    pub top_obstructions: Vec<(String, u32)>,
+}
+
+/// Compose the week's full digest from the store's slices.
+///
+/// This is the single entry point that calls every pure analytics function in
+/// the codebase: the weekly review (`build_week`), the plan autopsy
+/// (`autopsy`), duration calibration (`duration_calibration`), recorded break
+/// adherence (inside `build_week`), unjudged blocks (inside `build_week`),
+/// and the top obstructions (`top_obstructions`). It exists so the diagnostics
+/// that were built and never wired reach the user in one artifact.
+#[allow(clippy::too_many_arguments)] // one record's worth of inputs, in one call
+pub fn compose_weekly(
+    sessions: &[SessionRecord],
+    decrees: &[Decree],
+    inscriptions: &[Inscription],
+    verdicts: &[Verdict],
+    breaks: &[crate::timer::break_record::BreakRecord],
+    obstructions: &[crate::journal::obstruction::Obstruction],
+    rota: &[crate::state::rota::RotaEntry],
+    today: NaiveDate,
+    tz_offset_secs: i32,
+    planned_break_secs: u32,
+) -> WeeklyDigest {
+    let review = build_week(
+        sessions,
+        decrees,
+        inscriptions,
+        verdicts,
+        breaks,
+        today,
+        tz_offset_secs,
+        planned_break_secs,
+    );
+    let from = review.range.start.format("%Y-%m-%d").to_string();
+    let to = review.range.end.format("%Y-%m-%d").to_string();
+    let today_s = today.format("%Y-%m-%d").to_string();
+    let autopsy =
+        crate::state::plan_autopsy::autopsy(rota, verdicts, obstructions, &from, &to, &today_s);
+    let calibration = crate::stats::report::duration_calibration(sessions, verdicts);
+    // Obstructions are keyed by timestamp; use the same UTC bucket as the week.
+    let (start_utc, end_utc) = week_utc_bounds(review.range, tz_offset_secs);
+    let top = crate::journal::obstruction::top_obstructions(obstructions, start_utc, end_utc, 5);
+    WeeklyDigest {
+        review,
+        autopsy,
+        calibration,
+        top_obstructions: top,
+    }
+}
+
+/// The week's [start, end] instant in UTC seconds under the given offset.
+fn week_utc_bounds(range: Range, tz_offset_secs: i32) -> (i64, i64) {
+    use chrono::TimeZone;
+    let offset = chrono::FixedOffset::east_opt(tz_offset_secs)
+        .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).unwrap());
+    let start = offset
+        .from_local_datetime(&chrono::NaiveDateTime::new(
+            range.start,
+            chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+        ))
+        .single()
+        .map(|dt| dt.timestamp())
+        .unwrap_or(0);
+    let end = offset
+        .from_local_datetime(&chrono::NaiveDateTime::new(
+            range.end,
+            chrono::NaiveTime::from_hms_opt(23, 59, 59).unwrap(),
+        ))
+        .single()
+        .map(|dt| dt.timestamp())
+        .unwrap_or(0);
+    (start, end.max(start))
+}
+
+/// Render the digest as a single Markdown document.
+pub fn render_digest(digest: &WeeklyDigest, locale_fa: bool) -> String {
+    let fa = locale_fa;
+    let mut out = String::new();
+
+    let title = if fa {
+        format!(
+            "# خلاصهٔ هفتهٔ {}\n\n",
+            crate::calendar::jalali::fa_num(digest.review.range.start.year() as i64)
+        )
+    } else {
+        format!(
+            "# Weekly digest — week of {}\n\n",
+            digest.review.range.start
+        )
+    };
+    out.push_str(&title);
+
+    // 1. The read-back (blocks + summary).
+    out.push_str(&render_markdown(&digest.review, fa));
+    out.push('\n');
+
+    // 2. Plan autopsy: what became of what was planned.
+    let (landed, abandoned, unreached) = crate::state::plan_autopsy::by_outcome(&digest.autopsy);
+    let num = |n: i64| {
+        if fa {
+            crate::calendar::jalali::fa_num(n)
+        } else {
+            n.to_string()
+        }
+    };
+    out.push_str(if fa {
+        "## کالبدشکافی برنامه‌ها\n\n"
+    } else {
+        "## Plan autopsy\n\n"
+    });
+    out.push_str(&format!(
+        "{} **{}** · {} **{}** · {} **{}**\n\n",
+        if fa { "فرود" } else { "Landed" },
+        num(landed as i64),
+        if fa { "رها" } else { "Abandoned" },
+        num(abandoned as i64),
+        if fa { "نرسیده" } else { "Unreached" },
+        num(unreached as i64),
+    ));
+    // The abandoned and unreached blocks, called out explicitly.
+    let missed: Vec<&crate::state::plan_autopsy::AutopsyRow> = digest
+        .autopsy
+        .iter()
+        .filter(|r| r.outcome != crate::state::plan_autopsy::AutopsyOutcome::Landed)
+        .collect();
+    if missed.is_empty() {
+        out.push_str(if fa {
+            "هیچ برنامه‌ای ناقص نمانده است.\n\n"
+        } else {
+            "No planned block went unfulfilled.\n\n"
+        });
+    } else {
+        for r in missed.iter().take(8) {
+            let parsed = chrono::NaiveDate::parse_from_str(&r.day, "%Y-%m-%d");
+            let date = match parsed {
+                Ok(d) => crate::stats::report::jalali_label(d, !fa, true),
+                Err(_) => r.day.clone(),
+            };
+            let label = match r.outcome {
+                crate::state::plan_autopsy::AutopsyOutcome::Abandoned => {
+                    if fa {
+                        "رها شده"
+                    } else {
+                        "abandoned"
+                    }
+                }
+                _ => {
+                    if fa {
+                        "نرسیده"
+                    } else {
+                        "unreached"
+                    }
+                }
+            };
+            out.push_str(&format!("  - {} · {} — {}\n", date, r.label, label,));
+        }
+        out.push('\n');
+    }
+
+    // 3. Duration calibration (lifetime).
+    out.push_str(if fa {
+        "## کالیبراسیون طول\n\n"
+    } else {
+        "## Duration calibration\n\n"
+    });
+    out.push_str(&crate::stats::report::calibration_label(
+        &digest.calibration,
+        fa,
+    ));
+    out.push_str("\n\n");
+
+    // 4. Top obstructions.
+    if !digest.top_obstructions.is_empty() {
+        out.push_str(if fa {
+            "## موانع پرتکرار\n\n"
+        } else {
+            "## Most common obstructions\n\n"
+        });
+        for (text, count) in digest.top_obstructions.iter().take(5) {
+            out.push_str(&format!(
+                "  - {} ({}×)\n",
+                text,
+                crate::calendar::jalali::fa_num(*count as i64),
+            ));
+        }
+        out.push('\n');
+    }
+
+    out
+}
+
+/// Write the week's digest to a file, once per week.
+///
+/// Reuses the same convention as [`write_if_new`]: a fixed file per week,
+/// written only when it doesn't exist. This is the scheduled hook that finally
+/// delivers the diagnostics to the user.
+#[allow(clippy::too_many_arguments)] // one record's worth of inputs, in one call
+pub fn write_digest_if_new(
+    sessions: &[SessionRecord],
+    decrees: &[Decree],
+    inscriptions: &[Inscription],
+    verdicts: &[Verdict],
+    breaks: &[crate::timer::break_record::BreakRecord],
+    obstructions: &[crate::journal::obstruction::Obstruction],
+    rota: &[crate::state::rota::RotaEntry],
+    today: NaiveDate,
+    tz_offset_secs: i32,
+    planned_break_secs: u32,
+    locale_fa: bool,
+) -> Option<std::path::PathBuf> {
+    let digest = compose_weekly(
+        sessions,
+        decrees,
+        inscriptions,
+        verdicts,
+        breaks,
+        obstructions,
+        rota,
+        today,
+        tz_offset_secs,
+        planned_break_secs,
+    );
+    let dir = crate::state::store::Store::data_dir().join("weekly");
+    let filename = format!("digest-{}.md", digest.review.range.start);
+    let path = dir.join(&filename);
+    if path.exists() {
+        return None;
+    }
+    let md = render_digest(&digest, locale_fa);
+    std::fs::create_dir_all(&dir).ok()?;
+    crate::state::atomic_file::atomic_write(&path, md.as_bytes()).ok()?;
+    Some(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -771,5 +1022,101 @@ mod tests {
         let md = render_markdown(&rev, false);
         assert!(md.contains("Unjudged blocks:"), "section header appears");
         assert!(md.contains("had a decree"), "spoken-for block is flagged");
+    }
+
+    // --- Weekly dig digest ---
+
+    #[test]
+    fn compose_weekly_empty_week_is_safe() {
+        let d = compose_weekly(&[], &[], &[], &[], &[], &[], &[], today(), 12600, 300);
+        assert!(d.review.blocks.is_empty());
+        assert!(d.autopsy.is_empty());
+        assert!(d.top_obstructions.is_empty());
+        // Empty week still renders without panicking.
+        let md = render_digest(&d, false);
+        assert!(md.contains("Weekly digest"), "title renders: {md}");
+        assert!(md.contains("Plan autopsy"), "autopsy section renders");
+        assert!(
+            md.contains("Duration calibration"),
+            "calibration section renders"
+        );
+        assert!(md.contains("No planned block went unfulfilled"));
+    }
+
+    #[test]
+    fn compose_weekly_includes_autopsy_counts() {
+        // One planned block in the week that never produced a session → unreached.
+        let rota = vec![crate::state::rota::RotaEntry {
+            id: 1,
+            day: today().format("%Y-%m-%d").to_string(),
+            label: "work".to_string(),
+            task_id: None,
+            decree: String::new(),
+            minutes: 25,
+            created_at: SAT,
+            opened_at: 0,
+            session_at: 0,
+            outcome: None,
+            deleted: false,
+        }];
+        let d = compose_weekly(&[], &[], &[], &[], &[], &[], &rota, today(), 12600, 300);
+        let (landed, abandoned, unreached) = crate::state::plan_autopsy::by_outcome(&d.autopsy);
+        assert_eq!((landed, abandoned, unreached), (0, 0, 1));
+        let md = render_digest(&d, false);
+        assert!(md.contains("Unreached **1**"), "unreached count: {md}");
+        assert!(md.contains("work"), "the missed block label appears");
+    }
+
+    #[test]
+    fn compose_weekly_includes_calibration_and_obstructions() {
+        // Enough rated sessions to calibrate (5+ in one bucket).
+        let sessions: Vec<SessionRecord> = (0..6).map(|i| sess(SAT + i * 60, 25)).collect();
+        let verdicts: Vec<crate::journal::Verdict> = sessions
+            .iter()
+            .map(|s| verdict::declare(s.at, crate::journal::VerdictKind::Kept, s.at).unwrap())
+            .collect();
+        let obstructions = vec![crate::journal::obstruction::Obstruction {
+            session_at: SAT,
+            text: "no time".to_string(),
+            created_at: SAT,
+            deleted: false,
+        }];
+        let d = compose_weekly(
+            &sessions,
+            &[],
+            &[],
+            &verdicts,
+            &[],
+            &obstructions,
+            &[],
+            today(),
+            12600,
+            300,
+        );
+        assert!(d.calibration.sweet_spot.is_some() || d.calibration.total_rated >= 5);
+        assert_eq!(d.top_obstructions[0].0, "no time");
+        let md = render_digest(&d, false);
+        assert!(
+            md.contains("Stable across all lengths")
+                || md.contains("honest ceiling")
+                || md.contains("sweet")
+                || md.contains("One block length")
+        );
+        assert!(
+            md.contains("Most common obstructions"),
+            "obstruction section: {md}"
+        );
+        assert!(md.contains("no time"));
+    }
+
+    #[test]
+    fn render_digest_persian_digits_when_locale_fa() {
+        let d = compose_weekly(&[], &[], &[], &[], &[], &[], &[], today(), 12600, 300);
+        let md = render_digest(&d, true);
+        assert!(md.contains("خلاصهٔ هفتهٔ"), "Persian title: {md}");
+        assert!(md.contains("کالبدشکافی"), "Persian autopsy header");
+        assert!(md.contains("کالیبراسیون"), "Persian calibration header");
+        // No ASCII digit in the landed count line (0 → ۰).
+        assert!(md.contains("۰"), "Persian glyph for zero appears");
     }
 }

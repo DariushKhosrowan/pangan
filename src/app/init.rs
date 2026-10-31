@@ -2473,6 +2473,24 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         ) {
             crate::log::info(&format!("wrote weekly review to {}", path.display()));
         }
+        // Same once-per-week convention for the full digest: the read-back plus
+        // the diagnostics that have no UI home yet (plan autopsy, calibration,
+        // top obstructions). It is a fixed document for a fixed week.
+        if let Some(path) = crate::journal::weekly_review::write_digest_if_new(
+            &st.data.sessions,
+            &st.data.decrees,
+            &st.data.inscriptions,
+            &st.data.verdicts,
+            &st.data.breaks,
+            &st.data.obstructions,
+            &st.data.rota,
+            today,
+            tz,
+            break_secs,
+            settings.lang != crate::state::settings::LANG_FA,
+        ) {
+            crate::log::info(&format!("wrote weekly digest to {}", path.display()));
+        }
     }
 
     // If the app died mid-focus-block, bring the clock back where it was.
