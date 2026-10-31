@@ -489,6 +489,14 @@ const SPACES: [&str; 2] = ["appDataFolder", "drive"];
 /// with the other must still find their data rather than silently starting a
 /// second, empty file.
 fn find_file_meta(token: &str, name: &str) -> Result<Option<RemoteFile>, String> {
+    // Whether a space was blocked by scope. Used only to give a clear error
+    // when *every* space is blocked (see the end of the function).
+    let mut any_space_problem = false;
+    // Whether at least one space listing succeeded. If one space is blocked by
+    // scope but another succeeds, the answer is just "the file may or may not
+    // exist" — the scope problem is not an error.
+    let mut saw_successful_listing = false;
+
     for space in SPACES {
         let url = format!(
             "{}/drive/v3/files?spaces={}&fields=files(id,name,version,etag)&q=name%20%3D%20%27{}%27",
@@ -514,20 +522,31 @@ fn find_file_meta(token: &str, name: &str) -> Result<Option<RemoteFile>, String>
         if status != 200 {
             let reason = google_reason(&text);
             // A space this token cannot see is not fatal; try the next one.
-            // But an error that applies to *every* space (the Drive API being
-            // disabled, a revoked scope) must be reported, not silently turned
-            // into "no file yet" — that made the app try to create a file after
-            // a read that had actually failed, and report the create's error
-            // instead of the read's.
+            // This is the reality of the two kinds of sign-in: a device-flow
+            // token carries `drive.file` and cannot query the hidden
+            // appDataFolder, while a loopback token carries `drive.appdata`
+            // and cannot list the visible Drive. Both come back as a 403
+            // with a message about insufficient scopes (or about appDataFolder
+            // itself), and it means "use the other space", not "give up".
+            //
+            // But an error that applies to *every* space — the Drive API being
+            // disabled, a revoked credential — must be reported, not silently
+            // turned into "no file yet": that made the app try to create a
+            // file after a read that had actually failed, and report the
+            // create's error instead of the read's.
             if status == 401 || status == 403 {
-                let is_space_problem = reason.to_lowercase().contains("appdatafolder");
+                let lower = reason.to_lowercase();
+                let is_space_problem = lower.contains("appdatafolder")
+                    || lower.contains("insufficient authentication scopes");
                 if is_space_problem {
+                    any_space_problem = true;
                     continue;
                 }
                 return Err(format!("drive list failed: HTTP {status}: {reason}"));
             }
             continue;
         }
+        saw_successful_listing = true;
         let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
             continue;
         };
@@ -539,6 +558,16 @@ fn find_file_meta(token: &str, name: &str) -> Result<Option<RemoteFile>, String>
                 space: space.to_string(),
             }));
         }
+    }
+
+    // Every space was blocked by scope and none listed successfully. The token
+    // has no usable Drive access, which is a configuration problem — say so
+    // plainly rather than pretending the sync file simply does not exist yet.
+    if !saw_successful_listing && any_space_problem {
+        return Err(
+            "this Google account has no Drive access with the granted scopes; reconnect and grant Drive permission"
+                .into(),
+        );
     }
     Ok(None)
 }
@@ -913,7 +942,18 @@ pub(crate) mod drive_roundtrip {
         version: u64,
     }
 
-    fn fake_drive() -> (String, Arc<Mutex<Option<String>>>) {
+        fn fake_drive() -> (String, Arc<Mutex<Option<String>>>) {
+        fake_drive_impl(None)
+    }
+
+    /// A fake Drive that refuses listings in one space with a real-looking
+    /// 403 "insufficient authentication scopes" body, the way Google answers
+    /// a device-flow `drive.file` token that asks for `appDataFolder`.
+    fn fake_drive_for_scope_block(blocked: &'static str) -> (String, Arc<Mutex<Option<String>>>) {
+        fake_drive_impl(Some(blocked))
+    }
+
+    fn fake_drive_impl(blocked_space: Option<&'static str>) -> (String, Arc<Mutex<Option<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let stored: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -922,6 +962,7 @@ pub(crate) mod drive_roundtrip {
         let file_state = Arc::clone(&file);
 
         std::thread::spawn(move || {
+            let blocked_space = blocked_space;
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { continue };
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
@@ -1015,23 +1056,55 @@ pub(crate) mod drive_roundtrip {
                         None => ("404 Not Found", String::new()),
                     }
                 } else if path.contains("/drive/v3/files?") {
-                    let guard = file_state.lock().unwrap();
-                    // Built with serde_json rather than a format string: the
-                    // etag has to be a JSON string containing quotes, and
-                    // hand-escaping that is exactly the kind of thing that
-                    // looks right and produces invalid JSON.
-                    let payload = match guard.as_ref() {
-                        Some(f) => serde_json::json!({
-                            "files": [{
-                                "id": "file-1",
-                                "name": "pangan-sync.json",
-                                "version": f.version.to_string(),
-                                "etag": format!("\"v{}\"", f.version),
-                            }]
-                        }),
-                        None => serde_json::json!({ "files": [] }),
-                    };
-                    ("200 OK", payload.to_string())
+                    // A blocked space is answered exactly as Google answers a
+                    // token that lacks the scope for that space: 403 with a
+                    // reason that mentions the scopes. The client must treat
+                    // this as "use a different space" rather than giving up.
+                    let req_space = path
+                        .split("spaces=")
+                        .nth(1)
+                        .and_then(|s| s.split('&').next())
+                        .unwrap_or("");
+                    if let Some(blocked) = blocked_space {
+                        if req_space == blocked {
+                            let payload = serde_json::json!({
+                                "error": {
+                                    "code": 403,
+                                    "message": "Request had insufficient authentication scopes.",
+                                    "status": "PERMISSION_DENIED",
+                                }
+                            });
+                            ("403 Forbidden", payload.to_string())
+                        } else {
+                            let guard = file_state.lock().unwrap();
+                            let payload = match guard.as_ref() {
+                                Some(f) => serde_json::json!({
+                                    "files": [{
+                                        "id": "file-1",
+                                        "name": "pangan-sync.json",
+                                        "version": f.version.to_string(),
+                                        "etag": format!("\"v{}\"", f.version),
+                                    }]
+                                }),
+                                None => serde_json::json!({ "files": [] }),
+                            };
+                            ("200 OK", payload.to_string())
+                        }
+                    } else {
+                        let guard = file_state.lock().unwrap();
+                        let payload = match guard.as_ref() {
+                            Some(f) => serde_json::json!({
+                                "files": [{
+                                    "id": "file-1",
+                                    "name": "pangan-sync.json",
+                                    "version": f.version.to_string(),
+                                    "etag": format!("\"v{}\"", f.version),
+                                }]
+                            }),
+                            None => serde_json::json!({ "files": [] }),
+                        };
+                        ("200 OK", payload.to_string())
+                    }
                 } else {
                     let _ = method;
                     ("404 Not Found", String::new())
@@ -1048,6 +1121,7 @@ pub(crate) mod drive_roundtrip {
 
         (format!("http://{addr}"), stored)
     }
+
 
     #[test]
     fn upload_then_download_returns_exactly_what_was_sent() {
@@ -1068,6 +1142,29 @@ pub(crate) mod drive_roundtrip {
         let payload2 = r#"{"sessions":[],"tasks":[],"next_task_id":9}"#;
         upload("tok", payload2).unwrap();
         assert_eq!(download("tok").unwrap().as_deref(), Some(payload2));
+
+        std::env::remove_var("PANGAN_DRIVE_BASE");
+    }
+
+    /// The regression that broke real sync: a device-flow token has `drive.file`
+    /// scope, which Google refuses for the hidden appDataFolder with a 403
+    /// that says "insufficient authentication scopes". The client used to
+    /// treat that as fatal and abort the whole sync. It must fall through to
+    /// the visible `drive` space instead, so a device-flow sign-in still works.
+    #[test]
+    fn device_flow_token_falls_back_when_appdatafolder_is_scope_blocked() {
+        let _guard = DRIVE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let (base, store) = fake_drive_for_scope_block("appDataFolder");
+        std::env::set_var("PANGAN_DRIVE_BASE", &base);
+
+        let payload = r#"{"sessions":[{"at":100,"minutes":25}],"tasks":[],"next_task_id":1}"#;
+
+        // Create succeeds because the drive space is reachable.
+        upload("tok", payload).unwrap();
+        assert_eq!(store.lock().unwrap().as_deref(), Some(payload));
+
+        // And the read-back falls through the blocked space to find the file.
+        assert_eq!(download("tok").unwrap().as_deref(), Some(payload));
 
         std::env::remove_var("PANGAN_DRIVE_BASE");
     }

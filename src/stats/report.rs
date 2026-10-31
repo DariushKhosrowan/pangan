@@ -13,7 +13,7 @@
 
 use crate::calendar::jalali as calendar;
 use crate::state::store::SessionRecord;
-use chrono::{Datelike, Duration, Local, NaiveDate};
+use chrono::{Datelike, Duration, Local, NaiveDate, Offset};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Period {
@@ -238,6 +238,11 @@ pub struct ReportStats {
     /// the mini heat strip.
     pub daily: Vec<(NaiveDate, u64)>,
 
+    /// The user's most productive 3-hour window within this span, when enough
+    /// sessions exist to say anything at all (see `best_focus_window`). This
+    /// is the actionable "when should I schedule my hardest work" number.
+    pub best_hour_window: Option<HourWindow>,
+
     /// Whether the span contains today (so "streak" is the live one).
     pub contains_today: bool,
 }
@@ -362,7 +367,78 @@ fn minutes_label(total: u64, en: bool) -> String {
     }
 }
 
-/// The buckets for a span: hours for a day, days for a week or month, months
+/// The single most actionable stat the reports can offer: the time of day
+/// this user actually focuses best.
+///
+/// Pangan records a session only when it completes, so every session in the
+/// store is a *finished* focus block. The strongest stable signal for "when
+/// the user does their best work" is therefore where the most completed
+/// blocks land — a 3-hour window of the day that consistently gets the most
+/// sessions. This is the number to surface because it is derived from real
+/// history and is immediately actionable ("plan your hardest work for 9–11").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HourWindow {
+    /// The window's start hour, 0–23.
+    pub start_hour: u8,
+    /// The window's end hour (exclusive), start+3, 3–24.
+    pub end_hour: u8,
+    /// How many completed sessions fell inside the window.
+    pub sessions: u32,
+}
+
+/// Find the best 3-hour focus window over `sessions`.
+///
+/// A sliding 3-hour window (00:00–03:00, 01:00–04:00, …) is scored by how
+/// many completed sessions fall inside it. Ties are broken by session count,
+/// then by the earliest start hour, so the answer is deterministic. Returns
+/// `None` when the sample is too small to mean anything (< 10 sessions), so a
+/// fresh user does not get a misleading "best time" from two sessions.
+///
+/// `tz_offset_secs` shifts the raw UTC hour into the user's local hour before
+/// bucketing, so the window is in local time (the time a person would
+/// actually plan around).
+pub fn best_focus_window(sessions: &[SessionRecord], tz_offset_secs: i32) -> Option<HourWindow> {
+    if sessions.len() < 10 {
+        return None;
+    }
+    // Count completed sessions per local hour of day.
+    let mut per_hour = [0u32; 24];
+    for s in sessions {
+        let Some(h) = hour_of_local(s.at, tz_offset_secs) else { continue };
+        per_hour[h as usize] += 1;
+    }
+    // Sliding 3-hour window.
+    let mut best_sessions = 0u32;
+    let mut best_start = 0u8;
+    for start in 0..24 {
+        let mut acc = 0u32;
+        for k in 0..3 {
+            acc += per_hour[(start + k) % 24];
+        }
+        if acc > best_sessions {
+            best_sessions = acc;
+            best_start = start as u8;
+        }
+        // Ties keep the earlier start (strict > keeps the first).
+    }
+    if best_sessions == 0 {
+        return None;
+    }
+    Some(HourWindow {
+        start_hour: best_start,
+        end_hour: (best_start + 3) % 24,
+        sessions: best_sessions,
+    })
+}
+
+/// The local hour (0–23) of a Unix timestamp for a given UTC offset.
+fn hour_of_local(ts: i64, tz_offset_secs: i32) -> Option<u32> {
+    use chrono::Timelike;
+    let shifted = ts + tz_offset_secs as i64;
+    chrono::DateTime::from_timestamp(shifted, 0).map(|d| d.hour())
+}
+
+/// The bucket count for a span: hours for a day, days for a week or month, months
 /// for a year, and a rolling set of months for all-time.
 fn build_buckets(
     period: Period,
@@ -620,10 +696,12 @@ pub fn report_at(
     let mut prev_sessions = 0u64;
     let mut prev_days: HashSet<NaiveDate> = HashSet::new();
     let mut all_days: HashSet<NaiveDate> = HashSet::new();
+    let mut range_sessions: Vec<SessionRecord> = Vec::new();
     for s in sessions {
         let Some(d) = date_of(s.at) else { continue };
         all_days.insert(d);
         if range.contains(d) {
+            range_sessions.push(s.clone());
             let e = per_day.entry(d).or_insert((0, 0));
             e.0 += s.minutes;
             e.1 += 1;
@@ -704,6 +782,11 @@ pub fn report_at(
     let contains_today = range.contains(today);
     let streak = streak_ending_on(&all_days, today.min(range.end));
     let longest = longest_streak(&all_days, today);
+    // The best focus window is computed in local time, using the machine's
+    // current UTC offset so the raw UTC session stamps land in the hours the
+    // user actually lives in.
+    let tz = chrono::Local::now().offset().fix().local_minus_utc();
+    let best_hour_window = best_focus_window(&range_sessions, tz);
     ReportStats {
         period_label: period.label().to_string(),
         period_label_en: period.label_en().to_string(),
@@ -740,6 +823,7 @@ pub fn report_at(
         buckets,
         hours: per_hour.to_vec(),
         daily: per_day.iter().map(|(d, (m, _))| (*d, *m)).collect(),
+        best_hour_window,
         contains_today,
     }
 }
@@ -837,6 +921,12 @@ pub fn narrative(s: &ReportStats, en: bool) -> String {
             out.push_str(&format!(" ({})", s.best_day_label_en));
         }
         out.push('\n');
+        if let Some(win) = s.best_hour_window {
+            out.push_str(&format!(
+                "  Best focus window: {:02}:00–{:02}:00 ({} sessions)\n",
+                win.start_hour, win.end_hour, win.sessions
+            ));
+        }
         if s.has_prev {
             let arrow = if s.delta_pct >= 0.0 { "▲" } else { "▼" };
             out.push_str(&format!(
@@ -873,6 +963,14 @@ pub fn narrative(s: &ReportStats, en: bool) -> String {
             out.push_str(&format!(" ({})", s.best_day_label));
         }
         out.push('\n');
+        if let Some(win) = s.best_hour_window {
+            out.push_str(&format!(
+                "  بهترین بازهٔ تمرکز: {} تا {} ({} نشست)\n",
+                calendar::fa_num(win.start_hour as i64),
+                calendar::fa_num(win.end_hour as i64),
+                calendar::fa_num(win.sessions as i64)
+            ));
+        }
         if s.has_prev {
             let arrow = if s.delta_pct >= 0.0 { "▲" } else { "▼" };
             out.push_str(&format!(
@@ -1092,5 +1190,75 @@ mod tests {
         ] {
             assert_eq!(Period::from_index(p.index()), p);
         }
+    }
+
+    // ── best focus window ────────────────────────────────────────────────
+
+    fn sess_at_hour(hour: u32) -> SessionRecord {
+        SessionRecord {
+            at: ts_for(2026, 10, 28, hour),
+            minutes: 25,
+        }
+    }
+
+    #[test]
+    fn focus_window_is_none_below_the_minimum_sample() {
+        // Nine sessions are not enough to claim a "best time".
+        let s: Vec<SessionRecord> = (0..9).map(|_| sess_at_hour(10)).collect();
+        assert!(best_focus_window(&s, 0).is_none());
+    }
+
+    #[test]
+    fn focus_window_finds_the_densest_three_hour_block() {
+        // Five sessions at 10:00 and five at 11:00. The 3-hour window that
+        // holds both is 9–12 (also 10–13, 8–11, etc.), and ties resolve to
+        // the earliest start hour, so 9–12 wins.
+        let mut s: Vec<SessionRecord> = Vec::new();
+        for h in [10u32, 11] {
+            for _ in 0..5 {
+                s.push(sess_at_hour(h));
+            }
+        }
+        let w = best_focus_window(&s, 0).unwrap();
+        assert_eq!((w.start_hour, w.end_hour), (9, 12));
+        assert_eq!(w.sessions, 10);
+    }
+
+    #[test]
+    fn focus_window_respects_the_timezone_offset() {
+        // Ten sessions at 10:00 UTC. With a +3:30 offset (Iran) they land at
+        // 13:30 local, so every session falls in local hour 13. The 3-hour
+        // window covering it can start at 11, 12 or 13, and the earliest start
+        // wins the tie.
+        let s: Vec<SessionRecord> = (0..10).map(|_| sess_at_hour(10)).collect();
+        let w = best_focus_window(&s, 3 * 3600 + 30 * 60).unwrap();
+        assert_eq!((w.start_hour, w.end_hour), (11, 14));
+    }
+
+    #[test]
+    fn the_report_surfaces_the_best_focus_window() {
+        // Enough sessions today for the report to name a window. The exact
+        // local hour depends on the machine's timezone, so only the shape is
+        // asserted here: a window exists, it accounts for every session, and
+        // the narrative carries it in both languages.
+        let today = day(2026, 10, 28);
+        let mut s: Vec<SessionRecord> = Vec::new();
+        for h in 9..12 {
+            for _ in 0..4 {
+                s.push(sess_at_hour(h));
+            }
+        }
+        let r = report_at(&s, Period::Week, 0, today, None, false);
+        let w = r.best_hour_window.expect("a busy week must name a window");
+        assert_eq!(w.sessions, 12, "the window must count every session");
+        assert!(narrative(&r, false).contains("بهترین بازهٔ تمرکز"));
+        assert!(narrative(&r, true).contains("Best focus window"));
+    }
+
+    #[test]
+    fn empty_history_names_no_focus_window() {
+        let r = report_at(&[], Period::Month, 0, day(2026, 10, 28), None, false);
+        assert!(r.best_hour_window.is_none());
+        assert!(!narrative(&r, false).contains("بهترین بازهٔ تمرکز"));
     }
 }
