@@ -16,6 +16,7 @@
 //! `tz_offset_secs`, no I/O, no clock reads beyond what's passed in. The
 //! Markdown string is returned to the caller, which decides where to write it.
 
+use crate::journal::promise_quality::PromiseQuality;
 use crate::journal::{Decree, Inscription, Verdict, VerdictKind};
 use crate::state::store::SessionRecord;
 use crate::stats::bounce::{bounce_stats, BounceStats};
@@ -621,6 +622,9 @@ pub struct WeeklyDigest {
     /// Bounce rate across the trailing window: how fast the user returns to a
     /// kept block after a bad day. None until a recovery is measurable.
     pub bounce: Option<BounceStats>,
+    /// Promise quality: whether quantified decrees are kept at a different
+    /// rate than vague ones, and by how much. None until a judgment exists.
+    pub promise_quality: Option<PromiseQuality>,
 }
 
 /// Compose the week's full digest from the store's slices.
@@ -743,6 +747,7 @@ pub fn compose_weekly(
     );
     let break_quality = crate::timer::break_quality::break_quality(breaks, sessions, verdicts);
     let bounce = bounce_stats(sessions, verdicts, today, tz_offset_secs);
+    let promise_quality = crate::journal::promise_quality::promise_quality(decrees, verdicts);
     WeeklyDigest {
         review,
         autopsy,
@@ -753,6 +758,7 @@ pub fn compose_weekly(
         outcomes,
         break_quality,
         bounce,
+        promise_quality,
     }
 }
 
@@ -1090,6 +1096,71 @@ pub fn render_digest(digest: &WeeklyDigest, locale_fa: bool) -> String {
         out.push('\n');
     }
 
+    // 9. Promise quality — does how you phrase a promise predict whether the
+    // block lands? Quantified decrees (one that names a number) compared with
+    // vague ones, with lift as the headline. Only present once both groups
+    // have at least one judged decree.
+    if let Some(pq) = &digest.promise_quality {
+        out.push_str(if fa {
+            "## کیفیت عهد\n\n"
+        } else {
+            "## Promise quality\n\n"
+        });
+        let pct = |r: f32| (r * 100.0).round() as i64;
+        let fmt_group = |g: &crate::journal::promise_quality::PromiseGroup| match g.kept_rate() {
+            Some(r) => format!(
+                "{}٪ ({} از {})",
+                num(pct(r)),
+                num(g.kept as i64),
+                num(g.decrees as i64)
+            ),
+            None => "—".to_string(),
+        };
+        let q_line = if fa {
+            format!(
+                "> کمی: {} · غیرکمی: {}.\n",
+                fmt_group(&pq.quantified),
+                fmt_group(&pq.unquantified)
+            )
+        } else {
+            format!(
+                "> Quantified: {} · Vague: {}.\n",
+                fmt_group(&pq.quantified),
+                fmt_group(&pq.unquantified)
+            )
+        };
+        out.push_str(&q_line);
+        if let Some(lift) = pq.lift() {
+            let signed = lift * 100.0;
+            let line = if fa {
+                if signed >= 0.0 {
+                    format!(
+                        "> وعده‌های کمی {} درصد بیشتر نگه‌داشته می‌شوند.\n\n",
+                        num(signed.round() as i64)
+                    )
+                } else {
+                    format!(
+                        "> وعده‌های کمی {} درصد کمتر نگه‌داشته می‌شوند.\n\n",
+                        num((-signed).round() as i64)
+                    )
+                }
+            } else if signed >= 0.0 {
+                format!(
+                    "> Quantified promises are kept {}% more often.\n\n",
+                    signed.round() as i64
+                )
+            } else {
+                format!(
+                    "> Quantified promises are kept {}% less often.\n\n",
+                    (-signed).round() as i64
+                )
+            };
+            out.push_str(&line);
+        } else {
+            out.push('\n');
+        }
+    }
+
     out
 }
 
@@ -1319,6 +1390,76 @@ mod tests {
         assert!(
             !render_digest(&d0, false).contains("## Bounce rate"),
             "empty record renders no bounce"
+        );
+    }
+
+    #[test]
+    fn digest_renders_promise_quality_when_both_groups_judged() {
+        use crate::journal::VerdictKind;
+        // Quantified: "write 500 words" kept. Vague: "think" broken.
+        let mut sessions = Vec::new();
+        let mut decrees = Vec::new();
+        let mut verdicts = Vec::new();
+        for (i, (text, kind)) in [
+            ("write 500 words", VerdictKind::Kept),
+            ("think", VerdictKind::Broken),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let at = SAT - i as i64 * 86_400;
+            sessions.push(sess(at, 25));
+            decrees.push(crate::journal::decree::create(at, at - 60, text).unwrap());
+            verdicts.push(crate::journal::verdict::declare(at, kind, at).unwrap());
+        }
+
+        let d = compose_weekly(
+            &sessions,
+            &decrees,
+            &[],
+            &verdicts,
+            &[],
+            &[],
+            &[],
+            &[],
+            today(),
+            12600,
+            300,
+            false,
+        );
+        assert!(
+            d.promise_quality.is_some(),
+            "both groups judged → promise quality stats"
+        );
+        let md = render_digest(&d, false);
+        assert!(md.contains("## Promise quality"), "the section renders");
+        assert!(
+            md.contains("Quantified: 100٪"),
+            "quantified rate reported with Persian percent sign"
+        );
+        assert!(
+            md.contains("Quantified promises are kept 100% more often."),
+            "lift headline reported"
+        );
+
+        // Empty record stays silent.
+        let d0 = compose_weekly(
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            today(),
+            12600,
+            300,
+            false,
+        );
+        assert!(
+            !render_digest(&d0, false).contains("## Promise quality"),
+            "empty record renders no promise quality"
         );
     }
 
