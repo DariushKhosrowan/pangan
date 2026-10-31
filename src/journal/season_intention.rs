@@ -147,6 +147,27 @@ fn keep(candidate: &SeasonIntention, existing: &SeasonIntention) -> bool {
     candidate.id > existing.id
 }
 
+/// The rendered intention line for a season, if one is live.
+///
+/// Returns `None` when the season has no live intention (zero entries, or only
+/// tombstoned ones). Returns the localised one-line rendering otherwise: a
+/// simple phrase that can sit at the top of the season summary so the record
+/// opens with what it was for.
+pub fn intention_line(
+    rows: &[SeasonIntention],
+    jalali_year: i32,
+    season: usize,
+    fa: bool,
+) -> Option<String> {
+    let live = latest_live_for_season(rows, jalali_year, season)?;
+    let body = &live.body;
+    if fa {
+        Some(format!("قصد این فصل: {}", body))
+    } else {
+        Some(format!("This season's intention: {}", body))
+    }
+}
+
 /// Write the current season's intention file, once per season, when due.
 ///
 /// Follows the same convention as the season summary: a fixed file per season,
@@ -306,5 +327,32 @@ mod tests {
             intention(2, 1405, 0, 300, true),
         ];
         assert_eq!(latest_live_for_season(&rows, 1405, 0).unwrap().id, 1);
+    }
+
+    #[test]
+    fn intention_line_none_when_season_has_no_live_entry() {
+        // Zero entries → None.
+        assert!(intention_line(&[], 1405, 0, false).is_none());
+        // Only a tombstoned entry → None.
+        let rows = [intention(1, 1405, 0, 100, true)];
+        assert!(intention_line(&rows, 1405, 0, false).is_none());
+        // A different season's live entry → None for this season.
+        let rows = [intention(1, 1405, 1, 100, false)];
+        assert!(intention_line(&rows, 1405, 0, false).is_none());
+    }
+
+    #[test]
+    fn intention_line_renders_live_entry() {
+        let mut live = intention(1, 1405, 0, 200, false);
+        live.body = "finish the book".to_string();
+        let rows = [
+            intention(2, 1405, 0, 100, true), // tombstone ignored
+            live,
+        ];
+        let en = intention_line(&rows, 1405, 0, false).unwrap();
+        assert_eq!(en, "This season's intention: finish the book");
+        let fa = intention_line(&rows, 1405, 0, true).unwrap();
+        assert!(fa.contains("قصد این فصل"));
+        assert!(fa.contains("finish the book"));
     }
 }
