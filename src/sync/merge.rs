@@ -52,6 +52,7 @@ pub fn merge(local: &Data, remote: &Data) -> Data {
         inscriptions: merge_inscriptions(&local.inscriptions, &remote.inscriptions),
         decrees: merge_decrees(&local.decrees, &remote.decrees),
         verdicts: merge_verdicts(&local.verdicts, &remote.verdicts),
+        obstructions: merge_obstructions(&local.obstructions, &remote.obstructions),
         rota: merge_rota(&local.rota, &remote.rota),
         next_rota_id: local.next_rota_id.max(remote.next_rota_id),
         plans: merge_plans(&local.plans, &remote.plans),
@@ -320,6 +321,39 @@ fn newer_verdict(candidate: &Verdict, existing: &Verdict) -> bool {
     candidate.kind.rank() < existing.kind.rank()
 }
 
+/// Merge two obstruction lists. One row per session; the newer `created_at`
+/// wins, a tombstone beats a live copy, and an equal stamp picks the
+/// lexicographically smaller text for determinism.
+fn merge_obstructions(
+    a: &[crate::journal::obstruction::Obstruction],
+    b: &[crate::journal::obstruction::Obstruction],
+) -> Vec<crate::journal::obstruction::Obstruction> {
+    use crate::journal::obstruction::Obstruction;
+    let mut map: BTreeMap<i64, Obstruction> = BTreeMap::new();
+    for o in a.iter().chain(b.iter()) {
+        match map.get(&o.session_at) {
+            None => {
+                map.insert(o.session_at, o.clone());
+            }
+            Some(existing) => {
+                let keep = if o.created_at != existing.created_at {
+                    o.created_at > existing.created_at
+                } else if o.deleted != existing.deleted {
+                    o.deleted
+                } else {
+                    o.text <= existing.text
+                };
+                if keep {
+                    map.insert(o.session_at, o.clone());
+                }
+            }
+        }
+    }
+    let mut out: Vec<Obstruction> = map.into_values().collect();
+    out.sort_by_key(|o| o.session_at);
+    out
+}
+
 /// Which of two copies of one rota entry to keep.
 ///
 /// Precedence, in order:
@@ -462,6 +496,7 @@ mod tests {
             inscriptions: vec![],
             decrees: vec![],
             verdicts: vec![],
+            obstructions: vec![],
         };
         let once = merge(&a, &a);
         let twice = merge(&once, &once);

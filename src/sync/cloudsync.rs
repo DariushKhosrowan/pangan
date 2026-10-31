@@ -415,6 +415,7 @@ mod tests {
             inscriptions: vec![],
             decrees: vec![],
             verdicts: vec![],
+            obstructions: vec![],
         };
         let b = Data {
             schema_version: 1,
@@ -428,6 +429,7 @@ mod tests {
             inscriptions: vec![],
             decrees: vec![],
             verdicts: vec![],
+            obstructions: vec![],
         };
         let first = merge::merge(&a, &b);
         let second = merge::merge(&first, &b);
@@ -490,6 +492,7 @@ mod tests {
             inscriptions: vec![],
             decrees: vec![],
             verdicts: vec![],
+            obstructions: vec![],
         };
         let mut dev_a = device("desktop");
         let out_a = sync_once(&mut tokens, &local(a.clone()), &mut dev_a, &mut |_, _| {}).unwrap();
@@ -885,6 +888,7 @@ mod recovery_tests {
             inscriptions: vec![],
             decrees: vec![],
             verdicts: vec![],
+            obstructions: vec![],
         };
         let mut dev = device("desktop");
         sync_once(&mut tokens, &local(good), &mut dev, &mut |_, _| {}).unwrap();
@@ -1362,6 +1366,7 @@ mod everything_syncs_tests {
             inscriptions: vec![],
             decrees: vec![],
             verdicts: vec![],
+            obstructions: vec![],
         };
         let mut dev_a = device("desktop");
         let out_a = sync_once(
@@ -1563,6 +1568,7 @@ mod everything_syncs_tests {
             inscriptions: vec![],
             decrees: vec![],
             verdicts: vec![],
+            obstructions: vec![],
         };
         let mut dev = device("desktop");
         let mut settled = data.clone();

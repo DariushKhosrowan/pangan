@@ -74,6 +74,11 @@ pub struct Data {
     /// of the two it was.
     #[serde(default)]
     pub verdicts: Vec<crate::journal::Verdict>,
+    /// One line per session explaining why a non-Kept verdict happened. Keyed
+    /// by `session_at`, the same key the verdict joins on, so the reason keeps
+    /// naming its block. Tombstoned on clear; see `journal::obstruction`.
+    #[serde(default)]
+    pub obstructions: Vec<crate::journal::obstruction::Obstruction>,
     /// The ordered queue of blocks a day is meant to hold, plus every entry the
     /// user has taken off it. See `state::rota` for why entries keep the day
     /// they were planned for instead of following the user forward.
@@ -109,6 +114,7 @@ impl Default for Data {
             inscriptions: Vec::new(),
             decrees: Vec::new(),
             verdicts: Vec::new(),
+            obstructions: Vec::new(),
             rota: Vec::new(),
             next_rota_id: 0,
             plans: Vec::new(),
@@ -719,6 +725,33 @@ impl Store {
     /// What the user said about one session, if anything.
     pub fn verdict_for(&self, session_at: i64) -> Option<&crate::journal::Verdict> {
         crate::journal::verdict::find(&self.data.verdicts, session_at)
+    }
+
+    // ── obstructions: why a non-Kept verdict happened ──────────────────────
+
+    /// Set (or clear, with empty text) the obstruction for one session.
+    pub fn set_obstruction(
+        &mut self,
+        session_at: i64,
+        text: &str,
+    ) -> Result<(), crate::journal::obstruction::ObstructionError> {
+        let next = crate::journal::obstruction::set_obstruction(
+            &self.data.obstructions,
+            session_at,
+            text,
+            chrono::Utc::now().timestamp(),
+        )?;
+        self.data.obstructions = next;
+        self.save();
+        Ok(())
+    }
+
+    /// The live obstruction for a session, if any.
+    pub fn obstruction_for(
+        &self,
+        session_at: i64,
+    ) -> Option<&crate::journal::obstruction::Obstruction> {
+        crate::journal::obstruction::obstruction_for(&self.data.obstructions, session_at)
     }
 }
 
