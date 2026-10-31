@@ -1603,7 +1603,15 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
                 .map(|d| d.with_timezone(&chrono::Local).date_naive())
         })
         .min();
-    let r = stats::report_at(&st.data.sessions, period, offset, today, earliest, en);
+    let r = stats::report_at(
+        &st.data.sessions,
+        period,
+        offset,
+        today,
+        earliest,
+        en,
+        stats::local_tz_offset_secs(),
+    );
 
     win.set_report_period_index(period.index());
     win.set_report_offset(offset);
@@ -1707,6 +1715,7 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
         today,
         earliest,
         en,
+        stats::local_tz_offset_secs(),
     );
     let w = stats::report_at(
         &st.data.sessions,
@@ -1715,6 +1724,7 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
         today,
         earliest,
         en,
+        stats::local_tz_offset_secs(),
     );
     let m = stats::report_at(
         &st.data.sessions,
@@ -1723,6 +1733,7 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
         today,
         earliest,
         en,
+        stats::local_tz_offset_secs(),
     );
     let mut report = String::new();
     report.push_str(&stats::narrative(&t, en));
@@ -1786,6 +1797,7 @@ fn refresh_screens(win: &PanganWindow, app: &AppState) {
         today,
         earliest,
         en,
+        stats::local_tz_offset_secs(),
     );
     let week_peak = wb
         .buckets

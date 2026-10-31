@@ -115,6 +115,13 @@ pub fn week_index(d: NaiveDate) -> i64 {
     ((d.weekday().num_days_from_monday() as i64) + 2) % 7
 }
 
+/// Local UTC offset in seconds (east of UTC: +12600 for Iran UTC+3:30,
+/// +3600/-18000 for the US in DST). Read once per render/report so every
+/// aggregation in one frame agrees on the same offset even across a DST edge.
+pub fn local_tz_offset_secs() -> i32 {
+    Local::now().offset().fix().local_minus_utc()
+}
+
 fn greg(jy: i32, jm: u32, jd: u32) -> NaiveDate {
     let (gy, gm, gd) = calendar::to_gregorian(jy, jm, jd);
     NaiveDate::from_ymd_opt(gy, gm, gd).unwrap_or_else(|| Local::now().date_naive())
@@ -247,13 +254,15 @@ pub struct ReportStats {
     pub contains_today: bool,
 }
 
-fn date_of(ts: i64) -> Option<NaiveDate> {
-    chrono::DateTime::from_timestamp(ts, 0).map(|d| d.with_timezone(&Local).date_naive())
+fn date_of(ts: i64, tz_offset_secs: i32) -> Option<NaiveDate> {
+    let offset = chrono::FixedOffset::east_opt(tz_offset_secs)?;
+    chrono::DateTime::from_timestamp(ts, 0).map(|d| d.with_timezone(&offset).date_naive())
 }
 
-fn hour_of(ts: i64) -> Option<u32> {
+fn hour_of(ts: i64, tz_offset_secs: i32) -> Option<u32> {
     use chrono::Timelike;
-    chrono::DateTime::from_timestamp(ts, 0).map(|d| d.with_timezone(&Local).hour())
+    let offset = chrono::FixedOffset::east_opt(tz_offset_secs)?;
+    chrono::DateTime::from_timestamp(ts, 0).map(|d| d.with_timezone(&offset).hour())
 }
 
 /// Consecutive days with a session, ending at `end` (or at the last active day
@@ -650,8 +659,9 @@ fn build_buckets(
 pub fn report(sessions: &[SessionRecord], period: Period, offset: i32) -> ReportStats {
     let today = Local::now().date_naive();
     let en = false; // caller re-labels; kept for internal formatting defaults
-    let earliest = sessions.iter().filter_map(|s| date_of(s.at)).min();
-    report_at(sessions, period, offset, today, earliest, en)
+    let tz = local_tz_offset_secs();
+    let earliest = sessions.iter().filter_map(|s| date_of(s.at, tz)).min();
+    report_at(sessions, period, offset, today, earliest, en, tz)
 }
 
 /// The full form: explicit anchor date, explicit earliest session, explicit
@@ -663,6 +673,7 @@ pub fn report_at(
     today: NaiveDate,
     earliest: Option<NaiveDate>,
     en: bool,
+    tz_offset_secs: i32,
 ) -> ReportStats {
     let range = bounds(period, offset, today, earliest);
     // Offsets count *backwards*: 0 is the current span, -1 the one before it.
@@ -700,14 +711,16 @@ pub fn report_at(
     let mut all_days: HashSet<NaiveDate> = HashSet::new();
     let mut range_sessions: Vec<SessionRecord> = Vec::new();
     for s in sessions {
-        let Some(d) = date_of(s.at) else { continue };
+        let Some(d) = date_of(s.at, tz_offset_secs) else {
+            continue;
+        };
         all_days.insert(d);
         if range.contains(d) {
             range_sessions.push(s.clone());
             let e = per_day.entry(d).or_insert((0, 0));
             e.0 += s.minutes;
             e.1 += 1;
-            if let Some(h) = hour_of(s.at) {
+            if let Some(h) = hour_of(s.at, tz_offset_secs) {
                 per_hour[h as usize] += s.minutes;
                 per_hour_sessions[h as usize] += 1;
             }
@@ -744,7 +757,7 @@ pub fn report_at(
         let mut b = 0u64;
         let mut acc: BTreeMap<NaiveDate, u64> = BTreeMap::new();
         for s in sessions {
-            if let Some(d) = date_of(s.at) {
+            if let Some(d) = date_of(s.at, tz_offset_secs) {
                 if prev_range.map(|r| r.contains(d)).unwrap_or(false) {
                     *acc.entry(d).or_insert(0) += s.minutes;
                 }
@@ -1019,7 +1032,7 @@ mod tests {
     fn day_period_counts_only_that_day() {
         let today = day(2026, 10, 28);
         let s = vec![rec(2026, 10, 28, 25), rec(2026, 10, 27, 50)];
-        let r = report_at(&s, Period::Day, 0, today, None, false);
+        let r = report_at(&s, Period::Day, 0, today, None, false, 0);
         assert_eq!(r.sessions, 1);
         assert_eq!(r.minutes, 25);
         assert_eq!(r.buckets.len(), 24);
@@ -1066,14 +1079,14 @@ mod tests {
     #[test]
     fn month_bucket_count_matches_jalali_month_length() {
         let today = day(2026, 10, 28);
-        let r = report_at(&[], Period::Month, 0, today, None, false);
+        let r = report_at(&[], Period::Month, 0, today, None, false, 0);
         assert_eq!(r.buckets.len(), 30, "Aban is a 30-day month");
     }
 
     #[test]
     fn year_has_twelve_month_buckets() {
         let today = day(2026, 10, 28);
-        let r = report_at(&[], Period::Year, 0, today, None, false);
+        let r = report_at(&[], Period::Year, 0, today, None, false, 0);
         assert_eq!(r.buckets.len(), 12);
     }
 
@@ -1087,7 +1100,7 @@ mod tests {
             rec(2026, 10, 27, 50),
             rec(2026, 10, 26, 50),
         ];
-        let r = report_at(&s, Period::Month, 0, today, None, false);
+        let r = report_at(&s, Period::Month, 0, today, None, false, 0);
         assert_eq!(r.days_in_period, 6);
         assert_eq!(r.active_days, 3);
         assert!((r.consistency - 0.5).abs() < 0.001);
@@ -1096,7 +1109,7 @@ mod tests {
     #[test]
     fn past_period_uses_its_full_length() {
         let today = day(2026, 10, 28);
-        let r = report_at(&[], Period::Month, -1, today, None, false);
+        let r = report_at(&[], Period::Month, -1, today, None, false, 0);
         assert_eq!(
             r.days_in_period, 30,
             "a finished month is scored on all 30 days"
@@ -1110,7 +1123,7 @@ mod tests {
             rec(2026, 10, 28, 100), // this week
             rec(2026, 10, 20, 50),  // last week
         ];
-        let r = report_at(&s, Period::Week, 0, today, None, false);
+        let r = report_at(&s, Period::Week, 0, today, None, false, 0);
         assert_eq!(r.minutes, 100);
         assert_eq!(r.prev_minutes, 50);
         assert!(r.has_prev);
@@ -1121,14 +1134,14 @@ mod tests {
     fn all_time_spans_from_first_session() {
         let today = day(2026, 10, 28);
         let s = vec![rec(2026, 9, 1, 25), rec(2026, 10, 28, 25)];
-        let r = report_at(&s, Period::All, 0, today, Some(day(2026, 9, 1)), false);
+        let r = report_at(&s, Period::All, 0, today, Some(day(2026, 9, 1)), false, 0);
         assert_eq!(r.sessions, 2);
         assert_eq!(r.minutes, 50);
     }
 
     #[test]
     fn empty_history_is_zero_and_does_not_panic() {
-        let r = report_at(&[], Period::Week, 0, day(2026, 10, 28), None, false);
+        let r = report_at(&[], Period::Week, 0, day(2026, 10, 28), None, false, 0);
         assert_eq!(r.sessions, 0);
         assert_eq!(r.minutes, 0);
         assert_eq!(r.score, 0);
@@ -1145,7 +1158,7 @@ mod tests {
             rec(2026, 10, 26, 25),
             rec(2026, 10, 20, 25),
         ];
-        let r = report_at(&s, Period::Month, 0, today, None, false);
+        let r = report_at(&s, Period::Month, 0, today, None, false, 0);
         assert_eq!(r.streak, 3);
         assert_eq!(r.longest_streak, 3);
     }
@@ -1156,7 +1169,7 @@ mod tests {
         // not 0. Not having begun today is not a broken streak.
         let today = day(2026, 10, 28);
         let s = vec![rec(2026, 10, 27, 25), rec(2026, 10, 26, 25)];
-        let r = report_at(&s, Period::Week, 0, today, None, false);
+        let r = report_at(&s, Period::Week, 0, today, None, false, 0);
         assert_eq!(r.streak, 2);
     }
 
@@ -1167,7 +1180,7 @@ mod tests {
             at: ts_for(today.year(), today.month(), today.day(), 9),
             minutes: 25,
         }];
-        let r = report_at(&s, Period::Day, 0, today, None, false);
+        let r = report_at(&s, Period::Day, 0, today, None, false, 0);
         assert_eq!(r.buckets.len(), 24);
         assert_eq!(r.buckets.iter().map(|b| b.minutes).sum::<u64>(), 25);
     }
@@ -1175,7 +1188,7 @@ mod tests {
     #[test]
     fn future_days_are_marked_in_a_running_week() {
         let today = day(2026, 10, 28); // Wednesday
-        let r = report_at(&[], Period::Week, 0, today, None, false);
+        let r = report_at(&[], Period::Week, 0, today, None, false, 0);
         let future: Vec<&Bucket> = r.buckets.iter().filter(|b| b.future).collect();
         assert_eq!(future.len(), 2, "Thursday and Friday are still ahead");
         assert!(r.buckets.iter().any(|b| b.current));
@@ -1250,7 +1263,7 @@ mod tests {
                 s.push(sess_at_hour(h));
             }
         }
-        let r = report_at(&s, Period::Week, 0, today, None, false);
+        let r = report_at(&s, Period::Week, 0, today, None, false, 0);
         let w = r.best_hour_window.expect("a busy week must name a window");
         assert_eq!(w.sessions, 12, "the window must count every session");
         assert!(narrative(&r, false).contains("بهترین بازهٔ تمرکز"));
@@ -1259,7 +1272,7 @@ mod tests {
 
     #[test]
     fn empty_history_names_no_focus_window() {
-        let r = report_at(&[], Period::Month, 0, day(2026, 10, 28), None, false);
+        let r = report_at(&[], Period::Month, 0, day(2026, 10, 28), None, false, 0);
         assert!(r.best_hour_window.is_none());
         assert!(!narrative(&r, false).contains("بهترین بازهٔ تمرکز"));
     }
