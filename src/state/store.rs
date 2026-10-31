@@ -2,6 +2,7 @@
 //! Data lives under the config dir (`~/.config/pangan/data.json` on Linux).
 
 use crate::journal::{Decree, Inscription};
+use crate::state::migration;
 use crate::state::plans::{self, Plan, PlanError};
 use crate::state::rota::{self, RotaEntry, RotaError};
 use serde::{Deserialize, Serialize};
@@ -41,8 +42,14 @@ pub struct Task {
     pub deleted: bool,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Data {
+    /// Which schema version this record was saved as. Every future breaking
+    /// change to `Data` bumps this and adds a migration arm; a file with a
+    /// *higher* version than the running app is refused rather than silently
+    /// misread. See `state::migration`.
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
     #[serde(default)]
     pub sessions: Vec<SessionRecord>,
     #[serde(default)]
@@ -88,6 +95,28 @@ pub struct Data {
     pub next_plan_id: u64,
 }
 
+fn default_schema_version() -> u32 {
+    crate::state::migration::CURRENT_SCHEMA_VERSION
+}
+
+impl Default for Data {
+    fn default() -> Self {
+        Self {
+            schema_version: migration::CURRENT_SCHEMA_VERSION,
+            sessions: Vec::new(),
+            tasks: Vec::new(),
+            next_task_id: 0,
+            inscriptions: Vec::new(),
+            decrees: Vec::new(),
+            verdicts: Vec::new(),
+            rota: Vec::new(),
+            next_rota_id: 0,
+            plans: Vec::new(),
+            next_plan_id: 0,
+        }
+    }
+}
+
 impl Data {
     pub fn next_task_id(&mut self) -> u64 {
         self.next_task_id += 1;
@@ -113,9 +142,14 @@ impl Store {
 
     pub fn load() -> Self {
         let path = Self::path();
+        // Parse, then run the schema seam. A file from a newer app is refused
+        // (we cannot know what its newer fields mean); an older file is
+        // migrated forward. Either way we never silently accept an incompatible
+        // record that would be corrupted on the first re-save.
         let data = std::fs::read_to_string(&path)
             .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
+            .and_then(|s| serde_json::from_str::<Data>(&s).ok())
+            .and_then(|d| migration::migrate(d).ok())
             .unwrap_or_default();
         Self { path, data }
     }

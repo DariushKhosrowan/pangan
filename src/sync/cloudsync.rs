@@ -404,6 +404,7 @@ mod tests {
     #[test]
     fn a_second_pass_over_the_same_data_is_quiet() {
         let a = Data {
+            schema_version: 1,
             sessions: vec![SessionRecord { at: 1, minutes: 25 }],
             tasks: vec![task(1, "write", 10)],
             next_task_id: 2,
@@ -416,6 +417,7 @@ mod tests {
             verdicts: vec![],
         };
         let b = Data {
+            schema_version: 1,
             sessions: vec![SessionRecord { at: 2, minutes: 25 }],
             tasks: vec![task(2, "read", 20)],
             next_task_id: 3,
@@ -474,6 +476,7 @@ mod tests {
 
         // Device A: one session and one task, nothing remote yet.
         let a = Data {
+            schema_version: 1,
             sessions: vec![SessionRecord {
                 at: 100,
                 minutes: 25,
@@ -868,6 +871,7 @@ mod recovery_tests {
 
         // The good state reaches the cloud.
         let good = Data {
+            schema_version: 1,
             sessions: vec![SessionRecord {
                 at: 100,
                 minutes: 25,
@@ -1331,6 +1335,7 @@ mod everything_syncs_tests {
         settings_a.sound_theme = "santur".into();
         settings_a.lang = "en".into();
         let data_a = Data {
+            schema_version: 1,
             sessions: vec![
                 SessionRecord {
                     at: now - 3_600,
@@ -1544,6 +1549,7 @@ mod everything_syncs_tests {
     fn syncing_many_times_does_not_create_duplicates_or_drift() {
         let (_guard, mut tokens) = fake();
         let data = Data {
+            schema_version: 1,
             sessions: vec![SessionRecord {
                 at: 1_000,
                 minutes: 25,

@@ -45,6 +45,7 @@ use std::collections::BTreeMap;
 /// no difference to push.
 pub fn merge(local: &Data, remote: &Data) -> Data {
     let mut out = Data {
+        schema_version: local.schema_version.max(remote.schema_version),
         sessions: merge_sessions(&local.sessions, &remote.sessions),
         tasks: merge_tasks(&local.tasks, &remote.tasks),
         next_task_id: local.next_task_id.max(remote.next_task_id),
@@ -450,6 +451,7 @@ mod tests {
     #[test]
     fn merge_is_idempotent() {
         let a = Data {
+            schema_version: 1,
             sessions: vec![sess(1, 25)],
             tasks: vec![task(1, "x", 5)],
             next_task_id: 2,
