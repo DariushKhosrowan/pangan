@@ -36,7 +36,7 @@ pub const MAX_SUGGESTIONS: usize = 3;
 pub const BREAK_ADHERENCE_WARN_RATE: f32 = 0.7;
 
 /// What kind of evidence a suggestion is built on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SuggestionKind {
     /// Block-length calibration.

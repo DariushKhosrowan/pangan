@@ -636,6 +636,9 @@ pub struct WeeklyDigest {
     pub purpose_drift_hour: Option<(u8, crate::journal::purpose_drift::DriftStat)>,
     /// The duration bucket with the worst purpose drift (if any qualifies).
     pub purpose_drift_duration: Option<(&'static str, crate::journal::purpose_drift::DriftStat)>,
+    /// Which prescription kind actually works for this user, as a localized
+    /// one-line summary. None until a kind has enough outcomes to judge.
+    pub kind_effectiveness_label: Option<String>,
 }
 
 /// Compose the week's full digest from the store's slices.
@@ -742,10 +745,19 @@ pub fn compose_weekly(
         tz_offset_secs,
         planned_break_secs,
     );
-    let outcomes = crate::journal::prescription_outcome::bucketed(
-        crate::journal::prescription_outcome::classify_all(prescriptions, &|metric| {
-            crate::journal::week_drift::value_of(&current_metrics, metric)
-        }),
+    let classified = crate::journal::prescription_outcome::classify_all(prescriptions, &|metric| {
+        crate::journal::week_drift::value_of(&current_metrics, metric)
+    });
+    let outcomes = crate::journal::prescription_outcome::bucketed(classified.clone());
+    // Prescription kind effectiveness: which levers actually work for this
+    // user. Computed from the same classified outcomes, grouped by kind.
+    let kind_effectiveness = crate::journal::prescription_effectiveness::kind_effectiveness(
+        &classified,
+        crate::journal::prescription_effectiveness::MIN_SAMPLES,
+    );
+    let kind_effectiveness_label = crate::journal::prescription_effectiveness::effectiveness_label(
+        &kind_effectiveness,
+        locale_fa,
     );
     // Make the coach learn: filter and escalate raw suggestions against the
     // outcome buckets, so resolved advice isn't re-nagged and stubborn advice
@@ -818,6 +830,7 @@ pub fn compose_weekly(
         purpose_drift,
         purpose_drift_hour,
         purpose_drift_duration,
+        kind_effectiveness_label,
     }
 }
 
@@ -1109,6 +1122,11 @@ pub fn render_digest(digest: &WeeklyDigest, locale_fa: bool) -> String {
                 ));
             }
             out.push('\n');
+        }
+        // The meta-line: which lever actually works for this user.
+        if let Some(kl) = &digest.kind_effectiveness_label {
+            out.push_str(kl);
+            out.push_str("\n\n");
         }
     }
 
