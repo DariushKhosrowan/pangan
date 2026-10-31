@@ -2062,6 +2062,10 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in property <string> archive-decree-count: "";
     /// The session the open dialog belongs to (Unix seconds, 0 = none).
     in property <int> inscription-session: 0;
+    /// The storage key of the verdict already declared for that session ("kept",
+    /// "partial", …), "" when none. Pushed from Rust so the quick-judge row can
+    /// show which seal is already filled.
+    in property <string> inscription-verdict-kind: "";
     /// Set by Rust when the last write succeeded, so the dialog can close.
     in-out property <bool> inscription-saved: false;
 
@@ -5999,6 +6003,59 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         font-size: Type.caption;
                         color: Palette.text-faint;
                         vertical-alignment: center;
+                    }
+                }
+
+                // ---- the quick judge ----
+                // The verdict row, offered at the same moment as the inscription:
+                // the block just finished, the user is right here, and the app
+                // knows which session it was. Judging now beats judging later from
+                // the archive — the work is still warm. The five seals reuse the
+                // archive's vocabulary and the same declare-verdict callback.
+                VerticalLayout {
+                    spacing: 4px;
+
+                    Text {
+                        text: Strings.verdict-ask;
+                        font-family: "Vazirmatn";
+                        font-size: Type.caption;
+                        font-weight: 600;
+                        color: Palette.text-dim;
+                        horizontal-alignment: Strings.fa ? right : left;
+                    }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        alignment: start;
+                        VerdictSeal {
+                            kind: "kept";
+                            label: Strings.verdict-kept;
+                            active: root.inscription-verdict-kind == "kept";
+                            picked(k) => { root.declare-verdict(root.inscription-session, k); }
+                        }
+                        VerdictSeal {
+                            kind: "partial";
+                            label: Strings.verdict-partial;
+                            active: root.inscription-verdict-kind == "partial";
+                            picked(k) => { root.declare-verdict(root.inscription-session, k); }
+                        }
+                        VerdictSeal {
+                            kind: "broken";
+                            label: Strings.verdict-broken;
+                            active: root.inscription-verdict-kind == "broken";
+                            picked(k) => { root.declare-verdict(root.inscription-session, k); }
+                        }
+                        VerdictSeal {
+                            kind: "extended";
+                            label: Strings.verdict-extended;
+                            active: root.inscription-verdict-kind == "extended";
+                            picked(k) => { root.declare-verdict(root.inscription-session, k); }
+                        }
+                        VerdictSeal {
+                            kind: "short";
+                            label: Strings.verdict-short;
+                            active: root.inscription-verdict-kind == "short";
+                            picked(k) => { root.declare-verdict(root.inscription-session, k); }
+                        }
                     }
                 }
 

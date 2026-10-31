@@ -2762,9 +2762,17 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                     let already_written = st.inscription_for_session(newest).is_some();
                     let skipped = *tick_app.ins_skipped.lock().unwrap() == Some(newest);
+                    // The kind already declared for this session, so the quick
+                    // judge shows which seal is already filled.
+                    let verdict_kind = st
+                        .verdict_for(newest)
+                        .filter(|v| !v.deleted)
+                        .map(|v| v.kind.as_str().to_string())
+                        .unwrap_or_default();
                     if !already_written && !skipped {
                         if let Some(w) = tick_weak.upgrade() {
                             w.set_inscription_session(newest as i32);
+                            w.set_inscription_verdict_kind(SharedString::from(verdict_kind));
                             w.set_inscription_text(SharedString::from(""));
                             w.set_inscription_error(SharedString::from(""));
                             w.set_inscription_open(true);
