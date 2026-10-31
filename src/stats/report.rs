@@ -1167,6 +1167,231 @@ pub fn best_kept_hour(stats: &[HourVerdictStat; 24], min_samples: u32) -> Option
     best.map(|(_, h)| h)
 }
 
+/// A block-length bucket in duration calibration.
+#[derive(Clone, Debug)]
+pub struct DurationBucket {
+    /// The nominal length this bucket holds (minutes) — the lower edge for
+    /// sessions that fall between two nominal values.
+    pub nominal: u64,
+    /// Sessions whose planned length landed in this bucket.
+    pub sessions: u32,
+    /// Sessions in the bucket that carry a live verdict.
+    pub rated: u32,
+    /// `kept_or_extended / rated` — the share of blocks that met their
+    /// promise at this length. `None` when nothing is rated.
+    pub kept_rate: Option<f32>,
+    /// Weighted mean verdict (Kept=5 … Broken=1) — the soft number beside the
+    /// strict `kept_rate`.
+    pub avg_verdict: Option<f32>,
+    /// `rated < CALIBRATION_MIN_SAMPLES` — too thin to win a finding.
+    pub too_few_samples: bool,
+}
+
+/// The result of calibrating block length against the record.
+#[derive(Clone, Debug)]
+pub struct DurationCalibration {
+    /// One bucket per nominal length in [`CALIBRATION_BUCKETS`].
+    pub buckets: Vec<DurationBucket>,
+    /// The length the user keeps best: highest `kept_rate` among buckets with
+    /// enough samples. Ties break by larger sample, then shorter nominal.
+    pub sweet_spot: Option<u64>,
+    /// The smallest length at which honesty collapses: the first bucket whose
+    /// `kept_rate` sits at or below [`CALIBRATION_OVERREACH_RATE`] and every
+    /// later well-sampled bucket stays there too.
+    pub overreach_floor: Option<u64>,
+    /// Total sessions carrying a live verdict across all buckets.
+    pub total_rated: u32,
+    /// Sessions with no verdict at all — they were never rated.
+    pub unknown: u32,
+}
+
+/// Nominal block lengths bucketed for calibration, in minutes.
+pub const CALIBRATION_BUCKETS: [u64; 10] = [5, 10, 15, 20, 25, 30, 45, 60, 90, 120];
+
+/// Minimum rated sessions for a bucket to inform a finding.
+pub const CALIBRATION_MIN_SAMPLES: u32 = 5;
+
+/// The kept-rate line below which a length is over-reach.
+pub const CALIBRATION_OVERREACH_RATE: f32 = 0.5;
+
+/// The ordinal score for one verdict kind — Kept=5 … Broken=1.
+fn verdict_score(kind: crate::journal::VerdictKind) -> u8 {
+    match kind {
+        crate::journal::VerdictKind::Kept => 5,
+        crate::journal::VerdictKind::Extended => 4,
+        crate::journal::VerdictKind::Partial => 3,
+        crate::journal::VerdictKind::Short => 2,
+        crate::journal::VerdictKind::Broken => 1,
+    }
+}
+
+/// Which bucket a planned length lands in.
+fn bucket_index(minutes: u64) -> usize {
+    let idx = CALIBRATION_BUCKETS.partition_point(|&n| n <= minutes);
+    if idx == 0 {
+        0
+    } else {
+        (idx - 1).min(CALIBRATION_BUCKETS.len() - 1)
+    }
+}
+
+/// Ask the record how long a block should be.
+///
+/// Joins each session's planned length to its verdict, buckets by length, and
+/// reports the kept rate per bucket plus two findings: the *sweet spot* (the
+/// length the user keeps best) and the *overreach floor* (the first length at
+/// which honesty collapses). Pure: existing rows in, a value out, no I/O.
+pub fn duration_calibration(
+    sessions: &[SessionRecord],
+    verdicts: &[crate::journal::Verdict],
+) -> DurationCalibration {
+    let verdict_for: std::collections::HashMap<i64, crate::journal::VerdictKind> = verdicts
+        .iter()
+        .filter(|v| !v.deleted)
+        .map(|v| (v.session_at, v.kind))
+        .collect();
+
+    let mut sessions_cnt = vec![0u32; CALIBRATION_BUCKETS.len()];
+    let mut rated_cnt = vec![0u32; CALIBRATION_BUCKETS.len()];
+    let mut kept_cnt = vec![0u32; CALIBRATION_BUCKETS.len()];
+    let mut score_sum = vec![0u64; CALIBRATION_BUCKETS.len()];
+    let mut unknown = 0u32;
+
+    for s in sessions {
+        if s.minutes == 0 {
+            continue; // data-corruption guard: not a real block
+        }
+        let idx = bucket_index(s.minutes);
+        sessions_cnt[idx] += 1;
+        match verdict_for.get(&s.at) {
+            Some(&kind) => {
+                rated_cnt[idx] += 1;
+                if kind.is_met() {
+                    kept_cnt[idx] += 1;
+                }
+                score_sum[idx] += verdict_score(kind) as u64;
+            }
+            None => unknown += 1,
+        }
+    }
+
+    let total_rated: u32 = rated_cnt.iter().sum();
+    let mut buckets: Vec<DurationBucket> = Vec::with_capacity(CALIBRATION_BUCKETS.len());
+    for i in 0..CALIBRATION_BUCKETS.len() {
+        let rated = rated_cnt[i];
+        buckets.push(DurationBucket {
+            nominal: CALIBRATION_BUCKETS[i],
+            sessions: sessions_cnt[i],
+            rated,
+            kept_rate: (rated > 0).then(|| kept_cnt[i] as f32 / rated as f32),
+            avg_verdict: (rated > 0).then(|| score_sum[i] as f32 / rated as f32),
+            too_few_samples: rated < CALIBRATION_MIN_SAMPLES,
+        });
+    }
+
+    // A single well-sampled length cannot be compared to anything.
+    let comparable = buckets
+        .iter()
+        .filter(|b| !b.too_few_samples && b.rated > 0)
+        .count();
+
+    let sweet_spot = if comparable < 2 {
+        None
+    } else {
+        let mut best: Option<(f32, u32, u64)> = None;
+        for b in &buckets {
+            if b.too_few_samples {
+                continue;
+            }
+            if let Some(rate) = b.kept_rate {
+                let better = match best {
+                    None => true,
+                    Some((br, brated, bnom)) => {
+                        rate > br + 1e-9
+                            || (rate - br).abs() < 1e-9 && b.rated > brated
+                            || (rate - br).abs() < 1e-9 && b.rated == brated && b.nominal < bnom
+                    }
+                };
+                if better {
+                    best = Some((rate, b.rated, b.nominal));
+                }
+            }
+        }
+        best.map(|(_, _, n)| n)
+    };
+
+    let overreach_floor = if comparable < 2 {
+        None
+    } else {
+        let qualified: Vec<usize> = (0..buckets.len())
+            .filter(|&i| !buckets[i].too_few_samples)
+            .collect();
+        let mut found = None;
+        'outer: for &i in &qualified {
+            if let Some(rate) = buckets[i].kept_rate {
+                if rate <= CALIBRATION_OVERREACH_RATE {
+                    for &j in qualified.iter().filter(|&&j| j > i) {
+                        if let Some(r2) = buckets[j].kept_rate {
+                            if r2 > CALIBRATION_OVERREACH_RATE {
+                                continue 'outer; // honesty recovered later
+                            }
+                        }
+                    }
+                    found = Some(buckets[i].nominal);
+                    break;
+                }
+            }
+        }
+        found
+    };
+
+    DurationCalibration {
+        buckets,
+        sweet_spot,
+        overreach_floor,
+        total_rated,
+        unknown,
+    }
+}
+
+/// A report-ready label for a calibration.
+///
+/// Four states, in priority order: not enough data, a single comparable
+/// length, a detected overreach ceiling, or stable across all lengths.
+pub fn calibration_label(c: &DurationCalibration, locale_fa: bool) -> String {
+    let comparable = c
+        .buckets
+        .iter()
+        .filter(|b| !b.too_few_samples && b.rated > 0)
+        .count();
+    if c.total_rated < CALIBRATION_MIN_SAMPLES || comparable == 0 {
+        return if locale_fa {
+            "دادهٔ کافی برای کالیبراسیون وجود ندارد".to_string()
+        } else {
+            "Not enough data to calibrate".to_string()
+        };
+    }
+    if comparable == 1 {
+        return if locale_fa {
+            "یک طول بلوک — قابل مقایسه نیست".to_string()
+        } else {
+            "One block length — nothing to compare".to_string()
+        };
+    }
+    if let Some(n) = c.overreach_floor {
+        return if locale_fa {
+            format!("حد صادقانهٔ شما: {} دقیقه", calendar::fa_num(n as i64))
+        } else {
+            format!("Your honest ceiling: {} minutes", n)
+        };
+    }
+    if locale_fa {
+        "در همهٔ طول‌ها پایدار".to_string()
+    } else {
+        "Stable across all lengths".to_string()
+    }
+}
+
 /// The gap between the busiest hour and the most honest hour.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HonestyGap {
@@ -1867,5 +2092,266 @@ mod tests {
         let v = vec![verdict_hour(crate::journal::VerdictKind::Kept, at)];
         let sum = hourly_verdict_summary(&v, &s, 12600, 1);
         assert_eq!(sum.best_kept_hour, Some(15));
+    }
+
+    // --- duration calibration ---
+
+    fn calib_v(kind: crate::journal::VerdictKind, at: i64) -> crate::journal::Verdict {
+        crate::journal::verdict::declare(at, kind, at).unwrap()
+    }
+
+    fn calib_bucket<'a>(c: &'a DurationCalibration, nominal: u64) -> &'a DurationBucket {
+        c.buckets.iter().find(|b| b.nominal == nominal).unwrap()
+    }
+
+    #[test]
+    fn duration_calibration_empty_record_returns_empty_buckets() {
+        let c = duration_calibration(&[], &[]);
+        assert_eq!(c.buckets.len(), 10);
+        for b in &c.buckets {
+            assert_eq!(b.sessions, 0);
+            assert_eq!(b.rated, 0);
+            assert_eq!(b.kept_rate, None);
+            assert_eq!(b.avg_verdict, None);
+            assert!(b.too_few_samples);
+        }
+        assert_eq!(c.total_rated, 0);
+        assert_eq!(c.unknown, 0);
+        assert_eq!(c.sweet_spot, None);
+        assert_eq!(c.overreach_floor, None);
+        assert_eq!(calibration_label(&c, false), "Not enough data to calibrate");
+        assert_eq!(
+            calibration_label(&c, true),
+            "دادهٔ کافی برای کالیبراسیون وجود ندارد"
+        );
+    }
+
+    #[test]
+    fn duration_calibration_buckets_by_planned_length() {
+        let s = vec![sess(100, 25), sess(200, 20)];
+        let v = vec![
+            calib_v(crate::journal::VerdictKind::Kept, 100),
+            calib_v(crate::journal::VerdictKind::Broken, 200),
+        ];
+        let c = duration_calibration(&s, &v);
+        assert_eq!(calib_bucket(&c, 25).sessions, 1);
+        assert_eq!(calib_bucket(&c, 25).rated, 1);
+        assert_eq!(calib_bucket(&c, 25).kept_rate, Some(1.0));
+        assert_eq!(calib_bucket(&c, 20).sessions, 1);
+        assert_eq!(calib_bucket(&c, 20).kept_rate, Some(0.0));
+    }
+
+    #[test]
+    fn duration_calibration_clamps_out_of_range_lengths() {
+        let s = vec![sess(1, 3), sess(2, 200)];
+        let c = duration_calibration(&s, &[]);
+        assert_eq!(calib_bucket(&c, 5).sessions, 1);
+        assert_eq!(calib_bucket(&c, 120).sessions, 1);
+    }
+
+    #[test]
+    fn duration_calibration_rejects_zero_minute_sessions() {
+        let s = vec![sess(1, 0), sess(2, 25)];
+        let c = duration_calibration(&s, &[]);
+        let total: u32 = c.buckets.iter().map(|b| b.sessions).sum();
+        assert_eq!(total, 1);
+    }
+
+    #[test]
+    fn duration_calibration_counts_unrated_sessions_as_unknown() {
+        let s = vec![sess(100, 25), sess(200, 25)];
+        let v = vec![calib_v(crate::journal::VerdictKind::Kept, 100)];
+        let c = duration_calibration(&s, &v);
+        assert_eq!(c.unknown, 1);
+        assert_eq!(calib_bucket(&c, 25).sessions, 2);
+        assert_eq!(calib_bucket(&c, 25).rated, 1);
+    }
+
+    #[test]
+    fn duration_calibration_extended_counts_met_short_does_not() {
+        let ats = [100i64, 200, 300, 400, 500];
+        let s: Vec<SessionRecord> = ats.iter().map(|&a| sess(a, 25)).collect();
+        let v = vec![
+            calib_v(crate::journal::VerdictKind::Extended, ats[0]),
+            calib_v(crate::journal::VerdictKind::Short, ats[1]),
+            calib_v(crate::journal::VerdictKind::Partial, ats[2]),
+            calib_v(crate::journal::VerdictKind::Kept, ats[3]),
+            calib_v(crate::journal::VerdictKind::Broken, ats[4]),
+        ];
+        let c = duration_calibration(&s, &v);
+        let b = calib_bucket(&c, 25);
+        assert_eq!(b.kept_rate, Some(0.4)); // Extended + Kept over 5
+        assert!((b.avg_verdict.unwrap() - 3.0).abs() < 1e-6); // (4+2+3+5+1)/5
+        assert_eq!(
+            calibration_label(&c, false),
+            "One block length — nothing to compare"
+        );
+        assert_eq!(c.sweet_spot, None);
+        assert_eq!(c.overreach_floor, None);
+    }
+
+    #[test]
+    fn duration_calibration_sweet_spot_picks_highest_kept_rate() {
+        let ats = [100i64, 200, 300, 400, 500, 600, 700, 800, 900, 1000];
+        let s: Vec<SessionRecord> = ats
+            .iter()
+            .map(|&a| sess(a, if a <= 500 { 25 } else { 30 }))
+            .collect();
+        let v = vec![
+            calib_v(crate::journal::VerdictKind::Kept, ats[0]),
+            calib_v(crate::journal::VerdictKind::Kept, ats[1]),
+            calib_v(crate::journal::VerdictKind::Kept, ats[2]),
+            calib_v(crate::journal::VerdictKind::Kept, ats[3]),
+            calib_v(crate::journal::VerdictKind::Broken, ats[4]),
+            calib_v(crate::journal::VerdictKind::Kept, ats[5]),
+            calib_v(crate::journal::VerdictKind::Kept, ats[6]),
+            calib_v(crate::journal::VerdictKind::Kept, ats[7]),
+            calib_v(crate::journal::VerdictKind::Broken, ats[8]),
+            calib_v(crate::journal::VerdictKind::Broken, ats[9]),
+        ];
+        let c = duration_calibration(&s, &v);
+        assert_eq!(c.sweet_spot, Some(25)); // 0.8 vs 0.6
+    }
+
+    #[test]
+    fn duration_calibration_sweet_spot_tie_breaks_by_larger_sample() {
+        let ats = [1i64, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let s: Vec<SessionRecord> = ats
+            .iter()
+            .map(|&a| sess(a, if a <= 5 { 25 } else { 30 }))
+            .collect();
+        let kinds = [
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Broken,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Broken,
+        ];
+        let v: Vec<_> = ats.iter().zip(kinds).map(|(&a, k)| calib_v(k, a)).collect();
+        let c = duration_calibration(&s, &v);
+        assert_eq!(c.sweet_spot, Some(30)); // both 0.8, 30 has larger sample
+    }
+
+    #[test]
+    fn duration_calibration_sweet_spot_tie_breaks_by_shorter_nominal() {
+        let ats = [1i64, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let s: Vec<SessionRecord> = ats
+            .iter()
+            .map(|&a| sess(a, if a <= 5 { 20 } else { 25 }))
+            .collect();
+        let v: Vec<_> = ats
+            .iter()
+            .enumerate()
+            .map(|(i, &a)| {
+                let k = if i == 4 || i == 9 {
+                    crate::journal::VerdictKind::Broken
+                } else {
+                    crate::journal::VerdictKind::Kept
+                };
+                calib_v(k, a)
+            })
+            .collect();
+        let c = duration_calibration(&s, &v);
+        assert_eq!(c.sweet_spot, Some(20)); // equal rate & sample → shorter nominal
+    }
+
+    #[test]
+    fn duration_calibration_overreach_floor_detects_first_collapse() {
+        let ats = [1i64, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let len: fn(i64) -> u64 = |a| {
+            if a <= 5 {
+                20
+            } else if a <= 10 {
+                25
+            } else {
+                30
+            }
+        };
+        let s: Vec<SessionRecord> = ats.iter().map(|&a| sess(a, len(a))).collect();
+        let kinds = [
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Broken,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Broken,
+            crate::journal::VerdictKind::Broken,
+            crate::journal::VerdictKind::Broken,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Broken,
+            crate::journal::VerdictKind::Broken,
+            crate::journal::VerdictKind::Broken,
+        ];
+        let v: Vec<_> = ats.iter().zip(kinds).map(|(&a, k)| calib_v(k, a)).collect();
+        let c = duration_calibration(&s, &v);
+        // 20: 0.8 (good); 25: 0.4 (collapsed); 30: 0.4 (stays collapsed)
+        assert_eq!(c.overreach_floor, Some(25));
+        assert_eq!(
+            calibration_label(&c, false),
+            "Your honest ceiling: 25 minutes"
+        );
+        assert_eq!(calibration_label(&c, true), "حد صادقانهٔ شما: ۲۵ دقیقه");
+    }
+
+    #[test]
+    fn duration_calibration_overreach_none_when_honesty_recovers() {
+        let ats = [1i64, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let len: fn(i64) -> u64 = |a| if a <= 5 { 25 } else { 30 };
+        let s: Vec<SessionRecord> = ats.iter().map(|&a| sess(a, len(a))).collect();
+        let kinds = [
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Broken,
+            crate::journal::VerdictKind::Broken,
+            crate::journal::VerdictKind::Broken,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+        ];
+        let v: Vec<_> = ats.iter().zip(kinds).map(|(&a, k)| calib_v(k, a)).collect();
+        let c = duration_calibration(&s, &v);
+        // 25: 0.4 collapses, but 30: 0.8 recovers → no floor
+        assert_eq!(c.overreach_floor, None);
+        assert_eq!(calibration_label(&c, false), "Stable across all lengths");
+        assert_eq!(calibration_label(&c, true), "در همهٔ طول‌ها پایدار");
+    }
+
+    #[test]
+    fn duration_calibration_overreach_requires_min_samples() {
+        let ats = [1i64, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let len: fn(i64) -> u64 = |a| if a <= 2 { 25 } else { 30 };
+        let s: Vec<SessionRecord> = ats.iter().map(|&a| sess(a, len(a))).collect();
+        let kinds = [
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Broken,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+            crate::journal::VerdictKind::Kept,
+        ];
+        let v: Vec<_> = ats.iter().zip(kinds).map(|(&a, k)| calib_v(k, a)).collect();
+        let c = duration_calibration(&s, &v);
+        // 25 has only 2 rated (below min) → excluded; 30 is healthy → no floor
+        assert_eq!(calib_bucket(&c, 25).too_few_samples, true);
+        assert_eq!(c.overreach_floor, None);
     }
 }

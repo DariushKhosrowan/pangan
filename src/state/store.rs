@@ -730,6 +730,7 @@ impl Store {
     // ── obstructions: why a non-Kept verdict happened ──────────────────────
 
     /// Set (or clear, with empty text) the obstruction for one session.
+    #[allow(dead_code)] // logic API, not yet wired (UI locked)
     pub fn set_obstruction(
         &mut self,
         session_at: i64,
@@ -747,6 +748,7 @@ impl Store {
     }
 
     /// The live obstruction for a session, if any.
+    #[allow(dead_code)] // logic API, not yet wired (UI locked)
     pub fn obstruction_for(
         &self,
         session_at: i64,

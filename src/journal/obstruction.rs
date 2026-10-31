@@ -40,6 +40,7 @@ pub struct Obstruction {
 /// Why an obstruction could not be stored.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ObstructionError {
+    #[allow(dead_code)] // part of the error surface; empty is handled as tombstone
     /// The text is empty after normalization (this is a tombstone request,
     /// handled by `set_obstruction` — callers that don't mean to delete
     /// should treat it as a no-op).
