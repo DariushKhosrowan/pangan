@@ -2084,6 +2084,11 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     /// The intention currently governing the running block, "" when none.
     /// Pushed from Rust so the 300 ms tick never has to reach into the store.
     in property <string> current-decree: "";
+    /// The coaching line: the active prescription if one is live, else the
+    /// current season's live intention. "" when neither exists. Pushed from
+    /// Rust like current-decree, and rendered as a quiet line under the block's
+    /// decree so the coaching never competes with the ring.
+    in property <string> coach-line: "";
 
     // ---- The day's rota ----
     //
@@ -2591,6 +2596,25 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                         overflow: elide;
                     }
                 }
+            }
+
+            // ---- the coaching line ----
+            // One quiet line under the block's decree: the active prescription
+            // if one is live, else the current season's live intention. It is
+            // deliberately quieter than the decree strip — the coaching is
+            // context, not the work — and collapses entirely when there is
+            // nothing to say, like the decree strip above it.
+            if root.coach-line != "" : Text {
+                height: 18px;
+                x: 22px;
+                width: parent.width - 22px - 22px;
+                text: root.coach-line;
+                font-family: "Vazirmatn";
+                font-size: Type.caption;
+                color: Palette.text-faint;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: elide;
             }
 
             // ---- session dots ----

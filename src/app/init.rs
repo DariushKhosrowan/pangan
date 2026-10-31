@@ -979,6 +979,25 @@ fn push_decree_state(win: &PanganWindow, app: &AppState, st: &Store) {
             .unwrap_or_default()
     });
     win.set_current_decree(SharedString::from(text));
+
+    // The coaching line: the active prescription if one is live, else the
+    // current season's live intention. Quiet context under the block's decree,
+    // so a user with an open prescription or a stated season keeps seeing it
+    // without having to visit the chronicle. Empty when neither exists.
+    let coach = crate::journal::daily_briefing::active_prescription(&st.data.prescriptions)
+        .map(|p| p.text)
+        .or_else(|| {
+            let today = chrono::Local::now().date_naive();
+            let season = crate::journal::season_summary::season_of(today);
+            crate::journal::season_intention::latest_live_for_season(
+                &st.data.season_intentions,
+                season.jalali_year,
+                season.season,
+            )
+            .map(|i| i.body.clone())
+        })
+        .unwrap_or_default();
+    win.set_coach_line(SharedString::from(coach));
 }
 
 /// Push the day's rota into the window: the rows, the Start Next label, and how
