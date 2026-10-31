@@ -9,6 +9,8 @@ use slint::{
     CloseRequestResponse, ComponentHandle, Global, ModelRc, SharedString, Timer, TimerMode,
     VecModel,
 };
+#[allow(unused_imports)] // TimeZone is a trait; used only for the tz helpers here
+use chrono::TimeZone;
 
 use crate::app::automation;
 use crate::audio::sound;
@@ -1155,6 +1157,44 @@ fn push_rota(win: &PanganWindow, app: &AppState, st: &Store) {
         format!(
             "{} بلوک ناتمام از روزهای پیش را به امروز بیاور",
             calendar::fa_num(carry.len() as i64)
+        )
+    }));
+
+    // Today's unjudged blocks, surfaced as a quiet nudge on the timer. The
+    // finished-but-unfaced sessions of *today* are named (not the whole
+    // backlog), because a line about today is a nudge while the day is still
+    // here; the older backlog belongs to the report and the briefing. Zero
+    // produces an empty label so the line collapses.
+    let tz = crate::stats::report::local_tz_offset_secs();
+    let offset = chrono::FixedOffset::east_opt(tz)
+        .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).unwrap());
+    let today_start = offset
+        .from_local_datetime(&chrono::NaiveDateTime::new(today, chrono::NaiveTime::MIN))
+        .single()
+        .map(|dt| dt.timestamp())
+        .unwrap_or(0);
+    let today_end = offset
+        .from_local_datetime(&chrono::NaiveDateTime::new(
+            today,
+            chrono::NaiveTime::from_hms_opt(23, 59, 59).unwrap(),
+        ))
+        .single()
+        .map(|dt| dt.timestamp())
+        .unwrap_or(0);
+    let unjudged_today = crate::journal::unjudged::unjudged_count(
+        &st.data.sessions,
+        &st.data.verdicts,
+        today_start,
+        today_end,
+    );
+    win.set_unjudged_label(SharedString::from(if unjudged_today == 0 {
+        String::new()
+    } else if en {
+        format!("{} unjudged from today", unjudged_today)
+    } else {
+        format!(
+            "{} بلوک بدون داوری از امروز",
+            calendar::fa_num(unjudged_today as i64)
         )
     }));
 }

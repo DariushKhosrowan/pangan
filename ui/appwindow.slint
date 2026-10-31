@@ -2120,6 +2120,9 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in-out property <string> rota-new-label: "";
     in-out property <int> rota-new-minutes: 25;
     in property <bool> rota-can-add: false;
+    /// Today's unjudged blocks, as a short line ("N unjudged from today").
+    /// "" when today has no unjudged session, so the timer stays clean.
+    in property <string> unjudged-label: "";
     /// What the day's plans came to: "۲ انجام · ۱ رهاشده · ۲ مانده".
     ///
     /// Built in Rust because the digits are Persian and Slint cannot
@@ -2627,6 +2630,23 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                     width: i < root.session-done ? 18px : 6px; height: 6px; border-radius: 3px; background: i < root.session-done ? Palette.accent : Palette.surface-3; animate width { duration: Motion.normal; easing: ease-out; }
                     animate background { duration: Motion.normal; }
                 }
+            }
+
+            // ---- today's unjudged ----
+            // A quiet line under the dots naming the finished blocks that were
+            // never faced. It is a nudge to judge while the day is still here,
+            // not a statistic; it collapses entirely when today has none.
+            if root.unjudged-label != "" : Text {
+                height: 18px;
+                x: 22px;
+                width: parent.width - 22px - 22px;
+                text: root.unjudged-label;
+                font-family: "Vazirmatn";
+                font-size: Type.caption;
+                color: Palette.text-faint;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: elide;
             }
 
             Rectangle { height: 10px; }
