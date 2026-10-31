@@ -126,6 +126,12 @@ pub struct Data {
     /// Hands out season-close ids.
     #[serde(default)]
     pub next_season_close_id: u64,
+    /// Season-intention records. See `journal::season_intention`.
+    #[serde(default)]
+    pub season_intentions: Vec<crate::journal::season_intention::SeasonIntention>,
+    /// Hands out season-intention ids.
+    #[serde(default)]
+    pub next_season_intention_id: u64,
 }
 
 fn default_schema_version() -> u32 {
@@ -154,6 +160,8 @@ impl Default for Data {
             next_prescription_verdict_id: 0,
             season_closes: Vec::new(),
             next_season_close_id: 0,
+            season_intentions: Vec::new(),
+            next_season_intention_id: 0,
         }
     }
 }

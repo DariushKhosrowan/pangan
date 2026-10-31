@@ -2590,6 +2590,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         ) {
             crate::log::info(&format!("wrote season summary to {}", path.display()));
         }
+        // The season intention: prompted in the season's first week, once per
+        // season, unless a live intention already exists. The opening note
+        // that mirrors the season close.
+        if let Some(path) = crate::journal::season_intention::write_season_intention_if_new(
+            &st.data.season_intentions,
+            today,
+        ) {
+            crate::log::info(&format!(
+                "wrote season intention prompt to {}",
+                path.display()
+            ));
+        }
     }
 
     // If the app died mid-focus-block, bring the clock back where it was.
