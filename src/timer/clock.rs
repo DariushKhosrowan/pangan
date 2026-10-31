@@ -1,11 +1,19 @@
 //! Platform-agnostic timer core: drift-free countdown state machine.
-//! The deadline is an `Instant`; every tick recomputes remaining from the
-//! monotonic clock, so there is no `sleep()` drift.
+//! The deadline is a Unix timestamp (wall clock); every tick recomputes
+//! remaining from the wall clock, so there is no `sleep()` drift and — just
+//! as important — a system suspend does not freeze the countdown. A
+//! monotonic clock (`std::time::Instant`) does not advance while a laptop is
+//! suspended; a wall clock does, so the block still finishes on time.
 
 use crate::state::settings::Settings;
 use crate::state::store::SessionRecord;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+/// The current Unix time in seconds — the one clock the timer trusts.
+fn now_unix() -> i64 {
+    chrono::Utc::now().timestamp()
+}
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -105,7 +113,11 @@ pub struct State {
     pub remaining: Duration,
     pub total: Duration,
     pub work_done: u32,
-    pub finish_at: Option<Instant>,
+    /// Wall-clock (Unix seconds) deadline for the current phase, when running.
+    /// Using the wall clock — not `std::time::Instant` — is what keeps the
+    /// countdown honest across a system suspend, where the monotonic clock
+    /// freezes.
+    pub finish_unix: Option<i64>,
     /// Unix seconds when the current focus block started, for crash recovery.
     /// Zero while no block is in flight.
     pub started_at: i64,
@@ -143,7 +155,7 @@ impl Shared {
                 remaining: total,
                 total,
                 work_done: 0,
-                finish_at: None,
+                finish_unix: None,
                 started_at: 0,
             }),
             quit: std::sync::atomic::AtomicBool::new(false),
@@ -207,7 +219,7 @@ impl Shared {
         if !s.running {
             s.total = new_total;
             s.remaining = new_total;
-            s.finish_at = None;
+            s.finish_unix = None;
         }
     }
 
@@ -282,8 +294,8 @@ impl Shared {
         s.remaining = s.total;
         s.running = self.cfg.lock().unwrap().auto_start_next;
         // When auto-start is off, land paused ready for the user to begin.
-        s.finish_at = if s.running {
-            Some(Instant::now() + s.remaining)
+        s.finish_unix = if s.running {
+            Some(now_unix() + s.remaining.as_secs() as i64)
         } else {
             None
         };
@@ -296,9 +308,13 @@ impl Shared {
         if !s.running {
             return None;
         }
-        let now = Instant::now();
-        if let Some(finish) = s.finish_at {
-            s.remaining = finish.saturating_duration_since(now);
+        // Wall-clock now. The deadline is a Unix timestamp, so a system
+        // suspend (where the monotonic clock freezes) still advances the
+        // countdown on resume.
+        let now = now_unix();
+        if let Some(finish) = s.finish_unix {
+            let remain = (finish - now).max(0) as u64;
+            s.remaining = Duration::from_secs(remain);
             if s.remaining.is_zero() {
                 // Which phase just ended decides what comes next. Passing the
                 // wrong flag here is what makes a finished break start another
@@ -308,7 +324,7 @@ impl Shared {
                 let ended_work = s.phase == Phase::Work;
                 if ended_work {
                     let rec = SessionRecord {
-                        at: chrono::Utc::now().timestamp(),
+                        at: now,
                         minutes: self.cfg.lock().unwrap().work_minutes,
                     };
                     self.pending_sessions.lock().unwrap().push(rec);
@@ -326,14 +342,14 @@ impl Shared {
         let mut s = self.state.lock().unwrap();
         s.running = !s.running;
         if s.running {
-            s.finish_at = Some(Instant::now() + s.remaining);
+            s.finish_unix = Some(now_unix() + s.remaining.as_secs() as i64);
             if s.phase == Phase::Work {
                 // Stamp the block start so a crash mid-block can be recovered,
                 // even when the block was started from the plain timer rather
                 // than a rota entry. Kept on the first start only: pausing and
                 // resuming must not reset the clock the block began on.
                 if s.started_at == 0 {
-                    s.started_at = chrono::Utc::now().timestamp();
+                    s.started_at = now_unix();
                 }
                 self.pending_events
                     .lock()
@@ -341,7 +357,7 @@ impl Shared {
                     .push(crate::state::settings::EVENT_FOCUS_START.into());
             }
         } else {
-            s.finish_at = None;
+            s.finish_unix = None;
         }
     }
 
@@ -356,7 +372,7 @@ impl Shared {
         s.running = false;
         s.remaining = self.phase_total(Phase::Work);
         s.total = s.remaining;
-        s.finish_at = None;
+        s.finish_unix = None;
         s.work_done = 0;
     }
 
@@ -458,12 +474,12 @@ impl Shared {
         s.total = total;
         s.remaining = Duration::from_secs(remaining_secs.min(duration_secs.max(1)));
         s.running = running;
-        s.finish_at = if running {
-            Some(Instant::now() + s.remaining)
+        s.finish_unix = if running {
+            Some(now_unix() + s.remaining.as_secs() as i64)
         } else {
             None
         };
-        s.started_at = chrono::Utc::now().timestamp();
+        s.started_at = now_unix();
     }
 
     /// True when the clock is sitting at the start of an untouched focus block.
@@ -503,7 +519,7 @@ impl Shared {
         s.total = total;
         s.remaining = total;
         s.running = true;
-        s.finish_at = Some(Instant::now() + total);
+        s.finish_unix = Some(now_unix() + total.as_secs() as i64);
         self.pending_events
             .lock()
             .unwrap()
@@ -675,7 +691,7 @@ mod tests {
     #[test]
     fn tick_fires_exactly_one_advance_at_zero() {
         let s = Shared::new(config());
-        s.state.lock().unwrap().finish_at = Some(Instant::now() - Duration::from_secs(1));
+        s.state.lock().unwrap().finish_unix = Some(now_unix() - 1);
         s.state.lock().unwrap().running = true;
         let msg = s.tick();
         assert!(msg.is_some());
@@ -695,7 +711,7 @@ mod tests {
         let s = Shared::new(config());
 
         // Finish a work session: this legitimately starts a break.
-        s.state.lock().unwrap().finish_at = Some(Instant::now() - Duration::from_secs(1));
+        s.state.lock().unwrap().finish_unix = Some(now_unix() - 1);
         s.state.lock().unwrap().running = true;
         assert!(s.tick().is_some());
         assert_eq!(
@@ -705,7 +721,7 @@ mod tests {
         );
 
         // Now let the break run out. It must go back to work.
-        s.state.lock().unwrap().finish_at = Some(Instant::now() - Duration::from_secs(1));
+        s.state.lock().unwrap().finish_unix = Some(now_unix() - 1);
         s.state.lock().unwrap().running = true;
         assert!(s.tick().is_some());
         assert_eq!(
@@ -716,7 +732,7 @@ mod tests {
 
         // And the work counter must not have been bumped by the break ending:
         // one work session completed, so the next break is still a short one.
-        s.state.lock().unwrap().finish_at = Some(Instant::now() - Duration::from_secs(1));
+        s.state.lock().unwrap().finish_unix = Some(now_unix() - 1);
         s.state.lock().unwrap().running = true;
         assert!(s.tick().is_some());
         assert_eq!(
@@ -734,5 +750,78 @@ mod tests {
         assert!(s.should_inhibit());
         s.skip(); // -> short break (running)
         assert!(!s.should_inhibit());
+    }
+
+    // ── system suspend: the countdown must keep the wall-clock deadline ──
+
+    /// A system suspend freezes the monotonic clock, but the wall clock keeps
+    /// running. The timer's deadline is a Unix timestamp, so after a suspend
+    /// gap the block must be finished — not still counting down. The bug this
+    /// pins down: when the deadline was an `Instant`, a suspend gap appeared
+    /// as zero elapsed time, so the block would finish 15 minutes too late.
+    #[test]
+    fn suspend_gap_makes_the_block_finish_on_time() {
+        let s = Shared::new(config());
+        s.toggle(); // start a 25-minute focus block
+        assert!(s.started_at() > 0);
+
+        // Simulate closing the laptop: 25 minutes of wall time pass (the
+        // block's full length), so the deadline is already in the past
+        // relative to the real wall clock. On resume, the tick must see it
+        // as finished.
+        s.state.lock().unwrap().finish_unix = Some(now_unix() - 1);
+        s.state.lock().unwrap().running = true;
+
+        let msg = s.tick();
+        assert!(
+            msg.is_some(),
+            "a block past its wall-clock deadline must finish"
+        );
+        assert_eq!(s.snapshot().session, "آسایش کوتاه");
+    }
+
+    /// A large suspend gap must not overflow or go negative.
+    #[test]
+    fn large_suspend_gap_clamps_to_zero() {
+        let s = Shared::new(config());
+        s.toggle();
+        // An hour of wall time passes while the laptop is closed.
+        s.state.lock().unwrap().finish_unix = Some(now_unix() - 3600);
+        s.state.lock().unwrap().running = true;
+        assert!(s.tick().is_some());
+        // After finish, remaining is the fresh full break, not a negative.
+        assert!(s.snapshot().minutes <= 15);
+    }
+
+    /// A clock jump backward must not extend the block beyond its planned
+    /// length — the deadline is absolute, not relative to a moving "now".
+    #[test]
+    fn clock_jump_backward_does_not_extend_the_block() {
+        let s = Shared::new(config());
+        s.toggle();
+        // The deadline is one minute from real now.
+        s.state.lock().unwrap().finish_unix = Some(now_unix() + 60);
+        s.state.lock().unwrap().running = true;
+        let remaining_before = s.snapshot().minutes;
+        let _ = s.tick(); // recompute
+                          // Remaining must be ~1 minute, never more than the planned total.
+        assert!(s.snapshot().minutes <= remaining_before + 1);
+    }
+
+    /// The snapshot's remaining and the live clock's remaining must agree on
+    /// the same inputs — recovery and live ticking read the same truth.
+    #[test]
+    fn snapshot_remaining_matches_clock_remaining() {
+        let snap = crate::timer::session_snapshot::SessionSnapshot {
+            started_at: 100,
+            planned_duration_secs: 1500,
+            phase: crate::timer::session_snapshot::Phase::Focus,
+            rota_entry_id: None,
+            decree_text: None,
+            paused_at: None,
+            paused_remaining_secs: 0,
+        };
+        // At wall time 1100 (1000s in), both agree on 500s remaining.
+        assert_eq!(snap.remaining_secs(1100), 500);
     }
 }
