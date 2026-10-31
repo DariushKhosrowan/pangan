@@ -70,6 +70,11 @@ pub fn merge(local: &Data, remote: &Data) -> Data {
         next_prescription_verdict_id: local
             .next_prescription_verdict_id
             .max(remote.next_prescription_verdict_id),
+        season_closes: crate::journal::season_close::merge(
+            &local.season_closes,
+            &remote.season_closes,
+        ),
+        next_season_close_id: local.next_season_close_id.max(remote.next_season_close_id),
     };
     // Keep the id counters ahead of every id actually in use, so a merge can
     // never hand out an id that already belongs to a row. This matters more for
@@ -107,6 +112,9 @@ pub fn merge(local: &Data, remote: &Data) -> Data {
         .max()
         .unwrap_or(0);
     out.next_prescription_verdict_id = out.next_prescription_verdict_id.max(highest_verdict);
+    // Season closes share the same counter semantics: the highest id itself.
+    let highest_close = out.season_closes.iter().map(|c| c.id).max().unwrap_or(0);
+    out.next_season_close_id = out.next_season_close_id.max(highest_close);
     out
 }
 
@@ -532,6 +540,8 @@ mod tests {
             next_prescription_id: 0,
             prescription_verdicts: Vec::new(),
             next_prescription_verdict_id: 0,
+            season_closes: Vec::new(),
+            next_season_close_id: 0,
         };
         let once = merge(&a, &a);
         let twice = merge(&once, &once);

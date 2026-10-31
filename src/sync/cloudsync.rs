@@ -421,6 +421,8 @@ mod tests {
             next_prescription_id: 0,
             prescription_verdicts: Vec::new(),
             next_prescription_verdict_id: 0,
+            season_closes: Vec::new(),
+            next_season_close_id: 0,
         };
         let b = Data {
             schema_version: 1,
@@ -440,6 +442,8 @@ mod tests {
             next_prescription_id: 0,
             prescription_verdicts: Vec::new(),
             next_prescription_verdict_id: 0,
+            season_closes: Vec::new(),
+            next_season_close_id: 0,
         };
         let first = merge::merge(&a, &b);
         let second = merge::merge(&first, &b);
@@ -508,6 +512,8 @@ mod tests {
             next_prescription_id: 0,
             prescription_verdicts: Vec::new(),
             next_prescription_verdict_id: 0,
+            season_closes: Vec::new(),
+            next_season_close_id: 0,
         };
         let mut dev_a = device("desktop");
         let out_a = sync_once(&mut tokens, &local(a.clone()), &mut dev_a, &mut |_, _| {}).unwrap();
@@ -910,6 +916,8 @@ mod recovery_tests {
             next_prescription_id: 0,
             prescription_verdicts: Vec::new(),
             next_prescription_verdict_id: 0,
+            season_closes: Vec::new(),
+            next_season_close_id: 0,
         };
         let mut dev = device("desktop");
         sync_once(&mut tokens, &local(good), &mut dev, &mut |_, _| {}).unwrap();
@@ -1402,6 +1410,8 @@ mod everything_syncs_tests {
             next_prescription_id: 0,
             prescription_verdicts: Vec::new(),
             next_prescription_verdict_id: 0,
+            season_closes: Vec::new(),
+            next_season_close_id: 0,
         };
         let mut dev_a = device("desktop");
         let out_a = sync_once(
@@ -1611,6 +1621,8 @@ mod everything_syncs_tests {
             next_prescription_id: 0,
             prescription_verdicts: Vec::new(),
             next_prescription_verdict_id: 0,
+            season_closes: Vec::new(),
+            next_season_close_id: 0,
         };
         let mut dev = device("desktop");
         let mut settled = data.clone();
