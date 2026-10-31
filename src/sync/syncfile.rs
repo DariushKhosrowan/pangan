@@ -614,6 +614,36 @@ mod tests {
     }
 
     #[test]
+    fn changing_a_field_back_to_its_default_still_stamps_and_propagates() {
+        // The requirement that prompted this regression: resetting a setting
+        // to its default value must still be a real change on the wire. If
+        // value-equality against the shipped default were misread as "no
+        // change" (or stamped at 0), a revert would silently lose to the
+        // stale cloud value and never propagate. `absorb` compares against
+        // what *this device last saw*, not the default, so a revert is a
+        // change and gets a fresh stamp.
+        let mut device = settled(&settings_with(50, "dark")); // baseline: 50
+                                                              // The user resets focus back to the default 25.
+        device.absorb(&settings_with(25, "dark"), 200);
+
+        assert_eq!(
+            device.stamps.get("work_minutes"),
+            Some(&200),
+            "reverting to the default must bump the stamp"
+        );
+
+        // And that reverted value must beat an older cloud copy of 50.
+        let mut cloud = settled(&settings_with(50, "dark"));
+        cloud.absorb(&settings_with(50, "dark"), 100); // stale, older stamp
+        let merged = device.merge(&cloud);
+        assert_eq!(
+            merged.values.get("work_minutes"),
+            Some(&toml::Value::Integer(25)),
+            "the revert must win over the stale cloud value"
+        );
+    }
+
+    #[test]
     fn merging_twice_changes_nothing() {
         let baseline = settings_with(25, "dark");
         let mut a = settled(&baseline);
