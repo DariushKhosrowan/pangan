@@ -31,6 +31,7 @@ pub mod reckoning;
 pub mod standing_promise;
 pub mod unjudged;
 pub mod verdict;
+pub mod week_drift;
 pub mod weekly_review;
 
 // The inscription rules are called from the app layer by bare name because they

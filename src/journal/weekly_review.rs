@@ -605,6 +605,9 @@ pub struct WeeklyDigest {
     pub calibration: crate::stats::report::DurationCalibration,
     /// The most common obstructions in the week, most frequent first.
     pub top_obstructions: Vec<(String, u32)>,
+    /// Week-over-week drift headline: which metric moved the most vs the
+    /// trailing four-week average, and whether that is an improvement.
+    pub drift: Option<crate::journal::week_drift::WeekDrift>,
 }
 
 /// Compose the week's full digest from the store's slices.
@@ -647,16 +650,27 @@ pub fn compose_weekly(
     // Obstructions are keyed by timestamp; use the same UTC bucket as the week.
     let (start_utc, end_utc) = week_utc_bounds(review.range, tz_offset_secs);
     let top = crate::journal::obstruction::top_obstructions(obstructions, start_utc, end_utc, 5);
+    let drift = crate::journal::week_drift::compute_drift(
+        sessions,
+        decrees,
+        inscriptions,
+        verdicts,
+        breaks,
+        today,
+        tz_offset_secs,
+        planned_break_secs,
+    );
     WeeklyDigest {
         review,
         autopsy,
         calibration,
         top_obstructions: top,
+        drift,
     }
 }
 
 /// The week's [start, end] instant in UTC seconds under the given offset.
-fn week_utc_bounds(range: Range, tz_offset_secs: i32) -> (i64, i64) {
+pub(crate) fn week_utc_bounds(range: Range, tz_offset_secs: i32) -> (i64, i64) {
     use chrono::TimeZone;
     let offset = chrono::FixedOffset::east_opt(tz_offset_secs)
         .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).unwrap());
@@ -696,6 +710,15 @@ pub fn render_digest(digest: &WeeklyDigest, locale_fa: bool) -> String {
         )
     };
     out.push_str(&title);
+
+    // 0. The headline finding, if there is one. This is the one line a
+    // long-term user actually wants: "am I getting better or worse, and
+    // where?"
+    if let Some(d) = &digest.drift {
+        out.push_str("> ");
+        out.push_str(&crate::journal::week_drift::headline_label(d, fa));
+        out.push_str("\n\n");
+    }
 
     // 1. The read-back (blocks + summary).
     out.push_str(&render_markdown(&digest.review, fa));
@@ -1118,5 +1141,35 @@ mod tests {
         assert!(md.contains("کالیبراسیون"), "Persian calibration header");
         // No ASCII digit in the landed count line (0 → ۰).
         assert!(md.contains("۰"), "Persian glyph for zero appears");
+    }
+
+    #[test]
+    fn digest_includes_drift_headline_when_data_moves() {
+        // Six sessions in the current week vs a zero baseline → a drift
+        // headline appears at the top of the digest.
+        let sessions: Vec<SessionRecord> = (0..6).map(|i| sess(SAT + i * 60, 25)).collect();
+        let verdicts: Vec<crate::journal::Verdict> = sessions
+            .iter()
+            .map(|s| verdict::declare(s.at, crate::journal::VerdictKind::Kept, s.at).unwrap())
+            .collect();
+        let d = compose_weekly(
+            &sessions,
+            &[],
+            &[],
+            &verdicts,
+            &[],
+            &[],
+            &[],
+            today(),
+            12600,
+            300,
+        );
+        assert!(d.drift.is_some(), "a move from 0 to 6 sessions must drift");
+        let md = render_digest(&d, false);
+        assert!(
+            md.contains("better than your 4-week average"),
+            "headline: {md}"
+        );
+        assert!(md.starts_with("# Weekly digest"), "title first");
     }
 }
