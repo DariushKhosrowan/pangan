@@ -43,6 +43,36 @@ fn weeks_between(older: &str, newer: &str) -> i64 {
     (b - a).num_days() / 7
 }
 
+/// True when a metric's advice has been rebutted by the user within the last
+/// two weeks. A verdict attaches to a ledger row by id; we resolve that row's
+/// metric and check how recent the verdict is.
+fn metric_recently_rebutted(
+    ledger: &[Prescription],
+    verdicts: &[crate::journal::prescription_verdict::PrescriptionVerdict],
+    metric: &str,
+    now_week: &str,
+) -> bool {
+    use crate::journal::prescription_verdict::PrescriptionVerdictKind;
+    for v in verdicts {
+        if v.deleted || v.kind != PrescriptionVerdictKind::Rebutted {
+            continue;
+        }
+        let Some(p) = ledger
+            .iter()
+            .find(|p| !p.deleted && p.id == v.prescription_id)
+        else {
+            continue;
+        };
+        if p.target_metric.as_deref() != Some(metric) {
+            continue;
+        }
+        if weeks_between(&p.week, now_week) <= 2 {
+            return true;
+        }
+    }
+    false
+}
+
 /// Number of stubborn ledger rows for a metric within the last `streak`
 /// weeks of `now_week`. A row from exactly `streak` weeks ago counts as the
 /// `streak`-th consecutive week.
@@ -64,11 +94,15 @@ fn bucket_has_metric(bucket: &[Outcome], metric: &str) -> bool {
 /// Apply the three rules to a suggestion list.
 ///
 /// `now_week` is the current week's start (`"%Y-%m-%d"`), used to decide how
-/// recent an outcome is.
+/// recent an outcome is. `verdicts` are the user's Accept/Rebut/Defer
+/// responses to past prescriptions; a Rebut suppresses the metric entirely —
+/// the user rejected that advice, so re-suggesting it (even escalated) is
+/// worse than silence.
 pub fn apply(
     suggestions: Vec<Suggestion>,
     outcomes: &OutcomeBuckets,
     ledger: &[Prescription],
+    verdicts: &[crate::journal::prescription_verdict::PrescriptionVerdict],
     now_week: &str,
 ) -> Vec<Suggestion> {
     suggestions
@@ -78,6 +112,13 @@ pub fn apply(
                 // Untargeted suggestions (none today) pass through untouched.
                 return Some(s);
             };
+
+            // Rule (0): a user Rebut on any live prescription for this metric
+            // silences it entirely. The human already told the coach the advice
+            // was wrong; no amount of metric movement overrides that.
+            if metric_recently_rebutted(ledger, verdicts, metric, now_week) {
+                return None;
+            }
 
             // Rule (c) first: a stubborn streak escalates to a warning. This
             // overrides suppression — a streak is exactly the case the mild
@@ -203,7 +244,7 @@ mod tests {
             suggestion(SuggestionKind::Calibration, "kept_rate"),
             suggestion(SuggestionKind::Drift, "sessions"),
         ];
-        let out = apply(in_suggestions, &buckets, &[], WEEK);
+        let out = apply(in_suggestions, &buckets, &[], &[], WEEK);
         assert_eq!(out.len(), 1, "kept_rate suppressed, sessions survives");
         assert_eq!(out[0].target_metric, Some("sessions"));
     }
@@ -216,7 +257,7 @@ mod tests {
             reopened: vec![],
         };
         let kept = suggestion(SuggestionKind::Calibration, "kept_rate");
-        let out = apply(vec![kept.clone()], &buckets, &[], WEEK);
+        let out = apply(vec![kept.clone()], &buckets, &[], &[], WEEK);
         assert_eq!(
             out.len(),
             1,
@@ -234,6 +275,7 @@ mod tests {
         let out = apply(
             vec![suggestion(SuggestionKind::Calibration, "kept_rate")],
             &buckets,
+            &[],
             &[],
             WEEK,
         );
@@ -254,7 +296,7 @@ mod tests {
         };
         // The stubborn outcome was a Calibration; this suggestion is Break.
         let s = suggestion(SuggestionKind::Break, "kept_rate");
-        let out = apply(vec![s], &buckets, &[], WEEK);
+        let out = apply(vec![s], &buckets, &[], &[], WEEK);
         assert_eq!(out.len(), 1, "a new lever should not be blocked");
     }
 
@@ -272,7 +314,7 @@ mod tests {
             reopened: vec![],
         };
         let s = suggestion(SuggestionKind::Calibration, "kept_rate");
-        let out = apply(vec![s], &buckets, &ledger, WEEK);
+        let out = apply(vec![s], &buckets, &ledger, &[], WEEK);
         assert_eq!(out.len(), 1, "escalated, not dropped");
         assert!(
             out[0].text.contains("⚠️"),
@@ -289,7 +331,99 @@ mod tests {
             reopened: vec![],
         };
         let in_suggestions = vec![suggestion(SuggestionKind::Drift, "sessions")];
-        let out = apply(in_suggestions.clone(), &buckets, &[], WEEK);
+        let out = apply(in_suggestions.clone(), &buckets, &[], &[], WEEK);
         assert_eq!(out, in_suggestions);
+    }
+
+    #[test]
+    fn rebutted_metric_is_silenced() {
+        // A user rebutted last week's kept_rate advice → no kept_rate
+        // suggestions this week, even though the metric has no outcome to
+        // speak of. Unrelated metrics pass through.
+        use crate::journal::prescription_verdict::PrescriptionVerdictKind;
+        let ledger = vec![prescription(
+            LAST_WEEK,
+            SuggestionKind::Calibration,
+            "kept_rate",
+        )];
+        let verdicts = vec![crate::journal::prescription_verdict::PrescriptionVerdict {
+            id: 1,
+            prescription_id: ledger[0].id,
+            kind: PrescriptionVerdictKind::Rebutted,
+            created_at: 0,
+            note: Some("that advice doesn't apply to my weeks".to_string()),
+            deleted: false,
+        }];
+        let buckets = OutcomeBuckets {
+            resolved: vec![],
+            stubborn: vec![],
+            reopened: vec![],
+        };
+        let in_suggestions = vec![
+            suggestion(SuggestionKind::Calibration, "kept_rate"),
+            suggestion(SuggestionKind::Drift, "sessions"),
+        ];
+        let out = apply(in_suggestions, &buckets, &ledger, &verdicts, WEEK);
+        assert_eq!(
+            out.len(),
+            1,
+            "rebutted metric is silenced, sessions survives"
+        );
+        assert_eq!(out[0].target_metric, Some("sessions"));
+    }
+
+    #[test]
+    fn rebutted_older_than_two_weeks_is_not_silenced() {
+        use crate::journal::prescription_verdict::PrescriptionVerdictKind;
+        // The rebut was three weeks ago — outside the two-week window, so the
+        // metric may be suggested again.
+        let ledger = vec![prescription(
+            "2026-10-10",
+            SuggestionKind::Calibration,
+            "kept_rate",
+        )];
+        let verdicts = vec![crate::journal::prescription_verdict::PrescriptionVerdict {
+            id: 1,
+            prescription_id: ledger[0].id,
+            kind: PrescriptionVerdictKind::Rebutted,
+            created_at: 0,
+            note: None,
+            deleted: false,
+        }];
+        let buckets = OutcomeBuckets {
+            resolved: vec![],
+            stubborn: vec![],
+            reopened: vec![],
+        };
+        let kept = suggestion(SuggestionKind::Calibration, "kept_rate");
+        let out = apply(vec![kept.clone()], &buckets, &ledger, &verdicts, WEEK);
+        assert_eq!(out.len(), 1, "a stale rebut does not silence forever");
+    }
+
+    #[test]
+    fn accepted_verdict_does_not_silence() {
+        use crate::journal::prescription_verdict::PrescriptionVerdictKind;
+        // Accepting the advice is not a rejection — it must not suppress.
+        let ledger = vec![prescription(
+            LAST_WEEK,
+            SuggestionKind::Calibration,
+            "kept_rate",
+        )];
+        let verdicts = vec![crate::journal::prescription_verdict::PrescriptionVerdict {
+            id: 1,
+            prescription_id: ledger[0].id,
+            kind: PrescriptionVerdictKind::Accepted,
+            created_at: 0,
+            note: None,
+            deleted: false,
+        }];
+        let buckets = OutcomeBuckets {
+            resolved: vec![],
+            stubborn: vec![],
+            reopened: vec![],
+        };
+        let kept = suggestion(SuggestionKind::Calibration, "kept_rate");
+        let out = apply(vec![kept.clone()], &buckets, &ledger, &verdicts, WEEK);
+        assert_eq!(out.len(), 1, "accepted advice is still allowed");
     }
 }

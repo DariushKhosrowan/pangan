@@ -649,6 +649,7 @@ pub fn compose_weekly(
     obstructions: &[crate::journal::obstruction::Obstruction],
     rota: &[crate::state::rota::RotaEntry],
     prescriptions: &[crate::journal::prescription_ledger::Prescription],
+    prescription_verdicts: &[crate::journal::prescription_verdict::PrescriptionVerdict],
     today: NaiveDate,
     tz_offset_secs: i32,
     planned_break_secs: u32,
@@ -747,6 +748,7 @@ pub fn compose_weekly(
         suggestions,
         &outcomes,
         prescriptions,
+        prescription_verdicts,
         &now_week,
     );
     let break_quality = crate::timer::break_quality::break_quality(breaks, sessions, verdicts);
@@ -1224,6 +1226,7 @@ pub fn write_digest_if_new(
     obstructions: &[crate::journal::obstruction::Obstruction],
     rota: &[crate::state::rota::RotaEntry],
     prescriptions: &[crate::journal::prescription_ledger::Prescription],
+    prescription_verdicts: &[crate::journal::prescription_verdict::PrescriptionVerdict],
     today: NaiveDate,
     tz_offset_secs: i32,
     planned_break_secs: u32,
@@ -1238,6 +1241,7 @@ pub fn write_digest_if_new(
         obstructions,
         rota,
         prescriptions,
+        prescription_verdicts,
         today,
         tz_offset_secs,
         planned_break_secs,
@@ -1306,6 +1310,7 @@ mod tests {
             &[],
             &[],
             &[],
+            &[],
             today(),
             12600,
             300,
@@ -1337,6 +1342,7 @@ mod tests {
 
         // Any empty record stays silent — no fabricated correlation.
         let d0 = compose_weekly(
+            &[],
             &[],
             &[],
             &[],
@@ -1394,6 +1400,7 @@ mod tests {
             &[],
             &[],
             &[],
+            &[],
             today(),
             12600,
             300,
@@ -1419,6 +1426,7 @@ mod tests {
 
         // A record with no recovery stays silent — no fabricated bounce.
         let d0 = compose_weekly(
+            &[],
             &[],
             &[],
             &[],
@@ -1467,6 +1475,7 @@ mod tests {
             &[],
             &[],
             &[],
+            &[],
             today(),
             12600,
             300,
@@ -1489,6 +1498,7 @@ mod tests {
 
         // Empty record stays silent.
         let d0 = compose_weekly(
+            &[],
             &[],
             &[],
             &[],
@@ -1690,6 +1700,7 @@ mod tests {
             &[],
             &[],
             &[],
+            &[],
             today(),
             12600,
             300,
@@ -1733,6 +1744,7 @@ mod tests {
             &[],
             &[],
             &rota,
+            &[],
             &[],
             today(),
             12600,
@@ -1793,6 +1805,7 @@ mod tests {
             &[],
             &rota,
             &[],
+            &[],
             today(),
             12600,
             300,
@@ -1834,6 +1847,7 @@ mod tests {
             &obstructions,
             &[],
             &[],
+            &[],
             today(),
             12600,
             300,
@@ -1858,6 +1872,7 @@ mod tests {
     #[test]
     fn render_digest_persian_digits_when_locale_fa() {
         let d = compose_weekly(
+            &[],
             &[],
             &[],
             &[],
@@ -1893,6 +1908,7 @@ mod tests {
             &[],
             &[],
             &verdicts,
+            &[],
             &[],
             &[],
             &[],
@@ -1944,6 +1960,7 @@ mod tests {
             &[],
             &[],
             &prescriptions,
+            &[],
             today(),
             12600,
             300,

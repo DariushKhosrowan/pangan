@@ -63,6 +63,13 @@ pub fn merge(local: &Data, remote: &Data) -> Data {
             &remote.prescriptions,
         ),
         next_prescription_id: local.next_prescription_id.max(remote.next_prescription_id),
+        prescription_verdicts: crate::journal::prescription_verdict::merge(
+            &local.prescription_verdicts,
+            &remote.prescription_verdicts,
+        ),
+        next_prescription_verdict_id: local
+            .next_prescription_verdict_id
+            .max(remote.next_prescription_verdict_id),
     };
     // Keep the id counters ahead of every id actually in use, so a merge can
     // never hand out an id that already belongs to a row. This matters more for
@@ -90,6 +97,16 @@ pub fn merge(local: &Data, remote: &Data) -> Data {
     // store that held nothing.
     let highest_prescription = out.prescriptions.iter().map(|p| p.id).max().unwrap_or(0);
     out.next_prescription_id = out.next_prescription_id.max(highest_prescription);
+    // Prescription verdicts are handed out by a counter that means "the last id
+    // handed out", exactly like the prescriptions counter. Same floor rule: the
+    // highest id itself, so an empty list never climbs on merge.
+    let highest_verdict = out
+        .prescription_verdicts
+        .iter()
+        .map(|v| v.id)
+        .max()
+        .unwrap_or(0);
+    out.next_prescription_verdict_id = out.next_prescription_verdict_id.max(highest_verdict);
     out
 }
 
@@ -513,6 +530,8 @@ mod tests {
             obstructions: vec![],
             prescriptions: vec![],
             next_prescription_id: 0,
+            prescription_verdicts: Vec::new(),
+            next_prescription_verdict_id: 0,
         };
         let once = merge(&a, &a);
         let twice = merge(&once, &once);

@@ -113,6 +113,13 @@ pub struct Data {
     /// Hands out prescription ids.
     #[serde(default)]
     pub next_prescription_id: u64,
+    /// User verdicts on prescriptions issued. See
+    /// `journal::prescription_verdict`.
+    #[serde(default)]
+    pub prescription_verdicts: Vec<crate::journal::prescription_verdict::PrescriptionVerdict>,
+    /// Hands out prescription-verdict ids.
+    #[serde(default)]
+    pub next_prescription_verdict_id: u64,
 }
 
 fn default_schema_version() -> u32 {
@@ -137,6 +144,8 @@ impl Default for Data {
             breaks: Vec::new(),
             prescriptions: Vec::new(),
             next_prescription_id: 0,
+            prescription_verdicts: Vec::new(),
+            next_prescription_verdict_id: 0,
         }
     }
 }
