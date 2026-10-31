@@ -2576,6 +2576,20 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         ) {
             crate::log::info(&format!("wrote daily follow-up to {}", path.display()));
         }
+        // The season read-back: one file per Jalali season, written on the
+        // first launch inside that season. The long view the weekly digest
+        // can't provide — whether a habit actually formed over three months.
+        if let Some(path) = crate::journal::season_summary::write_season_if_new(
+            &st.data.sessions,
+            &st.data.decrees,
+            &st.data.inscriptions,
+            &st.data.verdicts,
+            today,
+            tz,
+            locale_fa,
+        ) {
+            crate::log::info(&format!("wrote season summary to {}", path.display()));
+        }
     }
 
     // If the app died mid-focus-block, bring the clock back where it was.
