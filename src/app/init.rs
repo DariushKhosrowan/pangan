@@ -416,6 +416,22 @@ fn run_action(
         TrayAction::Skip => shared.skip(),
         TrayAction::Reset => {
             shared.reset();
+            // A reset that follows a started block rewrites the clock but not
+            // the plan: without this the rota would keep claiming the block was
+            // taken up and never learn it was abandoned, and the day's record
+            // would read as if it were still running. Said here rather than at
+            // midnight, when the user no longer remembers why.
+            //
+            // A finish (`Toggle`/`Skip` landing a session) is a stronger fact
+            // than the reset that may follow it, so `abandon_open` leaves a
+            // claimed entry alone.
+            let abandoned = {
+                let mut st = app.store.lock().unwrap();
+                st.abandon_open_rota_blocks()
+            };
+            if abandoned > 0 {
+                app.cloud.mark_dirty();
+            }
             None
         }
         TrayAction::Quit => {
@@ -892,6 +908,11 @@ fn push_rota(win: &PanganWindow, app: &AppState, st: &Store) {
         } else {
             format!("{}د", calendar::fa_num(e.minutes as i64))
         };
+        // What became of this block, as the row draws it. Resolved through
+        // `outcome::effective` rather than read off the field, so a stale entry
+        // from an earlier day reads as missed here for the same reason it does
+        // in the tally — one rule, two readers.
+        let outcome = crate::state::outcome::effective(e, &today_key);
         list_height += if e.decree.is_empty() { 40.0 } else { 54.0 };
         items.push(crate::ui::RotaItem {
             id: e.id as i32,
@@ -900,6 +921,7 @@ fn push_rota(win: &PanganWindow, app: &AppState, st: &Store) {
             length: SharedString::from(length),
             state: SharedString::from(state),
             decree: SharedString::from(e.decree.clone()),
+            outcome: SharedString::from(outcome.as_str()),
         });
     }
     win.set_rota(ModelRc::new(VecModel::from(items)));
@@ -912,6 +934,52 @@ fn push_rota(win: &PanganWindow, app: &AppState, st: &Store) {
     win.set_rota_next_label(SharedString::from(match next {
         Some(e) => e.label.clone(),
         None => String::new(),
+    }));
+
+    // What the day's plans came to. Said as a sentence with the parts named,
+    // not as a score: "۴ انجام · ۱ رهاشده · ۲ مانده" reads back what happened,
+    // where "3/7" would only say how much of it did not. Rendered from the same
+    // tally the report reads, so the two screens cannot disagree about the day.
+    //
+    // A day with no plans says nothing at all. An empty scoreboard reads as a
+    // failure the user did not commit — they simply had not written the day yet.
+    let tally = st.rota_day_tally(&today_key, &today_key);
+    win.set_rota_tally_visible(!tally.is_empty());
+    win.set_rota_tally_label(SharedString::from(if tally.is_empty() {
+        String::new()
+    } else {
+        let mut parts: Vec<String> = Vec::with_capacity(3);
+        if tally.done > 0 {
+            parts.push(if en {
+                format!("{} done", tally.done)
+            } else {
+                format!("{} انجام", calendar::fa_num(tally.done as i64))
+            });
+        }
+        if tally.abandoned > 0 {
+            parts.push(if en {
+                format!("{} abandoned", tally.abandoned)
+            } else {
+                format!("{} رهاشده", calendar::fa_num(tally.abandoned as i64))
+            });
+        }
+        if tally.pending > 0 {
+            parts.push(if en {
+                format!("{} to go", tally.pending)
+            } else {
+                format!("{} مانده", calendar::fa_num(tally.pending as i64))
+            });
+        }
+        if tally.missed > 0 {
+            parts.push(if en {
+                format!("{} missed", tally.missed)
+            } else {
+                format!("{} از دست رفته", calendar::fa_num(tally.missed as i64))
+            });
+        }
+        // Only the parts that happened. A zero is not information here, and a
+        // row of zeros is what makes a summary stop being read.
+        parts.join(" · ")
     }));
 
     // "2 of 5 left". Built here rather than in Slint because this is where the
@@ -1140,6 +1208,14 @@ fn push_inscriptions(win: &PanganWindow, app: &AppState, st: &Store) {
             verdict: SharedString::from(verdict_label),
             verdict_declared,
             verdict_kind: SharedString::from(verdict_kind),
+            // Which planned block this session answered. Empty for a block
+            // started from the plain timer, which had no plan to answer — the
+            // row then simply omits the line rather than saying "unplanned".
+            planned: SharedString::from(
+                st.rota_entry_for_session(session_at)
+                    .map(|e| e.label.clone())
+                    .unwrap_or_default(),
+            ),
         });
     }
 
@@ -2307,6 +2383,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 // unwritten session is not resurrected, because by then the user
                 // has lost the thread of what it was.
                 if let Some(newest) = recs.iter().map(|r| r.at).max() {
+                    // Attach the session to the plan it answered, before anything
+                    // else touches the store. This is the only instant the app
+                    // knows both that a block finished and which rota entry was
+                    // open for it — the rota row keeps `opened_at` precisely so
+                    // the pair can be joined here and nowhere else.
+                    //
+                    // A block started from the plain timer claims nothing: no
+                    // entry was open, so no plan changed, and no new plan is
+                    // invented to hold a session that never had one.
+                    st.claim_rota_outcome(newest);
                     // Pair the intention with the session that just ended. This
                     // is the only instant both timestamps exist: `written_at`
                     // was captured when the user pressed Issue, `newest` is now.

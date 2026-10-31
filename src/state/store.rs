@@ -500,6 +500,65 @@ impl Store {
         }
     }
 
+    // ── outcomes: what became of a planned block ──────────────────────────
+    //
+    // Every rule lives in `state::outcome`; these methods only own the save and
+    // the borrow. Kept apart from the rota methods above because they answer a
+    // different question — not "what is planned" but "what happened" — and a
+    // screen that asks the first should not have to hold the second's lock for
+    // longer than it needs.
+
+    /// Attach the session that just landed to the entry whose block produced it.
+    ///
+    /// Returns the entry's id when one was claimed. `None` is the ordinary case
+    /// of a block started from the plain timer: no plan was open, so no plan
+    /// changed, and nothing is invented to hold it.
+    pub fn claim_rota_outcome(&mut self, session_at: i64) -> Option<u64> {
+        let id = crate::state::outcome::claim(&mut self.data.rota, session_at)?;
+        self.save();
+        Some(id)
+    }
+
+    /// Say that every open block was abandoned, because the clock was reset.
+    ///
+    /// Returns how many entries changed, so the caller knows whether the day's
+    /// record moved and a sync is worth marking dirty.
+    pub fn abandon_open_rota_blocks(&mut self) -> usize {
+        let changed = crate::state::outcome::abandon_open(&mut self.data.rota);
+        if !changed.is_empty() {
+            self.save();
+        }
+        changed.len()
+    }
+
+    /// The entry a finished session belongs to, if one was ever recorded.
+    ///
+    /// The reverse of the link `claim_rota_outcome` writes: given a session in
+    /// the archive, which plan it answered. Used by the read-back so a block can
+    /// be shown under the line it was planned against.
+    pub fn rota_entry_for_session(&self, session_at: i64) -> Option<&RotaEntry> {
+        self.data
+            .rota
+            .iter()
+            .find(|e| e.is_live() && e.session_at == session_at)
+    }
+
+    /// What one day's plans added up to.
+    pub fn rota_day_tally(&self, day: &str, today: &str) -> crate::state::outcome::DayTally {
+        crate::state::outcome::tally(&self.data.rota, day, today)
+    }
+
+    /// Unused by the app but exercised by the store's tests, which need to read
+    /// an outcome without borrowing `data` directly.
+    #[allow(dead_code)]
+    pub fn rota_outcome(&self, id: u64, today: &str) -> Option<crate::state::outcome::Outcome> {
+        self.data
+            .rota
+            .iter()
+            .find(|e| e.id == id)
+            .map(|e| crate::state::outcome::effective(e, today))
+    }
+
     /// Unstarted entries left behind on earlier days, oldest first.
     pub fn rota_carry_over(&self, today: &str) -> Vec<RotaEntry> {
         rota::carry_over(&self.data.rota, today)
@@ -630,6 +689,84 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── outcomes ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn a_finished_session_is_claimed_by_the_open_rota_entry() {
+        let mut store = Store::load();
+        store.data = Data::default();
+        store.data.next_rota_id = 0;
+        let id = store
+            .add_rota_entry("2026-10-02", "write", None, "", 25)
+            .unwrap();
+        assert!(store.open_rota_entry(id));
+        assert_eq!(store.claim_rota_outcome(9_000), Some(id));
+        assert_eq!(
+            store.rota_outcome(id, "2026-10-02"),
+            Some(crate::state::outcome::Outcome::Done)
+        );
+        // The link is two-way: the session can be traced back to its plan.
+        assert_eq!(
+            store
+                .rota_entry_for_session(9_000)
+                .map(|e| e.label.clone())
+                .as_deref(),
+            Some("write")
+        );
+    }
+
+    #[test]
+    fn a_session_with_no_open_plan_claims_nothing() {
+        // The ordinary case of a block started from the plain timer. Nothing is
+        // invented to hold it.
+        let mut store = Store::load();
+        store.data = Data::default();
+        store.data.next_rota_id = 0;
+        store
+            .add_rota_entry("2026-10-02", "write", None, "", 25)
+            .unwrap();
+        assert_eq!(store.claim_rota_outcome(9_000), None);
+        assert!(store.rota_entry_for_session(9_000).is_none());
+    }
+
+    #[test]
+    fn a_reset_abandons_the_open_block_and_the_tally_says_so() {
+        let mut store = Store::load();
+        store.data = Data::default();
+        store.data.next_rota_id = 0;
+        let id = store
+            .add_rota_entry("2026-10-02", "write", None, "", 25)
+            .unwrap();
+        store.open_rota_entry(id);
+        assert_eq!(store.abandon_open_rota_blocks(), 1);
+        assert_eq!(
+            store.rota_outcome(id, "2026-10-02"),
+            Some(crate::state::outcome::Outcome::Abandoned)
+        );
+        let t = store.rota_day_tally("2026-10-02", "2026-10-02");
+        assert_eq!(t.planned, 1);
+        assert_eq!(t.abandoned, 1);
+        // Abandoning twice is a no-op: the block was already given up.
+        assert_eq!(store.abandon_open_rota_blocks(), 0);
+    }
+
+    #[test]
+    fn a_reset_after_a_finished_block_leaves_it_done() {
+        let mut store = Store::load();
+        store.data = Data::default();
+        store.data.next_rota_id = 0;
+        let id = store
+            .add_rota_entry("2026-10-02", "write", None, "", 25)
+            .unwrap();
+        store.open_rota_entry(id);
+        store.claim_rota_outcome(9_000);
+        assert_eq!(store.abandon_open_rota_blocks(), 0);
+        assert_eq!(
+            store.rota_outcome(id, "2026-10-02"),
+            Some(crate::state::outcome::Outcome::Done)
+        );
+    }
 
     #[test]
     fn add_task_assigns_increasing_ids() {

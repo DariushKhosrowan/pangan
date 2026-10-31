@@ -324,14 +324,32 @@ fn newer_verdict(candidate: &Verdict, existing: &Verdict) -> bool {
 /// Precedence, in order:
 ///
 /// 1. a tombstone wins — a removal that loses to a stale copy would come back;
-/// 2. an opened entry beats a pending one — the block was actually started
+/// 2. an entry with an outcome beats one without — the block was actually
+///    carried out (or actually abandoned) somewhere, and that fact is newer
+///    than "still waiting", which is only ever the state before it;
+/// 3. a finished outcome beats an abandoned one. Both are final, but done is
+///    the stronger fact: it is the one a session was recorded for, and letting
+///    a stale `abandoned` win would erase a block that really ran;
+/// 4. an opened entry beats a pending one — the block was actually started
 ///    somewhere, and putting it back in the queue would ask the user to start
 ///    work they have already begun;
-/// 3. otherwise the later `opened_at`, then the label, so both devices land on
+/// 5. otherwise the later `opened_at`, then the label, so both devices land on
 ///    the same row rather than each keeping its own.
+///
+/// Rules 2 and 3 are not an afterthought: a field that is merged by falling
+/// through to the label would let a device that never saw a session revert a
+/// finished block to pending on every sync.
 fn newer_rota(candidate: &RotaEntry, existing: &RotaEntry) -> bool {
     if candidate.deleted != existing.deleted {
         return candidate.deleted;
+    }
+    let c_out = crate::state::outcome::Outcome::parse(candidate.outcome.as_deref().unwrap_or(""));
+    let e_out = crate::state::outcome::Outcome::parse(existing.outcome.as_deref().unwrap_or(""));
+    match (c_out, e_out) {
+        (Some(_), None) => return true,
+        (None, Some(_)) => return false,
+        (Some(c), Some(e)) if c != e => return c.rank() < e.rank(),
+        _ => {}
     }
     if candidate.opened_at != existing.opened_at {
         return candidate.opened_at > existing.opened_at;
@@ -733,6 +751,95 @@ mod tests {
             ..Default::default()
         };
         assert!(merge(&a, &Data::default()).next_plan_id >= 9);
+    }
+
+    // ── outcomes ─────────────────────────────────────────────────────────
+
+    fn finished(id: u64, day: &str, outcome: &str, session_at: i64) -> RotaEntry {
+        let mut e = planned(id, day, "write the thing", 100);
+        e.opened_at = 5_000;
+        e.outcome = Some(outcome.to_string());
+        e.session_at = session_at;
+        e
+    }
+
+    #[test]
+    fn a_finished_block_is_not_reverted_by_a_device_that_never_saw_the_session() {
+        // The failure this rules out: the laptop syncs before the session lands,
+        // then the desktop merges the laptop's copy back in. If the outcome were
+        // merged by falling through to the label, the block would revert to
+        // pending and the day would forget work that actually happened.
+        let done = finished(1, "2026-10-02", "done", 9_000);
+        let stale = {
+            let mut e = planned(1, "2026-10-02", "write the thing", 100);
+            e.opened_at = 5_000;
+            e
+        };
+        let a = Data {
+            rota: vec![done],
+            ..Default::default()
+        };
+        let b = Data {
+            rota: vec![stale],
+            ..Default::default()
+        };
+        let merged = merge(&a, &b);
+        assert_eq!(merged.rota[0].outcome.as_deref(), Some("done"));
+        assert_eq!(merged.rota[0].session_at, 9_000);
+        // And the other direction agrees, so the two devices converge.
+        let merged = merge(&b, &a);
+        assert_eq!(merged.rota[0].outcome.as_deref(), Some("done"));
+    }
+
+    #[test]
+    fn a_done_block_beats_a_stale_abandoned_one() {
+        // A session that landed is the stronger fact. A device that marked the
+        // block abandoned before the session reached it must not erase it.
+        let done = finished(1, "2026-10-02", "done", 9_000);
+        let abandoned = finished(1, "2026-10-02", "abandoned", 0);
+        let a = Data {
+            rota: vec![done],
+            ..Default::default()
+        };
+        let b = Data {
+            rota: vec![abandoned],
+            ..Default::default()
+        };
+        assert_eq!(merge(&a, &b).rota[0].outcome.as_deref(), Some("done"));
+        assert_eq!(merge(&b, &a).rota[0].outcome.as_deref(), Some("done"));
+    }
+
+    #[test]
+    fn an_abandoned_block_still_beats_a_pending_one() {
+        let abandoned = finished(1, "2026-10-02", "abandoned", 0);
+        let pending = planned(1, "2026-10-02", "write the thing", 100);
+        let a = Data {
+            rota: vec![abandoned],
+            ..Default::default()
+        };
+        let b = Data {
+            rota: vec![pending],
+            ..Default::default()
+        };
+        assert_eq!(merge(&a, &b).rota[0].outcome.as_deref(), Some("abandoned"));
+    }
+
+    #[test]
+    fn a_removed_plan_takes_its_outcome_with_it() {
+        // A tombstone must still beat a finished outcome, or deleting a plan
+        // would be undone by the device that had it done.
+        let mut dead = finished(1, "2026-10-02", "done", 9_000);
+        dead.deleted = true;
+        let a = Data {
+            rota: vec![finished(1, "2026-10-02", "done", 9_000)],
+            ..Default::default()
+        };
+        let b = Data {
+            rota: vec![dead],
+            ..Default::default()
+        };
+        assert!(merge(&a, &b).rota[0].deleted);
+        assert!(merge(&b, &a).rota[0].deleted);
     }
 
     // ── verdicts ─────────────────────────────────────────────────────────

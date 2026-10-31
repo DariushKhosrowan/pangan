@@ -37,6 +37,11 @@ no audio files, everything generated mathematically.
   actually about. A record nobody reads back is an archive, not a record.
 - 🗓️ **Day rota** — write the day down as a numbered list before it starts, then
   begin each block with one press. Its length and its decree come with it.
+- 🎯 **Planned vs. done** — every planned block records what it actually became:
+  a landed session, a block opened and given up, or one the day never reached.
+  Each rota row draws its own mark, and the day's summary reads back the parts
+  by name rather than as a score, so "started but abandoned" is never mistaken
+  for "carried through".
 - ✅ **Tasks & scheduling** — add tasks (with optional date/time), tracked persistently.
 - 🖥️ **System tray** — live countdown, Start/Pause, Skip, Reset, Quit.
 - 🔔 **Desktop notifications** — when a focus/break session ends.

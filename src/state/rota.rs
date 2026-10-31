@@ -87,6 +87,25 @@ pub struct RotaEntry {
     /// was started and abandoned produced no session at all).
     #[serde(default)]
     pub opened_at: i64,
+    /// Unix seconds of the session this block produced, 0 while it has none.
+    ///
+    /// The link [`super::outcome::claim`] writes when a session lands. Kept as
+    /// the session's own key rather than as a copy of its words, so the entry
+    /// points at the record instead of duplicating it.
+    ///
+    /// `#[serde(default)]` on both this and `outcome` is load-bearing: a rota
+    /// row written before this feature must still parse, and stop providing the
+    /// key older builds do not know about.
+    #[serde(default)]
+    pub session_at: i64,
+    /// What became of the block, as `outcome::Outcome`'s storage string.
+    ///
+    /// `None` means the app has not seen it settle — the block is still running,
+    /// or the row predates the field. Read through
+    /// [`super::outcome::effective`], never directly, so the "still pending on a
+    /// past day is missed" rule has exactly one home.
+    #[serde(default)]
+    pub outcome: Option<String>,
     /// Set when the entry is taken off the rota. The row stays so the removal
     /// can travel to the other device; the same reasoning as every other
     /// tombstone in this store.
@@ -240,6 +259,8 @@ pub fn create(
         minutes,
         created_at: now,
         opened_at: 0,
+        session_at: 0,
+        outcome: None,
         deleted: false,
     })
 }
@@ -326,6 +347,11 @@ pub fn replan(entry: &RotaEntry, new_id: u64, today: &str, now: i64) -> RotaEntr
         minutes: entry.minutes,
         created_at: now,
         opened_at: 0,
+        // A replanned entry is a fresh plan for a new day: it inherits the words
+        // but none of yesterday's outcome, or a leftover would arrive already
+        // marked done and never enter the queue.
+        session_at: 0,
+        outcome: None,
         deleted: false,
     }
 }

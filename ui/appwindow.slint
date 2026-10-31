@@ -229,6 +229,13 @@ export struct RotaItem {
     /// second line so the intention is visible before the block runs, which is
     /// the whole reason it was written down early.
     decree: string,
+    /// What became of the block: "done" | "abandoned" | "missed" | "pending".
+    ///
+    /// Distinct from `state`, which says where the row stands in the queue.
+    /// An entry can be `started` and `abandoned` at once — the block was taken
+    /// up and did not finish — and that pair is the most useful thing the row
+    /// can say, because it is the one the user cannot see for themselves.
+    outcome: string,
 }
 
 // One saved plan: a day shape that can be given to another day.
@@ -273,6 +280,13 @@ export struct InscriptionItem {
     /// The verdict's storage key ("kept", "partial", …), so the row can tell
     /// which seal is the active one without comparing translated strings.
     verdict-kind: string,
+    /// The rota entry this block was planned as, or "" when the block was
+    /// started from the plain timer rather than from the day's list.
+    ///
+    /// Shown first on the row, above the decree: the plan is the outermost
+    /// layer of what the block was for — the list said it, the decree refined
+    /// it, the inscription says what came of it.
+    planned: string,
 }
 
 // One decree the span made and did not answer.
@@ -1299,10 +1313,33 @@ component RotaRow inherits Rectangle {
         // A block already begun. This is the "taken up" mark the row has
         // instead of a strikeout, and it stays for the rest of the day so the
         // rota reads as a record of what was planned and what was started.
-        if item.state == "started" : Icon {
+        //
+        // Two marks rather than one, because "begun" and "finished" are the
+        // distinction the whole outcome record exists to draw: a filled tick
+        // means a session landed, a hollow ring means the block was opened and
+        // given up. Drawing both identically would hide the only fact the user
+        // cannot recover from memory.
+        if item.outcome == "done" : Icon {
             kind: "check";
             size: 12px;
             color: Palette.accent;
+            y: (parent.height - self.height) / 2;
+        }
+
+        if item.state == "started" && item.outcome == "abandoned" : Rectangle {
+            width: 11px;
+            height: 11px;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: Palette.text-faint;
+            background: transparent;
+            y: (parent.height - self.height) / 2;
+        }
+
+        if item.outcome == "missed" : Icon {
+            kind: "close";
+            size: 10px;
+            color: Palette.text-faint;
             y: (parent.height - self.height) / 2;
         }
 
@@ -2072,6 +2109,13 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in-out property <string> rota-new-label: "";
     in-out property <int> rota-new-minutes: 25;
     in property <bool> rota-can-add: false;
+    /// What the day's plans came to: "۲ انجام · ۱ رهاشده · ۲ مانده".
+    ///
+    /// Built in Rust because the digits are Persian and Slint cannot
+    /// interpolate. Empty on a day with no plans, and `rota-tally-visible`
+    /// carries the same fact as a bool so the `if` above needs no inversion.
+    in property <string> rota-tally-label: "";
+    in property <bool> rota-tally-visible: false;
 
     // ---- Saved plans ----
     //
@@ -2749,6 +2793,24 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             color: Palette.text-faint;
                             vertical-alignment: center;
                         }
+                    }
+
+                    // "2 done · 1 abandoned": what the day's plans came to.
+                    // Built in Rust — the digits are Persian here — and said as
+                    // a sentence rather than a score, because the point is to
+                    // read back what happened, not to be graded on it.
+                    //
+                    // Gated on a bool pushed from Rust rather than on the string
+                    // being non-empty: an inverted condition inside `if` is a
+                    // Slint syntax error, and comparing strings there is how the
+                    // same mistake gets written a second time.
+                    if root.rota-tally-visible : Text {
+                        height: 18px;
+                        text: root.rota-tally-label;
+                        font-size: Type.caption;
+                        color: Palette.text-faint;
+                        vertical-alignment: center;
+                        overflow: elide;
                     }
 
                     if root.rota.length == 0 : Text {
@@ -3920,6 +3982,31 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                             row-card := VerticalLayout {
                                 padding: 14px;
                                 spacing: 6px;
+
+                                // The plan this block came from, when it came
+                                // from one. Above the decree because it is the
+                                // outermost layer: the day's list said this
+                                // block would happen, and now it has.
+                                if row.planned != "" : HorizontalLayout {
+                                    spacing: 6px;
+                                    alignment: start;
+                                    Text {
+                                        text: "◦";
+                                        font-size: Type.caption;
+                                        color: Palette.text-faint;
+                                        vertical-alignment: top;
+                                    }
+                                    Text {
+                                        text: row.planned;
+                                        font-family: "Vazirmatn";
+                                        font-size: Type.caption;
+                                        color: Palette.text-faint;
+                                        wrap: word-wrap;
+                                        line-height-factor: 1.4;
+                                        horizontal-stretch: 1;
+                                        horizontal-alignment: Strings.fa ? right : left;
+                                    }
+                                }
 
                                 // The promise first, then the outcome. Only
                                 // shown when a decree was actually issued, so a
