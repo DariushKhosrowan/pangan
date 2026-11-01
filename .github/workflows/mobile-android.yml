@@ -30,10 +30,11 @@ jobs:
 
       - name: Install NDK + platform + build-tools (non-interactive)
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
           # Fail hard if a required component cannot be installed — a missing
           # platform shows up later as "Platform N is not installed".
-          sdkmanager \
+          yes | "$SDKMANAGER" \
             "ndk;27.2.12479018" \
             "platforms;android-35" \
             "build-tools;35.0.0"
