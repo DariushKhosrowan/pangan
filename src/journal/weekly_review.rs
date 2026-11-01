@@ -234,7 +234,7 @@ pub fn build_week(
         unjudged_blocks: {
             use chrono::TimeZone;
             let offset = chrono::FixedOffset::east_opt(tz_offset_secs)
-                .unwrap_or_else(|| chrono::FixedOffset::east(0));
+                .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).expect("zero offset is always valid"));
             let start_utc = offset
                 .from_local_datetime(&chrono::NaiveDateTime::new(
                     range.start,

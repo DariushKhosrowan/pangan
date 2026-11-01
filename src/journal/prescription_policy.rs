@@ -85,6 +85,7 @@ fn stubborn_streak(metric: &str, ledger: &[Prescription], now_week: &str) -> usi
 }
 
 /// True when an outcome sits in a given bucket and targets `metric`.
+#[allow(dead_code)] // part of the prescription-policy API surface; kept for future bucket filters
 fn bucket_has_metric(bucket: &[Outcome], metric: &str) -> bool {
     bucket
         .iter()

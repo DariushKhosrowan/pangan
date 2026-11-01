@@ -46,20 +46,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-latest, macos-13]
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-latest, macos-latest]
         include:
           - os: ubuntu-latest
             artifact: pangan-linux-x86_64
+            target: x86_64-unknown-linux-gnu
           - os: ubuntu-24.04-arm
             artifact: pangan-linux-aarch64
+            target: aarch64-unknown-linux-gnu
           - os: windows-latest
             artifact: pangan-windows-x86_64
+            target: x86_64-pc-windows-msvc
           - os: windows-11-arm
             artifact: pangan-windows-aarch64
+            target: aarch64-pc-windows-msvc
           - os: macos-latest
             artifact: pangan-macos-arm64
-          - os: macos-13
+            target: aarch64-apple-darwin
+          - os: macos-latest
             artifact: pangan-macos-x86_64
+            target: x86_64-apple-darwin
 
     steps:
       - uses: actions/checkout@v4
@@ -69,6 +75,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libwayland-dev libx11-dev libxkbcommon-x11-dev libgtk-3-dev
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -82,26 +91,26 @@ jobs:
             ${{ runner.os }}-${{ matrix.artifact }}-cargo-
 
       - name: Check
-        run: cargo check --all-features
+        run: cargo check --all-features --target ${{ matrix.target }}
 
-      # Windows ARM64: `cargo test` links the test binary with the MSVC
-      # linker, which currently fails with LNK1181 (cannot open 'windows.lib')
-      # in some `windows`/MSVC versions on aarch64. This is a toolchain
-      # issue, not a code issue — `cargo build` succeeds. So on that one
-      # target we run the suite's compile check but skip running the tests.
+      # Two cases skip running the suite:
+      # - Windows ARM64: MSVC LNK1181 toolchain bug on aarch64 (build works).
+      # - macOS x86_64 cross-compiled on the arm64 macos-latest host: the
+      #   x86_64 test binary cannot be executed on Apple Silicon, so we
+      #   compile-check it and skip the run.
       - name: Test
-        if: matrix.artifact != 'pangan-windows-aarch64'
-        run: cargo test --all-features
+        if: matrix.artifact != 'pangan-windows-aarch64' && matrix.artifact != 'pangan-macos-x86_64'
+        run: cargo test --all-features --target ${{ matrix.target }}
 
       - name: Build (release)
-        run: cargo build --release
+        run: cargo build --release --target ${{ matrix.target }}
 
       # Give the binary a unique per-OS name so Linux/macOS artifacts
       # cannot collide in the release (both are named "pangan" by cargo).
       - name: Prepare release artifact
         shell: bash
         run: |
-          cd target/release
+          cd target/${{ matrix.target }}/release
           if [ -f pangan.exe ]; then
             mv pangan.exe "${{ matrix.artifact }}.exe"
           else
@@ -111,7 +120,7 @@ jobs:
       - name: Compute SHA256
         shell: bash
         run: |
-          cd target/release
+          cd target/${{ matrix.target }}/release
           f="${{ matrix.artifact }}"
           if [ -f "${f}.exe" ]; then f="${f}.exe"; fi
           python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest(), sys.argv[1])" "$f" > "${{ matrix.artifact }}.sha256"
@@ -121,9 +130,9 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: |
-            target/release/${{ matrix.artifact }}
-            target/release/${{ matrix.artifact }}.exe
-            target/release/${{ matrix.artifact }}.sha256
+            target/${{ matrix.target }}/release/${{ matrix.artifact }}
+            target/${{ matrix.target }}/release/${{ matrix.artifact }}.exe
+            target/${{ matrix.target }}/release/${{ matrix.artifact }}.sha256
           if-no-files-found: error
 
   release:
