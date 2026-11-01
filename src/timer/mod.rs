@@ -3,4 +3,5 @@
 pub mod break_quality;
 pub mod break_record;
 pub mod clock;
+pub mod lifecycle;
 pub mod session_snapshot;

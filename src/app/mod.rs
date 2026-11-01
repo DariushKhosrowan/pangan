@@ -7,8 +7,15 @@
 
 pub mod automation;
 pub mod init;
+pub mod mobile;
 
 /// Start the application. Returns only when the user quits.
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     init::run()
+}
+
+/// Start the mobile host. The platform entry points call this after
+/// installing their native backend and platform adapter.
+pub fn run_mobile(root: std::path::PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    mobile::run_hosted(root)
 }

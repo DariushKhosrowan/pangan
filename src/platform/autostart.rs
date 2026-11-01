@@ -58,4 +58,11 @@ pub fn ensure() {
             let _ = std::fs::write(plist_path, plist);
         }
     }
+
+    // Mobile: no autostart concept; keep the library compiling on Android and
+    // iOS targets (the desktop run loop is never executed there).
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = ();
+    }
 }

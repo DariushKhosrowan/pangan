@@ -1,36 +1,14 @@
-//! Pangan — a Persian Pomodoro timer.
+//! Pangan desktop binary.
 //!
-//! Module map:
-//!
-//! * [`app`]       — startup, the UI event loop, shell automation hooks
-//! * [`timer`]     — the drift-free countdown core
-//! * [`state`]     — settings and the session/task store
-//! * [`sync`]      — Google Drive sync, merge, and backup
-//! * [`calendar`]  — Jalali calendar, Sasanian day names, chronicle, events
-//! * [`stats`]     — reports and streaks
-//! * [`audio`]     — procedural Iranian instrument synthesis
-//! * [`platform`]  — per-OS tray, notifications, hotkeys, inhibit, autostart
-
-mod app;
-mod audio;
-mod calendar;
-mod journal;
-mod log;
-mod platform;
-mod state;
-mod stats;
-mod sync;
-mod timer;
-
-pub(crate) mod ui {
-    slint::include_modules!();
-}
+//! Thin entry point over the `pangan` library crate; all application logic
+//! lives in the library so platform entry points (Android, iOS) reuse the
+//! same core.
 
 fn main() {
-    log::init();
-    log::info("pangan starting");
-    if let Err(e) = app::run() {
-        log::error(&format!("fatal: {e}"));
+    pangan::log::init();
+    pangan::log::info("pangan starting");
+    if let Err(e) = pangan::app::run() {
+        pangan::log::error(&format!("fatal: {e}"));
         eprintln!("pangan: fatal: {e}");
         std::process::exit(1);
     }

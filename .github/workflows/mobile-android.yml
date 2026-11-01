@@ -1,0 +1,71 @@
+name: Mobile - Android
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Android APK (arm64 + x86_64)
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/27.2.12479018
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust targets
+        run: |
+          rustup target add aarch64-linux-android x86_64-linux-android
+
+      - name: Install NDK + platform + build-tools (non-interactive)
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "ndk;27.2.12479018" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Install cargo-apk
+        run: cargo install cargo-apk
+
+      - name: Build debug APK (arm64)
+        working-directory: platforms/android/app
+        run: cargo apk build --target aarch64-linux-android
+
+      - name: Build debug APK (x86_64)
+        working-directory: platforms/android/app
+        run: cargo apk build --target x86_64-linux-android
+
+      - name: Verify APKs
+        run: |
+          set -euo pipefail
+          for abi in aarch64-linux-android x86_64-linux-android; do
+            apk="target/$abi/debug/apk/pangan-android.apk"
+            test -f "$apk" || { echo "missing $apk"; exit 1; }
+            echo "── $apk"
+            unzip -l "$apk" | grep -E 'classes.dex'  || { echo "no classes.dex"; exit 1; }
+            unzip -l "$apk" | grep -E 'lib/.*/libpangan_android.so' || { echo "no native lib"; exit 1; }
+            unzip -l "$apk" | grep -E 'AndroidManifest.xml' || { echo "no manifest"; exit 1; }
+          done
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: pangan-android-debug
+          path: |
+            target/aarch64-linux-android/debug/apk/*.apk
+            target/x86_64-linux-android/debug/apk/*.apk
+          if-no-files-found: error

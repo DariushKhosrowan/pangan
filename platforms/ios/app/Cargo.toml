@@ -1,0 +1,13 @@
+[package]
+name = "pangan-ios"
+version = "0.3.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "pangan_ios"
+crate-type = ["lib", "staticlib"]
+
+[dependencies]
+pangan = { path = "../../.." }
+slint = { version = "1.11" }

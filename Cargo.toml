@@ -1,3 +1,17 @@
+[workspace]
+resolver = "2"
+members = ["platforms/android/app", "platforms/ios/app"]
+# Root commands (cargo build / test / build --release) only touch the desktop
+# package. The mobile crates are built explicitly for their platform targets
+# (see docs / CI), which keeps the classic desktop workflow byte-for-byte.
+# Note: the root package ("./") is intentionally NOT listed in `members`.
+# Cargo still treats the root package as a workspace member automatically when
+# the root manifest carries both [package] and [workspace], so the desktop
+# build is unaffected — but cargo-apk / cargo-subcommand (v0.12) reject a
+# workspace member that itself contains a [workspace] table, so omitting "."
+# here is what lets the Android build run.
+default-members = ["."]
+
 [package]
 name = "pangan"
 version = "0.3.0"
@@ -11,6 +25,10 @@ default-run = "pangan"
 [[bin]]
 name = "pangan"
 path = "src/main.rs"
+
+[lib]
+name = "pangan"
+path = "src/lib.rs"
 
 [dependencies]
 slint = "1.11"

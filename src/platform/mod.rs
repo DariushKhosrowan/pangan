@@ -3,6 +3,7 @@
 //! `clock.rs`. Each capability here is implemented per-OS behind `cfg`.
 
 pub mod autostart;
+pub mod caps;
 pub mod inhibit;
 pub mod notify;
 pub mod tray;

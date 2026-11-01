@@ -91,3 +91,16 @@ pub fn send(title: &str, body: &str) -> Result<(), NotifyError> {
         Err(_) => Err(NotifyError::WindowsFocusAssist),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Android / iOS
+// ---------------------------------------------------------------------------
+// There is no desktop notification daemon on mobile; the platform capability
+// layer (`caps`) handles mobile notifications via the native host. This stub
+// keeps the desktop notification module compiling on mobile targets, and the
+// mobile app routes through `caps::Notifications` instead.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[allow(dead_code)]
+pub fn send(_title: &str, _body: &str) -> Result<(), NotifyError> {
+    Ok(())
+}

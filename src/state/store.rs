@@ -180,9 +180,9 @@ pub struct Store {
 
 impl Store {
     pub fn data_dir() -> PathBuf {
-        dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("pangan")
+        // The storage root is the desktop config dir by default; a mobile
+        // entry point overrides it to the application-private files dir.
+        crate::platform::caps::storage_root()
     }
 
     pub fn path() -> PathBuf {

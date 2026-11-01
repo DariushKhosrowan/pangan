@@ -181,3 +181,12 @@ pub fn spawn(shared: Arc<Shared>, tx: Sender<TrayAction>) {
         }
     });
 }
+
+// ---------------------------------------------------------------------------
+// Android / iOS
+// ---------------------------------------------------------------------------
+// No system tray on mobile. The stub keeps the module compiling on mobile
+// targets; the desktop run loop (the only caller) is never executed there.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[allow(dead_code)]
+pub fn spawn(_shared: Arc<Shared>, _tx: Sender<TrayAction>) {}

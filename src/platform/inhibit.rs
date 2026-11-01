@@ -55,6 +55,14 @@ pub fn acquire() -> Option<InhibitGuard> {
             .ok()?;
         Some(InhibitGuard { child: Some(child) })
     }
+
+    // Mobile: no idle-inhibit API; nothing to do. Present so the guard type
+    // and function remain defined (and the library stays compilable) on
+    // Android/iOS targets.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        None
+    }
 }
 
 impl Drop for InhibitGuard {

@@ -1,0 +1,27 @@
+[package]
+name = "pangan-android"
+version = "0.3.0"
+edition = "2021"
+publish = false
+description = "Pangan — Persian Pomodoro timer for Android (hosts the shared Slint UI)"
+license = "MIT"
+authors = ["Dariush Khosrowan"]
+repository = "https://github.com/DariushKhosrowan/pangan"
+
+[lib]
+name = "pangan_android"
+crate-type = ["cdylib"]
+
+[dependencies]
+pangan = { path = "../../.." }
+slint = { version = "1.11", features = ["backend-android-activity-06"] }
+android-activity = "0.6"
+
+# cargo-apk packaging metadata: https://github.com/rust-mobile/cargo-apk
+[package.metadata.android]
+package = "ir.khosrowan.pangan"
+version_name = "0.3.0"
+label = "Pangan"
+permissions = []
+min_sdk_version = 24
+target_sdk_version = 35

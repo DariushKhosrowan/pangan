@@ -90,6 +90,12 @@ impl SessionSnapshot {
         }
     }
 
+    /// The most recent moment the block was active (started or paused), in
+    /// Unix seconds. This is the reference point for the grace window.
+    pub fn last_activity(&self) -> i64 {
+        self.paused_at.unwrap_or(self.started_at)
+    }
+
     /// Whether this snapshot is worth resuming at `now`.
     ///
     /// True only when the block has not already run its full length and the

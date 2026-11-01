@@ -242,7 +242,7 @@ fn apply_snapshot(win: &PanganWindow, shared: &Shared) {
 /// Only http(s) is accepted, so a stray string can never launch a local binary.
 /// Used by the About links and by the sign-in flow, which opens Google's device
 /// page for the user rather than making them copy a URL by hand.
-fn open_in_browser(url: &str) {
+pub fn open_in_browser(url: &str) {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return;
     }
@@ -252,6 +252,8 @@ fn open_in_browser(url: &str) {
     let opener = "open";
     #[cfg(target_os = "windows")]
     let opener = "explorer";
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let opener = "open";
 
     let _ = std::process::Command::new(opener)
         .arg(url)
@@ -2124,6 +2126,14 @@ fn copy_to_clipboard(text: &str) -> bool {
             })
             .map(|st| st.success())
             .unwrap_or(false)
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        // Mobile hosts own the clipboard in the native layer; there is no
+        // system-wide clipboard reachable from Rust here. Return false so the
+        // caller never falsely claims the copy succeeded.
+        let _ = text;
+        false
     }
 }
 
@@ -4469,8 +4479,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let tray_shared = Arc::clone(&shared);
     crate::platform::tray::spawn(tray_shared, tx.clone());
 
-    let hk_shared = Arc::clone(&shared);
-    std::thread::spawn(move || hotkey_thread(hk_shared, tx.clone()));
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    {
+        let hk_shared = Arc::clone(&shared);
+        std::thread::spawn(move || hotkey_thread(hk_shared, tx.clone()));
+    }
 
     apply_snapshot(&win, &shared);
     apply_session_dots(&win, &shared, &app);
@@ -4488,6 +4501,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 fn hotkey_thread(shared: Arc<Shared>, tx: Sender<TrayAction>) {
     use global_hotkey::hotkey::{Code, HotKey, Modifiers};
     use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
