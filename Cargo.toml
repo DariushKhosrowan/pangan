@@ -41,7 +41,10 @@ ureq = { version = "3", features = ["json"] }
 sha2 = "0.10"
 base64 = "0.22"
 getrandom = "0.2"
-arboard = "3.7.0"
+# NOTE: `arboard` (clipboard) is desktop/Linux-only and is intentionally NOT a
+# blanket dependency — it has no Android/iOS backend and would fail to compile
+# for those targets. It is gated to Linux below (macOS uses pbcopy, Windows
+# uses clip).
 
 # --- Global hotkey (all three OS) -------------------------------
 [target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))'.dependencies]
@@ -51,10 +54,11 @@ global-hotkey = { version = "0.6", default-features = false }
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 notify-rust = "4.11"
 
-# --- Linux: tray (ksni), inhibit (zbus) --------------------------
+# --- Linux: tray (ksni), inhibit (zbus), clipboard (arboard) -------
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { version = "0.3.7", default-features = false, features = ["blocking", "async-io"] }
 zbus = { version = "5", default-features = false, features = ["blocking-api"] }
+arboard = "3.7.0"
 
 # --- Windows/macOS: tray (tray-icon) -----------------------------
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
