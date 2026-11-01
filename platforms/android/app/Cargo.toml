@@ -20,9 +20,14 @@ android-activity = "0.6"
 # cargo-apk packaging metadata: https://github.com/rust-mobile/cargo-apk
 # NOTE: version_name / version_code are intentionally NOT set here — cargo-apk
 # derives them from the package version (and panics if they are set).
+# The SDK levels must be nested under `[package.metadata.android.sdk]` —
+# flat `min_sdk_version`/`target_sdk_version` keys are ignored and the
+# manifest falls back to cargo-apk's defaults.
 [package.metadata.android]
 package = "ir.khosrowan.pangan"
 label = "Pangan"
 permissions = []
+
+[package.metadata.android.sdk]
 min_sdk_version = 24
 target_sdk_version = 35

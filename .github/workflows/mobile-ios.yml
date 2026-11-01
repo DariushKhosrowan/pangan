@@ -3,6 +3,7 @@ name: Mobile - iOS
 on:
   push:
     branches: [main, "feat/**"]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -12,9 +13,6 @@ env:
 concurrency:
   group: ios-${{ github.ref }}
   cancel-in-progress: true
-
-permissions:
-  contents: read
 
 jobs:
   ios-simulator:
@@ -72,9 +70,37 @@ jobs:
           xcrun simctl install "$UDID" build/pangan-ios-simulator.app
           xcrun simctl launch "$UDID" ir.khosrowan.pangan
 
+      - name: Package bundle
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # zip the .app bundle so it survives as a release asset
+          (cd build && zip -r -X ../dist/pangan-ios-simulator.app.zip pangan-ios-simulator.app)
+          ls -la dist/
+
       - name: Upload app bundle
         uses: actions/upload-artifact@v4
         with:
           name: pangan-ios-simulator
-          path: build/pangan-ios-simulator.app
+          path: dist/*.zip
           if-no-files-found: error
+
+  release:
+    name: Attach iOS bundle to release
+    needs: ios-simulator
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download iOS bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: pangan-ios-simulator
+          path: dist
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          update_release_body: false
+          files: dist/*

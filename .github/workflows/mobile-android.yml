@@ -3,6 +3,7 @@ name: Mobile - Android
 on:
   push:
     branches: [main, "feat/**"]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -13,12 +14,9 @@ concurrency:
   group: android-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-
 jobs:
   android:
-    name: Android APK (arm64 + x86_64)
+    name: Android release APK (arm64 + x86_64)
     runs-on: ubuntu-latest
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
@@ -33,7 +31,9 @@ jobs:
       - name: Install NDK + platform + build-tools (non-interactive)
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+          # Fail hard if a required component cannot be installed — a missing
+          # platform shows up later as "Platform N is not installed".
+          sdkmanager \
             "ndk;27.2.12479018" \
             "platforms;android-35" \
             "build-tools;35.0.0"
@@ -41,31 +41,68 @@ jobs:
       - name: Install cargo-apk
         run: cargo install cargo-apk
 
-      - name: Build debug APK (arm64)
-        working-directory: platforms/android/app
-        run: cargo apk build --target aarch64-linux-android
+      - name: Generate release keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore "$RUNNER_TEMP/pangan.keystore" \
+            -storepass pangan-release -keypass pangan-release \
+            -alias pangan -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Pangan, OU=Pangan, O=Pangan, L=IR, S=IR, C=IR"
 
-      - name: Build debug APK (x86_64)
+      - name: Build release APK (arm64)
+        env:
+          CARGO_APK_RELEASE_KEYSTORE: ${{ runner.temp }}/pangan.keystore
+          CARGO_APK_RELEASE_KEYSTORE_PASSWORD: pangan-release
         working-directory: platforms/android/app
-        run: cargo apk build --target x86_64-linux-android
+        run: cargo apk build --release --target aarch64-linux-android
 
-      - name: Verify APKs
+      - name: Build release APK (x86_64)
+        env:
+          CARGO_APK_RELEASE_KEYSTORE: ${{ runner.temp }}/pangan.keystore
+          CARGO_APK_RELEASE_KEYSTORE_PASSWORD: pangan-release
+        working-directory: platforms/android/app
+        run: cargo apk build --release --target x86_64-linux-android
+
+      - name: Verify APKs (classes.dex + native lib + manifest + signed)
         run: |
           set -euo pipefail
           for abi in aarch64-linux-android x86_64-linux-android; do
-            apk="target/$abi/debug/apk/pangan-android.apk"
-            test -f "$apk" || { echo "missing $apk"; exit 1; }
+            apk="platforms/android/app/target/$abi/release/apk/pangan-android.apk"
+            test -f "$apk" || { echo "missing APK for $abi: $apk"; exit 1; }
             echo "── $apk"
-            unzip -l "$apk" | grep -E 'classes.dex'  || { echo "no classes.dex"; exit 1; }
-            unzip -l "$apk" | grep -E 'lib/.*/libpangan_android.so' || { echo "no native lib"; exit 1; }
-            unzip -l "$apk" | grep -E 'AndroidManifest.xml' || { echo "no manifest"; exit 1; }
+            unzip -l "$apk" | grep -q 'classes.dex' || { echo "no classes.dex"; exit 1; }
+            unzip -l "$apk" | grep -Eq 'lib/.*/libpangan_android.so' || { echo "no native lib"; exit 1; }
+            unzip -l "$apk" | grep -q 'AndroidManifest.xml' || { echo "no manifest"; exit 1; }
+            unzip -l "$apk" | grep -Eq 'META-INF/.*\.(RSA|DSA|EC)' || { echo "APK not signed"; exit 1; }
+            # normalize filename per ABI
+            mkdir -p dist
+            cp "$apk" "dist/pangan-android-${abi%%-linux-android}.apk"
           done
+          ls -la dist/
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: pangan-android-debug
-          path: |
-            target/aarch64-linux-android/debug/apk/*.apk
-            target/x86_64-linux-android/debug/apk/*.apk
+          name: pangan-android-release
+          path: dist/*.apk
           if-no-files-found: error
+
+  release:
+    name: Attach Android APKs to release
+    needs: android
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download APKs
+        uses: actions/download-artifact@v4
+        with:
+          name: pangan-android-release
+          path: dist
+      - name: Attach to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          update_release_body: false
+          files: dist/*
