@@ -18,9 +18,10 @@ slint = { version = "1.11", features = ["backend-android-activity-06"] }
 android-activity = "0.6"
 
 # cargo-apk packaging metadata: https://github.com/rust-mobile/cargo-apk
+# NOTE: version_name / version_code are intentionally NOT set here — cargo-apk
+# derives them from the package version (and panics if they are set).
 [package.metadata.android]
 package = "ir.khosrowan.pangan"
-version_name = "0.3.0"
 label = "Pangan"
 permissions = []
 min_sdk_version = 24
