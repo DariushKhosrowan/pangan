@@ -42,15 +42,17 @@ CATEGORIES = [
 ]
 
 ASSETS = {
-    "pangan-linux-x86_64": "Linux · x86_64",
-    "pangan-linux-aarch64": "Linux · ARM64",
-    "pangan-windows-x86_64.exe": "Windows · x86_64",
-    "pangan-windows-aarch64.exe": "Windows · ARM64",
+    "pangan-linux-x86_64": "Linux · x86_64 (binary)",
+    "pangan-linux-aarch64": "Linux · ARM64 (binary)",
+    "pangan-windows-x86_64.exe": "Windows · x86_64 (portable exe)",
+    "pangan-windows-aarch64.exe": "Windows · ARM64 (portable exe)",
     "pangan-macos-arm64": "macOS · Apple Silicon",
     "pangan-macos-x86_64": "macOS · Intel",
     "pangan-android-arm64.apk": "Android · ARM64 APK",
     "pangan-android-x86_64.apk": "Android · x86_64 APK",
     "pangan-ios-simulator.app.zip": "iOS · Simulator",
+    "install.sh": "Linux installer helper",
+    "pangan.desktop": "Linux desktop entry (for menu integration)",
 }
 
 

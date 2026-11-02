@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Pangan
+GenericName=Pomodoro Timer
+Comment=A modern Persian Pomodoro timer inspired by Persepolis
+Categories=Utility;Office;
+Keywords=Pomodoro;timer;focus;persian;
+Exec=pangan
+Icon=pangan
+Terminal=false
+StartupWMClass=pangan

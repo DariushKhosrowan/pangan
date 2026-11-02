@@ -97,15 +97,91 @@ Pangan stores productivity data locally and supports optional synchronization th
 
 Find the latest available desktop and mobile packages and checksums on the **[Releases page](https://github.com/DariushKhosrowan/pangan/releases/latest)**.
 
-| Platform | Status |
-| --- | --- |
-| Linux | Desktop builds available |
-| Windows | Desktop builds available |
-| macOS | Desktop builds available |
-| Android | Universal release APK (all ABIs, one file) |
-| iOS | Simulator build available |
+| Platform | Easiest option | What you get |
+| --- | --- | --- |
+| Linux | **AppImage** `Pangan-<version>-x86_64.AppImage` | A single self-contained executable. Just download, `chmod +x`, run. No install required. |
+| Linux | Plain binary `pangan-linux-x86_64` | Requires the system libraries listed below. |
+| Windows | **Portable ZIP** `Pangan-<version>-windows-x86_64-portable.zip` | Unzip anywhere; double-click `Pangan.exe`. No installer, no admin rights. |
+| Windows | Plain binary `pangan-windows-x86_64.exe` | Standalone executable (Qt-free, statically linked). |
+| Android | `pangan-android-universal.apk` | One file for all 64-bit ABIs. |
+| iOS | `pangan-ios-simulator.app.zip` | Simulator build. |
 
-Choose a release asset for your operating system and CPU architecture. Actual availability is listed on the release page. Android users should install the single `pangan-android-universal.apk` (contains arm64 and x86_64 binaries). It installs on 64-bit arm64 or x86_64 devices running Android 7.0+ (API 24). Note: 32-bit ARM (armeabi-v7a) is not supported — the Skia renderer used by the UI does not build for it at API 24. If you previously installed an older Pangan APK signed with a different key, uninstall it first or the new signature will be rejected.
+### Linux
+
+**AppImage (recommended)** — no installation and no dependencies:
+
+```bash
+# Download the matching Pangan-<version>-x86_64.AppImage from the latest release
+# (https://github.com/DariushKhosrowan/pangan/releases/latest), then:
+chmod +x Pangan-<version>-x86_64.AppImage
+./Pangan-<version>-x86_64.AppImage
+```
+
+The AppImage runs as-is — no install needed. To add it to your application
+menu, either:
+- install [AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher)
+  (once) and double-click the AppImage, or
+- use your desktop's built-in AppImage integration (e.g. GNOME's
+  `appimaged`), which registers it automatically.
+
+On the rare systems with neither, you can register it manually with the
+bundled installer script:
+
+```bash
+sudo ./packaging/install.sh --appimage ./Pangan-<version>-x86_64.AppImage
+```
+
+**Plain binary** — download `pangan-linux-x86_64` (and the `install.sh`
+helper from the same release), put them in the same folder, then:
+
+```bash
+chmod +x pangan-linux-x86_64
+sudo ./install.sh    # installs to /usr/local/bin and registers the app menu entry
+```
+
+For a per-user install (no root), use `./install.sh --user` instead.
+
+The plain Linux binary is dynamically linked and needs a few system libraries
+(glibc ≥ 2.35 plus the X11/Wayland/xkbcommon graphics stack used by the UI).
+Install them with the command for your distribution:
+
+Ubuntu / Debian:
+
+```bash
+sudo apt install libxkbcommon0 libx11-6 libwayland-client0 libxcb1 libfontconfig1 libgl1
+```
+
+Fedora:
+
+```bash
+sudo dnf install libxkbcommon libX11 libwayland-client libxcb fontconfig mesa-libGL
+```
+
+Arch Linux:
+
+```bash
+sudo pacman -S --needed libxkbcommon libx11 wayland libxcb fontconfig mesa
+```
+
+openSUSE:
+
+```bash
+sudo zypper install libxkbcommon0 libX11-6 libwayland-client libxcb1 fontconfig
+```
+
+> Tip: if any of these are missing, Pangan will fail to open a window on
+> first launch. The AppImage bundles its own graphics stack, so it avoids
+> this entirely.
+
+### Windows
+
+**Portable ZIP (recommended)** — download `Pangan-<version>-windows-x86_64-portable.zip`, extract, and double-click `Pangan.exe`. No installation and no admin rights are needed. To uninstall, just delete the folder.
+
+**Plain binary** — download `pangan-windows-x86_64.exe` and double-click it. It is a standalone executable; no separate runtime is required (Windows 10 1809+ / Windows 11).
+
+### Android
+
+Install the single `pangan-android-universal.apk` (contains arm64 and x86_64 binaries). It installs on 64-bit arm64 or x86_64 devices running Android 7.0+ (API 24). Note: 32-bit ARM (armeabi-v7a) is not supported — the Skia renderer used by the UI does not build for it at API 24. If you previously installed an older Pangan APK signed with a different key, uninstall it first or the new signature will be rejected.
 
 ## Build from source
 
@@ -129,6 +205,14 @@ To run the available Rust tests:
 
 ```bash
 cargo test
+```
+
+To build the portable/self-contained packages locally after a release build:
+
+```bash
+cargo build --release
+./packaging/build-appimage.sh                  # Linux → dist/Pangan-<version>-<arch>.AppImage
+./packaging/build-windows-portable.sh          # Windows → dist/Pangan-<version>-windows-<arch>-portable.zip
 ```
 
 The repository's build configuration and test scripts are the authoritative references if these commands change as mobile support is developed.

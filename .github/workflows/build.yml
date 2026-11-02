@@ -135,6 +135,80 @@ jobs:
             target/${{ matrix.target }}/release/${{ matrix.artifact }}.sha256
           if-no-files-found: error
 
+  appimage:
+    name: appimage-${{ matrix.artifact }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # x86_64 AppImage built on the ubuntu-latest runner attaching the
+          # x86_64 binary produced by the build job.
+          - os: ubuntu-latest
+            artifact: pangan-linux-x86_64
+            ai_arch: x86_64
+          # aarch64 AppImage built on the native arm64 runner.
+          - os: ubuntu-24.04-arm
+            artifact: pangan-linux-aarch64
+            ai_arch: aarch64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: bin
+      - name: Stage binary for packaging
+        run: |
+          mkdir -p target/release
+          install -m 0755 bin/${{ matrix.artifact }} target/release/pangan
+      - name: Build AppImage
+        run: ./packaging/build-appimage.sh
+      - name: Verify AppImage
+        run: |
+          file dist/*.AppImage
+          chmod +x dist/*.AppImage
+          # Basic smoke: the AppImage is a self-extracting runtime; just ensure
+          # it exists, is executable and contains the AppRun + usr/bin/pangan.
+          test -x dist/*.AppImage
+          ls -la dist/
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: pangan-appimage-${{ matrix.ai_arch }}
+          path: dist/*.AppImage
+          if-no-files-found: error
+
+  windows-portable:
+    name: windows-portable-x86_64
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Windows x86_64 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: pangan-windows-x86_64
+          path: bin
+      - name: Stage exe for packaging
+        run: |
+          mkdir -p target/x86_64-pc-windows-msvc/release
+          install -m 0755 bin/pangan-windows-x86_64.exe \
+            target/x86_64-pc-windows-msvc/release/pangan.exe
+      - name: Build portable ZIP
+        run: ./packaging/build-windows-portable.sh
+      - name: Verify ZIP
+        run: |
+          unzip -l dist/*.zip
+          unzip -l dist/*.zip | grep -q Pangan.exe
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: pangan-windows-portable
+          path: dist/*.zip
+          if-no-files-found: error
+
   android:
     name: android-release
     runs-on: ubuntu-latest
@@ -268,7 +342,7 @@ jobs:
 
   release:
     name: release
-    needs: [build, android, ios-simulator]
+    needs: [build, android, ios-simulator, appimage, windows-portable]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -282,6 +356,11 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Add install helpers
+        run: |
+          cp packaging/install.sh dist/install.sh
+          chmod +x dist/install.sh
+          cp packaging/pangan.desktop dist/pangan.desktop
       - name: List artifacts
         run: find dist -type f | sort
       - name: Generate release notes + checksums
