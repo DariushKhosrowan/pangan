@@ -105,7 +105,7 @@ Find the latest available desktop and mobile packages and checksums on the **[Re
 | Android | Universal release APK (all ABIs, one file) |
 | iOS | Simulator build available |
 
-Choose a release asset for your operating system and CPU architecture. Actual availability is listed on the release page. Android users should install the single `pangan-android-universal.apk` (contains both arm64 and x86_64 binaries, so it installs on any device).
+Choose a release asset for your operating system and CPU architecture. Actual availability is listed on the release page. Android users should install the single `pangan-android-universal.apk` (contains arm64, x86_64, and armeabi-v7a binaries). It installs on Android 7.0+ (API 24) devices — 64-bit arm64/x86_64 or 32-bit ARM. If you previously installed an older Pangan APK signed with a different key, uninstall it first or the new signature will be rejected.
 
 ## Build from source
 
