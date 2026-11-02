@@ -145,7 +145,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Rust targets
         run: |
-          rustup target add aarch64-linux-android x86_64-linux-android armv7-linux-androideabi
+          rustup target add aarch64-linux-android x86_64-linux-android
       - name: Install NDK + platform + build-tools (non-interactive)
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
@@ -184,23 +184,12 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/dist/abi"
           cp "$GITHUB_WORKSPACE/target/release/apk/pangan_android.apk" \
              "$GITHUB_WORKSPACE/dist/abi/pangan-android-x86_64.apk"
-      - name: Build release APK (arm32 / armeabi-v7a)
-        env:
-          CARGO_APK_RELEASE_KEYSTORE: ${{ runner.temp }}/pangan.keystore
-          CARGO_APK_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-        working-directory: platforms/android/app
-        run: |
-          cargo apk build --release --target armv7-linux-androideabi
-          mkdir -p "$GITHUB_WORKSPACE/dist/abi"
-          cp "$GITHUB_WORKSPACE/target/release/apk/pangan_android.apk" \
-             "$GITHUB_WORKSPACE/dist/abi/pangan-android-arm32.apk"
-      - name: Merge universal APK (arm64 + x86_64 + arm32)
+      - name: Merge universal APK (arm64 + x86_64)
         run: |
           python3 .github/scripts/build_universal_apk.py \
             dist/pangan-android-universal-unsigned.apk \
             dist/abi/pangan-android-arm64.apk \
-            dist/abi/pangan-android-x86_64.apk \
-            dist/abi/pangan-android-arm32.apk
+            dist/abi/pangan-android-x86_64.apk
       - name: Sign universal APK (v1+v2+v3)
         run: |
           java -jar /usr/share/java/apksigner.jar sign \
@@ -217,7 +206,6 @@ jobs:
           java -jar /usr/share/java/apksigner.jar verify --verbose dist/pangan-android-universal.apk
           unzip -l dist/pangan-android-universal.apk | grep -q 'lib/arm64-v8a/libpangan_android.so'
           unzip -l dist/pangan-android-universal.apk | grep -q 'lib/x86_64/libpangan_android.so'
-          unzip -l dist/pangan-android-universal.apk | grep -q 'lib/armeabi-v7a/libpangan_android.so'
           unzip -l dist/pangan-android-universal.apk | grep -q 'AndroidManifest.xml'
           python3 .github/scripts/verify_apk_alignment.py dist/pangan-android-universal.apk
       - name: Upload APKs
