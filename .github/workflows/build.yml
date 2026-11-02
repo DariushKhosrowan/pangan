@@ -156,49 +156,62 @@ jobs:
             "build-tools;35.0.0"
       - name: Install cargo-apk
         run: cargo install cargo-apk
-      - name: Generate release keystore
+      - name: Install apksigner
+        run: sudo apt-get update && sudo apt-get install -y apksigner
+      - name: Materialize stable release keystore
         run: |
-          keytool -genkeypair -v \
-            -keystore "$RUNNER_TEMP/pangan.keystore" \
-            -storepass pangan-release -keypass pangan-release \
-            -alias pangan -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=Pangan, OU=Pangan, O=Pangan, L=IR, S=IR, C=IR"
+          echo "${{ secrets.ANDROID_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/pangan.keystore"
+          chmod 600 "$RUNNER_TEMP/pangan.keystore"
+          keytool -list -keystore "$RUNNER_TEMP/pangan.keystore" \
+            -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" >/dev/null
       - name: Build release APK (arm64)
         env:
           CARGO_APK_RELEASE_KEYSTORE: ${{ runner.temp }}/pangan.keystore
-          CARGO_APK_RELEASE_KEYSTORE_PASSWORD: pangan-release
+          CARGO_APK_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         working-directory: platforms/android/app
         run: |
           cargo apk build --release --target aarch64-linux-android
-          mkdir -p "$GITHUB_WORKSPACE/dist"
+          mkdir -p "$GITHUB_WORKSPACE/dist/abi"
           cp "$GITHUB_WORKSPACE/target/release/apk/pangan_android.apk" \
-             "$GITHUB_WORKSPACE/dist/pangan-android-arm64.apk"
+             "$GITHUB_WORKSPACE/dist/abi/pangan-android-arm64.apk"
       - name: Build release APK (x86_64)
         env:
           CARGO_APK_RELEASE_KEYSTORE: ${{ runner.temp }}/pangan.keystore
-          CARGO_APK_RELEASE_KEYSTORE_PASSWORD: pangan-release
+          CARGO_APK_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         working-directory: platforms/android/app
         run: |
           cargo apk build --release --target x86_64-linux-android
-          mkdir -p "$GITHUB_WORKSPACE/dist"
+          mkdir -p "$GITHUB_WORKSPACE/dist/abi"
           cp "$GITHUB_WORKSPACE/target/release/apk/pangan_android.apk" \
-             "$GITHUB_WORKSPACE/dist/pangan-android-x86_64.apk"
-      - name: Verify APKs
+             "$GITHUB_WORKSPACE/dist/abi/pangan-android-x86_64.apk"
+      - name: Merge universal APK (arm64 + x86_64)
+        run: |
+          python3 .github/scripts/build_universal_apk.py \
+            dist/pangan-android-universal-unsigned.apk \
+            dist/abi/pangan-android-arm64.apk \
+            dist/abi/pangan-android-x86_64.apk
+      - name: Sign universal APK (v1+v2+v3)
+        run: |
+          java -jar /usr/share/java/apksigner.jar sign \
+            --ks "$RUNNER_TEMP/pangan.keystore" \
+            --ks-key-alias pangan \
+            --ks-pass pass:${{ secrets.ANDROID_KEYSTORE_PASSWORD }} \
+            --key-pass pass:${{ secrets.ANDROID_KEYSTORE_KEY_PASSWORD }} \
+            --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+            --out dist/pangan-android-universal.apk \
+            dist/pangan-android-universal-unsigned.apk
+      - name: Verify universal APK
         run: |
           set -euo pipefail
-          for apk in dist/pangan-android-arm64.apk dist/pangan-android-x86_64.apk; do
-            echo "── $apk"
-            unzip -l "$apk" | grep -Eq 'lib/.*/libpangan_android.so' || { echo "no native lib"; exit 1; }
-            unzip -l "$apk" | grep -q 'AndroidManifest.xml' || { echo "no manifest"; exit 1; }
-            unzip -l "$apk" | grep -Eq 'META-INF/.*\.(RSA|DSA|EC)' || { echo "APK not signed"; exit 1; }
-          done
-          unzip -l dist/pangan-android-arm64.apk | grep -Eq 'lib/arm64-v8a/libpangan_android.so' || { echo "arm64 lib missing"; exit 1; }
-          unzip -l dist/pangan-android-x86_64.apk | grep -Eq 'lib/x86_64/libpangan_android.so' || { echo "x86_64 lib missing"; exit 1; }
+          java -jar /usr/share/java/apksigner.jar verify --verbose dist/pangan-android-universal.apk
+          unzip -l dist/pangan-android-universal.apk | grep -q 'lib/arm64-v8a/libpangan_android.so'
+          unzip -l dist/pangan-android-universal.apk | grep -q 'lib/x86_64/libpangan_android.so'
+          unzip -l dist/pangan-android-universal.apk | grep -q 'AndroidManifest.xml'
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: pangan-android-release
-          path: dist/*.apk
+          path: dist/pangan-android-universal.apk
           if-no-files-found: error
 
   ios-simulator:

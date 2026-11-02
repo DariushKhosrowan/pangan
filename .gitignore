@@ -3,3 +3,4 @@
 .DS_Store
 __pycache__/
 dist/
+android-keystore.jks

@@ -102,10 +102,10 @@ Find the latest available desktop and mobile packages and checksums on the **[Re
 | Linux | Desktop builds available |
 | Windows | Desktop builds available |
 | macOS | Desktop builds available |
-| Android | Release APKs available (arm64 + x86_64) |
+| Android | Universal release APK (all ABIs, one file) |
 | iOS | Simulator build available |
 
-Choose a release asset for your operating system and CPU architecture. Actual availability is listed on the release page.
+Choose a release asset for your operating system and CPU architecture. Actual availability is listed on the release page. Android users should install the single `pangan-android-universal.apk` (contains both arm64 and x86_64 binaries, so it installs on any device).
 
 ## Build from source
 
