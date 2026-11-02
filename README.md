@@ -117,7 +117,19 @@ Find the latest available desktop and mobile packages and checksums on the **[Re
 
 ### Linux
 
-**AppImage (recommended)** — no installation and no dependencies:
+**One command (recommended)** — auto-detects your distro + CPU, downloads the
+latest release, installs any missing runtime libraries, and registers the app:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/DariushKhosrowan/pangan/main/packaging/install.sh | bash
+```
+
+That's it. You'll find Pangan in your app menu (or run `pangan`). Per-user
+install with no root: add `--user`. Handy options: `--user` (no root),
+`--appimage <path>` (use a downloaded AppImage), `--skip-deps` (never touch the
+package manager), `--autostart` (launch at login), `--dry-run` (preview).
+
+**AppImage (alternative)** — no installation and no dependencies:
 
 ```bash
 # Download the matching Pangan-<version>-x86_64.AppImage from the latest release
