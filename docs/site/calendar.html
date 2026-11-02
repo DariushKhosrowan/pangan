@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pangan Calendar — Jalali, Gregorian &amp; Hijri Support</title>
+<meta name="description" content="Pangan's calendar supports three reckonings: the Persian Jalali calendar with Iranian events and Sasanian day names, the proleptic Gregorian calendar, and the Hijri Islamic calendar." />
+<meta name="robots" content="index, follow" />
+<link rel="canonical" href="https://dariushkhosrowan.github.io/pangan/calendar.html" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Pangan" />
+<meta property="og:title" content="Pangan Calendar — Jalali, Gregorian &amp; Hijri Support" />
+<meta property="og:description" content="Three calendar reckonings in one focus app: Persian Jalali, Gregorian, and Hijri Islamic." />
+<meta property="og:image" content="https://dariushkhosrowan.github.io/pangan/assets/og.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="stylesheet" href="style.css" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Pangan",
+  "applicationCategory": "ProductivityApplication",
+  "url": "https://dariushkhosrowan.github.io/pangan/calendar.html",
+  "featureList": ["Jalali calendar", "Gregorian calendar", "Hijri calendar", "Iranian historical events", "Sasanian day names"]
+}
+</script>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="container inner">
+    <a class="brand" href="index.html"><span class="dot"></span> Pangan <small>· پنگان</small></a>
+    <nav class="nav" aria-label="Primary">
+      <a href="features.html">Features</a>
+      <a href="themes.html">Themes</a>
+      <a href="calendar.html" class="active">Calendar</a>
+      <a href="download.html">Download</a>
+      <a class="gh" href="https://github.com/DariushKhosrowan/pangan">⭐ GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main class="container">
+
+  <section>
+    <div class="eyebrow">Calendar</div>
+    <h1 class="section-title">One app, three reckonings</h1>
+    <p class="section-sub">Time is cultural. Pangan's calendar view can run on any of three calendars — and your tasks, plans, and journal stay anchored to the same real days no matter which one you're looking at.</p>
+    <div class="grid">
+      <div class="card"><span class="ico">📅</span><h3>Jalali (Persian)</h3><p>The host calendar of Pangan: Iranian month names, era reckoning, and the Persian year. This is the default.</p></div>
+      <div class="card"><span class="ico">🗓️</span><h3>Gregorian</h3><p>The proleptic Gregorian calendar — January to December, with leap-year handling — for those who plan in the common calendar.</p></div>
+      <div class="card"><span class="ico">🌙</span><h3>Hijri (Islamic)</h3><p>The arithmetic (tabular) Islamic calendar, in English or Persian month names, for dates in the Hijri year.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2 class="section-title">The Persian calendar, in depth</h2>
+    <div class="prose">
+      <p>Beyond the month grid, Pangan's Jalali view carries <b>Iranian historical events</b>, <b>Sasanian day names</b>, and today's <b>festival</b> — Nowruz, the six Gahambars, fire and water feasts, and the twelve name-days.</p>
+    </div>
+    <figure class="shot"><img src="assets/02-persian-calendar.png" alt="Pangan Persian calendar with Shahanshahi date and Sasanian day name" /><figcaption>Jalali month grid with era reckoning and Sasanian day names.</figcaption></figure>
+    <figure class="shot"><img src="assets/04-iranian-events.png" alt="Chronicle of Iranian historical and cultural events" /><figcaption>Iranian historical and cultural events on this day.</figcaption></figure>
+  </section>
+
+  <section>
+    <h2 class="section-title">Tasks live on real days</h2>
+    <div class="prose">
+      <p>Switching calendars never moves your data. Each day in any reckoning maps to the same physical day, so a task planned on a Gregorian date appears on the matching Jalali date — and vice versa. The plan is the plan, whatever the label.</p>
+    </div>
+  </section>
+
+  <div class="cta-band">
+    <h2>Plan in your calendar</h2>
+    <p>Download Pangan and switch reckoning from the settings.</p>
+    <div class="cta"><a class="btn big" href="download.html">Download Pangan</a></div>
+  </div>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container inner">
+    <div class="foot-links">
+      <a href="index.html">Home</a>
+      <a href="features.html">Features</a>
+      <a href="themes.html">Themes</a>
+      <a href="download.html">Download</a>
+      <a href="https://github.com/DariushKhosrowan/pangan">GitHub</a>
+    </div>
+    <div>© <span id="yr"></span> Pangan</div>
+  </div>
+</footer>
+
+<script>document.getElementById("yr").textContent = new Date().getFullYear();</script>
+</body>
+</html>

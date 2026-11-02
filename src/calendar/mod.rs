@@ -5,6 +5,7 @@
 //! keep writing `calendar::to_gregorian` rather than
 //! `calendar::jalali::to_gregorian`.
 
+pub mod calendars;
 pub mod chronicle;
 pub mod events;
 pub mod jalali;

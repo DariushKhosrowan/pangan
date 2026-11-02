@@ -21,6 +21,30 @@ pub const ERA_CYRUS: &str = "cyrus";
 pub const ERA_DARIUS: &str = "darius";
 pub const ERA_SASANID: &str = "sasanid";
 pub const ERA_PARTHIAN: &str = "parthian";
+pub const ERA_ROSE: &str = "rose";
+pub const ERA_TEAL: &str = "teal";
+pub const ERA_VIOLET: &str = "violet";
+pub const ERA_OLIVE: &str = "olive";
+
+/// Every selectable heritage era, in the order shown in the picker.
+pub const ERAS: [&str; 8] = [
+    ERA_CYRUS,
+    ERA_DARIUS,
+    ERA_PARTHIAN,
+    ERA_SASANID,
+    ERA_ROSE,
+    ERA_TEAL,
+    ERA_VIOLET,
+    ERA_OLIVE,
+];
+
+// --- Calendar reckoning ----------------------------------------------------
+/// Which calendar drives the month grid and date labels: "jalali" (default),
+/// "gregorian", or "hijri". All three are supported day-for-day.
+pub const CAL_JALALI: &str = "jalali";
+pub const CAL_GREGORIAN: &str = "gregorian";
+pub const CAL_HIJRI: &str = "hijri";
+pub const CAL_MODES: [&str; 3] = [CAL_JALALI, CAL_GREGORIAN, CAL_HIJRI];
 
 pub const SOUND_SANTUR: &str = "santur";
 pub const SOUND_DAF: &str = "daf";
@@ -103,6 +127,9 @@ pub struct Settings {
     pub theme: String,
     /// Visual identity: which Iranian dynasty's palette and motifs are shown.
     pub era: String,
+    /// Which calendar drives the month grid and date labels: "jalali"
+    /// (default), "gregorian", or "hijri".
+    pub cal_mode: String,
     pub compact_mode: bool,
     /// Whether interface motion (transitions, easing, the pulsing ring) is
     /// played. Turning it off makes every animation instantaneous, which is
@@ -160,6 +187,7 @@ impl Default for Settings {
             daily_goal_minutes: 120,
             theme: THEME_SYSTEM.into(),
             era: ERA_CYRUS.into(),
+            cal_mode: CAL_JALALI.into(),
             lang: LANG_FA.into(),
             compact_mode: false,
             animations: true,
@@ -224,6 +252,9 @@ impl Settings {
         if self.theme != THEME_DARK && self.theme != THEME_LIGHT && self.theme != THEME_SYSTEM {
             self.theme = THEME_SYSTEM.into();
         }
+        if !CAL_MODES.contains(&self.cal_mode.as_str()) {
+            self.cal_mode = CAL_JALALI.into();
+        }
         if !LANGS.contains(&self.lang.as_str()) {
             self.lang = LANG_FA.into();
         }
@@ -246,6 +277,15 @@ impl Settings {
             ERA_DARIUS => if en { "Darius" } else { "داریوش" }.into(),
             ERA_SASANID => if en { "Sasanid" } else { "ساسانی" }.into(),
             ERA_PARTHIAN => if en { "Parthian" } else { "اشکانی" }.into(),
+            ERA_ROSE => if en { "Rose" } else { "گل سرخ" }.into(),
+            ERA_TEAL => if en {
+                "Teal"
+            } else {
+                "سبز فیروزه‌ای"
+            }
+            .into(),
+            ERA_VIOLET => if en { "Violet" } else { "بنفش" }.into(),
+            ERA_OLIVE => if en { "Olive" } else { "زیتونی" }.into(),
             _ => if en { "Cyrus" } else { "کوروش" }.into(),
         }
     }
@@ -270,6 +310,30 @@ impl Settings {
                 "Parthian lapis and silver"
             } else {
                 "لاجورد و سیم اشکانی"
+            }
+            .into(),
+            ERA_ROSE => if en {
+                "Rose and blush on ink"
+            } else {
+                "گلگون بر جوهر"
+            }
+            .into(),
+            ERA_TEAL => if en {
+                "Persian teal and pale jade"
+            } else {
+                "فیروزه‌ای بر یشم رنگپریده"
+            }
+            .into(),
+            ERA_VIOLET => if en {
+                "Violet and amethyst"
+            } else {
+                "بنفش و یاقوت ارغوانی"
+            }
+            .into(),
+            ERA_OLIVE => if en {
+                "Olive, sienna, and bone"
+            } else {
+                "زیتونی، سیه‌نا و استخوانی"
             }
             .into(),
             _ => if en {

@@ -102,18 +102,42 @@ export global Palette {
         ? (dark ? #4FA89B : #216158)
         : era == "parthian"
         ? (dark ? #5B8FD6 : #2A5495)
+        : era == "rose"
+        ? (dark ? #D97B8A : #96384A)
+        : era == "teal"
+        ? (dark ? #3FA9A0 : #1E615C)
+        : era == "violet"
+        ? (dark ? #A78BD8 : #5A3B96)
+        : era == "olive"
+        ? (dark ? #8FA97E : #49613D)
         : (dark ? #D6A84E : #8A6419); out property <brush> accent-soft: era == "darius"
         ? (dark ? #2A2018 : #F5E9DC)
         : era == "sasanid"
         ? (dark ? #14251F : #E2F0EC)
         : era == "parthian"
         ? (dark ? #141C2E : #E3E9F5)
+        : era == "rose"
+        ? (dark ? #2A161B : #F9E9EC)
+        : era == "teal"
+        ? (dark ? #132523 : #E0F0EE)
+        : era == "violet"
+        ? (dark ? #1E1830 : #EDE7F8)
+        : era == "olive"
+        ? (dark ? #1B2216 : #ECF1E6)
         : (dark ? #2A2418 : #F3EAD8); out property <brush> on-accent: era == "darius"
         ? (dark ? #1A0F06 : #FFFFFF)
         : era == "sasanid"
         ? (dark ? #04120F : #FFFFFF)
         : era == "parthian"
         ? (dark ? #060B16 : #FFFFFF)
+        : era == "rose"
+        ? (dark ? #1F060A : #FFFFFF)
+        : era == "teal"
+        ? (dark ? #03110F : #FFFFFF)
+        : era == "violet"
+        ? (dark ? #0B0616 : #FFFFFF)
+        : era == "olive"
+        ? (dark ? #0A1005 : #FFFFFF)
         : (dark ? #17120A : #FFFFFF); // ── Surfaces, tinted per era ───────────────────────────────────────────
     out property <brush> bg: era == "darius"
         ? (dark ? #12100C : #FAF6EF)
@@ -121,42 +145,98 @@ export global Palette {
         ? (dark ? #0A1413 : #F2F7F5)
         : era == "parthian"
         ? (dark ? #0B0F1A : #F3F5FA)
+        : era == "rose"
+        ? (dark ? #170D13 : #FAF2F5)
+        : era == "teal"
+        ? (dark ? #0A1414 : #F1F7F7)
+        : era == "violet"
+        ? (dark ? #120F1D : #F5F2FA)
+        : era == "olive"
+        ? (dark ? #12150E : #F6F8F1)
         : (dark ? #0E1016 : #F7F5F0); out property <brush> surface: era == "darius"
         ? (dark ? #1A1712 : #FFFFFF)
         : era == "sasanid"
         ? (dark ? #111D1B : #FFFFFF)
         : era == "parthian"
         ? (dark ? #131A28 : #FFFFFF)
+        : era == "rose"
+        ? (dark ? #1D1117 : #FFFFFF)
+        : era == "teal"
+        ? (dark ? #101C1C : #FFFFFF)
+        : era == "violet"
+        ? (dark ? #181430 : #FFFFFF)
+        : era == "olive"
+        ? (dark ? #181D14 : #FFFFFF)
         : (dark ? #15181F : #FFFFFF); out property <brush> surface-2: era == "darius"
         ? (dark ? #221D16 : #F2ECE1)
         : era == "sasanid"
         ? (dark ? #17251F : #E9F1EE)
         : era == "parthian"
         ? (dark ? #1A2334 : #E8EDF6)
+        : era == "rose"
+        ? (dark ? #261820 : #F3E6EC)
+        : era == "teal"
+        ? (dark ? #172626 : #E6EFEF)
+        : era == "violet"
+        ? (dark ? #201A3A : #ECE6F5)
+        : era == "olive"
+        ? (dark ? #202619 : #EFF3E6)
         : (dark ? #1C2029 : #F0EDE6); out property <brush> surface-3: era == "darius"
         ? (dark ? #2A241B : #E8DFD0)
         : era == "sasanid"
         ? (dark ? #1E2E28 : #DCE8E4)
         : era == "parthian"
         ? (dark ? #212C40 : #DCE3F0)
+        : era == "rose"
+        ? (dark ? #2E1E28 : #E9D6DF)
+        : era == "teal"
+        ? (dark ? #1D3030 : #D8E7E6)
+        : era == "violet"
+        ? (dark ? #282044 : #E0D6EE)
+        : era == "olive"
+        ? (dark ? #28301E : #E5E9D6)
         : (dark ? #232833 : #E7E2D8); out property <brush> border: era == "darius"
         ? (dark ? #2C261D : #E5DCCB)
         : era == "sasanid"
         ? (dark ? #20302A : #D9E5E1)
         : era == "parthian"
         ? (dark ? #232F45 : #D8E0EE)
+        : era == "rose"
+        ? (dark ? #32212B : #E0CBD5)
+        : era == "teal"
+        ? (dark ? #213638 : #CFE1DF)
+        : era == "violet"
+        ? (dark ? #2D2450 : #D6C9E8)
+        : era == "olive"
+        ? (dark ? #2D3622 : #DDE3CC)
         : (dark ? #262A35 : #E3DED3); out property <brush> hairline: era == "darius"
         ? (dark ? #221D15 : #EFE8DC)
         : era == "sasanid"
         ? (dark ? #182722 : #E8F0ED)
         : era == "parthian"
         ? (dark ? #1A2334 : #E7ECF5)
+        : era == "rose"
+        ? (dark ? #271720 : #F0E2E8)
+        : era == "teal"
+        ? (dark ? #182727 : #EAF1F1)
+        : era == "violet"
+        ? (dark ? #211A3C : #EFEAF6)
+        : era == "olive"
+        ? (dark ? #21271A : #F1F4E9)
         : (dark ? #1E222B : #EDE9E1); out property <brush> text: dark ? #E9E7EF : #1B1A20; out property <brush> text-dim: dark ? #9A9DAD : #6B6774; out property <brush> text-faint: dark ? #868B9C : #726D7A; out property <brush> track: era == "darius"
         ? (dark ? #2A241B : #E8DFD0)
         : era == "sasanid"
         ? (dark ? #1E2E28 : #DCE8E4)
         : era == "parthian"
         ? (dark ? #212C40 : #DCE3F0)
+        : era == "rose"
+        ? (dark ? #2E1E28 : #E9D6DF)
+        : era == "teal"
+        ? (dark ? #1D3030 : #D8E7E6)
+        : era == "violet"
+        ? (dark ? #282044 : #E0D6EE)
+        : era == "olive"
+        ? (dark ? #28301E : #E5E9D6)
         : (dark ? #232833 : #E7E2D8); // The accent, one step deeper. Used for the pressed/hover state of any
     // control filled with the accent, so the label keeps its contrast: white
     // on the light-theme gold goes from 5.36:1 to 6.12:1, where a lightened
@@ -167,6 +247,14 @@ export global Palette {
         ? (dark ? #5CB4A8 : #1E5950)
         : era == "parthian"
         ? (dark ? #6E9CDA : #264D89)
+        : era == "rose"
+        ? (dark ? #E28593 : #8B2F40)
+        : era == "teal"
+        ? (dark ? #4AB5AC : #17514C)
+        : era == "violet"
+        ? (dark ? #B497E4 : #503289)
+        : era == "olive"
+        ? (dark ? #9DB88B : #3E5333)
         : (dark ? #DAB263 : #7E5C17); // A shadow that works on both themes: a warm grey at low alpha in light, a
     // true black in dark. A grey shadow on a dark page reads as a smudge.
     out property <color> shadow: dark ? #00000066 : #2A211433; out property <brush> danger: dark ? #C9635B : #B04A42;
@@ -1903,6 +1991,8 @@ export component PanganWindow inherits Window {
     in property <string> time-left; in property <int> time-minutes; in property <int> time-seconds; in property <string> session-name; in property <float> progress; in property <string> phase; in property <bool> running; in property <int> work-done; in property <string> session-counter; // ---- Theme ----
     in property <string> theme-label: "سامانه"; in property <string> resolved-theme: "dark"; in-out property <string> theme-pref: "system"; // Heritage era identity
 in property <string> era: "cyrus"; in property <string> era-label: "کوروش"; in property <string> era-blurb: "زر آخامنشی بر لاجورد";
+    // Calendar reckoning: "jalali" | "gregorian" | "hijri"
+    in-out property <string> cal-mode: "jalali";
 
     // ---- Today (Persian calendar) ----
     in property <string> cal-date: "";        // "۱۲ آبان ۱۴۰۵"
@@ -2154,7 +2244,7 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
     in property <string> plan-error: "";
 
     // ---- Callbacks to Rust ----
-    callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-chronicle; callback close-chronicle; callback copy-code(string); callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback sync-connect; callback sync-disconnect; callback set-client-id(string); callback set-sync-auto(bool); callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback refresh-events; callback open-url(string); callback window-drag-start; callback set-compact-mode(bool); callback set-animations(bool); callback pick-day(string); callback shift-month(int); callback goto-today; callback add-task-on(string); callback delete-task(int); callback rename-task(int, string); callback move-task(int, int); callback step-day(int); callback set-report-period(int); callback step-report(int); callback report-today;
+    callback start-pause; callback skip; callback reset; callback open-report; callback close-report; callback open-today; callback close-today; callback open-chronicle; callback close-chronicle; callback copy-code(string); callback open-settings; callback close-settings; callback cycle-theme; callback toggle-sound; callback preview-sound; callback sync-now; callback sync-connect; callback sync-disconnect; callback set-client-id(string); callback set-sync-auto(bool); callback add-task; callback backup-now; callback restore-now; callback add-automation(string, string); callback toggle-task(int); callback set-theme(string); callback set-era(string); callback set-lang(string); callback set-cal-mode(string); callback refresh-events;callback open-url(string); callback window-drag-start; callback set-compact-mode(bool); callback set-animations(bool); callback pick-day(string); callback shift-month(int); callback goto-today; callback add-task-on(string); callback delete-task(int); callback rename-task(int, string); callback move-task(int, int); callback step-day(int); callback set-report-period(int); callback step-report(int); callback report-today;
     // ---- Inscription callbacks ----
     callback inscribe(int, string);
     callback skip-inscription(int);
@@ -5189,6 +5279,118 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                 }
                             }
 
+                            HorizontalLayout {
+                                spacing: 7px;
+                                EraCard {
+                                    era-id: "rose";
+                                    name: Strings.era-rose;
+                                    blurb: Strings.era-rose-blurb;
+                                    swatch: #D97B8A;
+                                    active: root.era == "rose";
+                                    horizontal-stretch: 1;
+                                    picked => { root.set-era("rose"); }
+                                }
+                                EraCard {
+                                    era-id: "teal";
+                                    name: Strings.era-teal;
+                                    blurb: Strings.era-teal-blurb;
+                                    swatch: #3FA9A0;
+                                    active: root.era == "teal";
+                                    horizontal-stretch: 1;
+                                    picked => { root.set-era("teal"); }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 7px;
+                                EraCard {
+                                    era-id: "violet";
+                                    name: Strings.era-violet;
+                                    blurb: Strings.era-violet-blurb;
+                                    swatch: #A78BD8;
+                                    active: root.era == "violet";
+                                    horizontal-stretch: 1;
+                                    picked => { root.set-era("violet"); }
+                                }
+                                EraCard {
+                                    era-id: "olive";
+                                    name: Strings.era-olive;
+                                    blurb: Strings.era-olive-blurb;
+                                    swatch: #8FA97E;
+                                    active: root.era == "olive";
+                                    horizontal-stretch: 1;
+                                    picked => { root.set-era("olive"); }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                height: 16px;
+                                Text {
+                                    text: Strings.lbl-calendar;
+                                    font-size: Type.caption;
+                                    color: Palette.text-faint;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Rectangle {
+                                    height: 28px;
+                                    border-radius: 14px;
+                                    background: root.cal-mode == "jalali" ? Palette.accent : Palette.surface-2;
+                                    border-width: 1px;
+                                    border-color: root.cal-mode == "jalali" ? transparent : Palette.hairline;
+                                    horizontal-stretch: 1;
+                                    ta-j := TouchArea { clicked => { root.set-cal-mode("jalali"); } }
+                                    Text {
+                                        text: Strings.cal-jalali;
+                                        font-size: Type.caption;
+                                        color: root.cal-mode == "jalali" ? Palette.on-accent : Palette.text-dim;
+                                        vertical-alignment: center;
+                                        horizontal-alignment: center;
+                                        width: parent.width;
+                                        height: parent.height;
+                                    }
+                                }
+                                Rectangle {
+                                    height: 28px;
+                                    border-radius: 14px;
+                                    background: root.cal-mode == "gregorian" ? Palette.accent : Palette.surface-2;
+                                    border-width: 1px;
+                                    border-color: root.cal-mode == "gregorian" ? transparent : Palette.hairline;
+                                    horizontal-stretch: 1;
+                                    ta-g := TouchArea { clicked => { root.set-cal-mode("gregorian"); } }
+                                    Text {
+                                        text: Strings.cal-gregorian;
+                                        font-size: Type.caption;
+                                        color: root.cal-mode == "gregorian" ? Palette.on-accent : Palette.text-dim;
+                                        vertical-alignment: center;
+                                        horizontal-alignment: center;
+                                        width: parent.width;
+                                        height: parent.height;
+                                    }
+                                }
+                                Rectangle {
+                                    height: 28px;
+                                    border-radius: 14px;
+                                    background: root.cal-mode == "hijri" ? Palette.accent : Palette.surface-2;
+                                    border-width: 1px;
+                                    border-color: root.cal-mode == "hijri" ? transparent : Palette.hairline;
+                                    horizontal-stretch: 1;
+                                    ta-h := TouchArea { clicked => { root.set-cal-mode("hijri"); } }
+                                    Text {
+                                        text: Strings.cal-hijri;
+                                        font-size: Type.caption;
+                                        color: root.cal-mode == "hijri" ? Palette.on-accent : Palette.text-dim;
+                                        vertical-alignment: center;
+                                        horizontal-alignment: center;
+                                        width: parent.width;
+                                        height: parent.height;
+                                    }
+                                }
+                            }
+
                             // The selected dynasty's span and its place in history.
                             HorizontalLayout {
                                 height: 14px;
@@ -5197,6 +5399,10 @@ in property <string> era: "cyrus"; in property <string> era-label: "کوروش";
                                     text: root.era == "darius" ? Strings.era-darius-span
                                         : root.era == "parthian" ? Strings.era-parthian-span
                                         : root.era == "sasanid" ? Strings.era-sasanid-span
+                                        : root.era == "rose" ? ""
+                                        : root.era == "teal" ? ""
+                                        : root.era == "violet" ? ""
+                                        : root.era == "olive" ? ""
                                         : Strings.era-cyrus-span;
                                     font-size: Type.caption;
                                     font-weight: 600;

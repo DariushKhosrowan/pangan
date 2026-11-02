@@ -732,6 +732,124 @@ fn parse_day_key(key: &str) -> Option<(i32, u32, u32)> {
     Some((y, m, d))
 }
 
+/// The active calendar reckoning from settings: "jalali" | "gregorian" | "hijri".
+fn app_cal(app: &AppState) -> String {
+    app.settings.lock().unwrap().cal_mode.clone()
+}
+
+/// Today's Jalali date as a JDN, plus the standard jalali triple.
+fn today_jdn() -> (i64, (i32, u32, u32)) {
+    let (jy, jm, jd) = calendar::today();
+    (calendar::jalali_to_jdn(jy, jm, jd), (jy, jm, jd))
+}
+
+/// Map a Julian Day Number to the `(year, month)` that should be displayed in
+/// the active calendar. This is what keeps the "shown month" correct when the
+/// user is browsing in Gregorian or Hijri mode.
+fn page_month_for(cal: &str, jdn: i64) -> (i32, u32) {
+    match cal {
+        "gregorian" => {
+            let (y, m, _) = calendar::jdn_to_gregorian(jdn);
+            (y, m)
+        }
+        "hijri" => {
+            let (y, m, _) = crate::calendar::calendars::jdn_to_hijri(jdn);
+            (y, m)
+        }
+        _ => {
+            let (y, m, _) = calendar::jdn_to_jalali(jdn);
+            (y, m)
+        }
+    }
+}
+
+/// Build the DayCells for the displayed month in the active calendar.
+///
+/// The grid layout and day labels follow the active reckoning, but every cell's
+/// `key` is always the canonical Jalali key, so task lookup and day selection
+/// stay correct no matter which calendar is being displayed.
+fn month_cells(
+    cal: &str,
+    gy: i32,
+    gm: u32,
+    today: (i32, u32, u32),
+    en: bool,
+    counts: &std::collections::HashMap<String, u32>,
+    selected_key: &str,
+) -> Vec<crate::ui::DayCell> {
+    let today_jdn = calendar::jalali_to_jdn(today.0, today.1, today.2);
+    let raw: Vec<crate::calendar::calendars::GridCell> = match cal {
+        "gregorian" => {
+            let t = calendar::jdn_to_gregorian(today_jdn);
+            crate::calendar::calendars::greg_month_grid(gy, gm, t)
+        }
+        "hijri" => {
+            let t = crate::calendar::calendars::jdn_to_hijri(today_jdn);
+            crate::calendar::calendars::hijri_month_grid(gy, gm, t)
+        }
+        _ => calendar::month_grid(gy, gm, today)
+            .into_iter()
+            .map(|c| crate::calendar::calendars::GridCell {
+                day: c.day,
+                year: c.year,
+                month: c.month,
+                key: c.key,
+                is_today: c.is_today,
+            })
+            .collect(),
+    };
+
+    raw.into_iter()
+        .map(|c| {
+            if c.day == 0 {
+                return crate::ui::DayCell {
+                    day: 0,
+                    label: SharedString::new(),
+                    key: SharedString::new(),
+                    is_today: false,
+                    selected: false,
+                    has_tasks: false,
+                    open_count: SharedString::new(),
+                };
+            }
+            // Canonical Jalali key for this real day.
+            let key = if cal == "jalali" {
+                c.key.clone()
+            } else {
+                let jdn = if cal == "gregorian" {
+                    calendar::gregorian_to_jdn(c.year, c.month, c.day)
+                } else {
+                    crate::calendar::calendars::hijri_to_jdn(c.year, c.month, c.day)
+                };
+                let (jy, jm, jd) = calendar::jdn_to_jalali(jdn);
+                format!("{jy:04}-{jm:02}-{jd:02}")
+            };
+            let has = counts.get(&key).copied().unwrap_or(0);
+            crate::ui::DayCell {
+                day: c.day as i32,
+                label: if en {
+                    SharedString::from(c.day.to_string())
+                } else {
+                    SharedString::from(calendar::fa_num(c.day as i64))
+                },
+                key: SharedString::from(key.clone()),
+                is_today: c.is_today,
+                selected: key == selected_key,
+                has_tasks: has > 0,
+                open_count: if has > 0 {
+                    SharedString::from(if en {
+                        has.to_string()
+                    } else {
+                        calendar::fa_num(has as i64)
+                    })
+                } else {
+                    SharedString::new()
+                },
+            }
+        })
+        .collect()
+}
+
 /// Build the month grid and the selected day's task list.
 ///
 /// This is the calendar screen's whole state: which month is on screen, which
@@ -763,39 +881,13 @@ fn refresh_day_view(win: &PanganWindow, app: &AppState) {
     };
 
     // ── the grid ──
+    let cal = app_cal(app);
     let counts: std::collections::HashMap<String, u32> = {
         let st = app.store.lock().unwrap();
         st.open_counts_by_date().into_iter().collect()
     };
-    let cells: Vec<crate::ui::DayCell> = calendar::month_grid(gy, gm, (ty, tm, td))
-        .into_iter()
-        .map(|c| {
-            let has = counts.get(&c.key).copied().unwrap_or(0);
-            crate::ui::DayCell {
-                day: c.day as i32,
-                label: if c.day == 0 {
-                    SharedString::new()
-                } else if en {
-                    SharedString::from(c.day.to_string())
-                } else {
-                    SharedString::from(calendar::fa_num(c.day as i64))
-                },
-                key: SharedString::from(c.key.clone()),
-                is_today: c.is_today,
-                selected: c.key == selected_key,
-                has_tasks: has > 0,
-                open_count: if has > 0 {
-                    SharedString::from(if en {
-                        has.to_string()
-                    } else {
-                        calendar::fa_num(has as i64)
-                    })
-                } else {
-                    SharedString::new()
-                },
-            }
-        })
-        .collect();
+    let cells: Vec<crate::ui::DayCell> =
+        month_cells(&cal, gy, gm, (ty, tm, td), en, &counts, &selected_key);
     // Slint's GridLayout has no explicit column count, so the month is handed
     // over as weeks of seven rather than one flat list.
     let rows: Vec<crate::ui::DayRow> = cells
@@ -807,17 +899,46 @@ fn refresh_day_view(win: &PanganWindow, app: &AppState) {
     win.set_month_rows(ModelRc::new(VecModel::from(rows)));
 
     // ── the month title ──
-    let month_name = if en {
-        calendar::MONTHS_EN[(gm as usize).clamp(1, 12) - 1]
-    } else {
-        calendar::MONTHS[(gm as usize).clamp(1, 12) - 1]
+    let month_title = match cal.as_str() {
+        "gregorian" => {
+            let mn = if en {
+                crate::calendar::calendars::GREG_MONTHS_EN[(gm as usize).clamp(1, 12) - 1]
+            } else {
+                crate::calendar::calendars::GREG_MONTHS_FA[(gm as usize).clamp(1, 12) - 1]
+            };
+            if en {
+                format!("{mn} {gy}")
+            } else {
+                format!("{} {}", calendar::fa_num(gy as i64), mn)
+            }
+        }
+        "hijri" => {
+            let mn = if en {
+                crate::calendar::calendars::HIJRI_MONTHS_EN[(gm as usize).clamp(1, 12) - 1]
+            } else {
+                crate::calendar::calendars::HIJRI_MONTHS_FA[(gm as usize).clamp(1, 12) - 1]
+            };
+            if en {
+                format!("{mn} {gy} AH")
+            } else {
+                format!("{} {} قمری", calendar::fa_num(gy as i64), mn)
+            }
+        }
+        _ => {
+            let month_name = if en {
+                calendar::MONTHS_EN[(gm as usize).clamp(1, 12) - 1]
+            } else {
+                calendar::MONTHS[(gm as usize).clamp(1, 12) - 1]
+            };
+            let era = calendar::era_year(gy);
+            if en {
+                format!("{month_name} {era}")
+            } else {
+                format!("{} {}", month_name, calendar::fa_num(era as i64))
+            }
+        }
     };
-    let era = calendar::era_year(gy);
-    win.set_month_title(SharedString::from(if en {
-        format!("{month_name} {era}")
-    } else {
-        format!("{} {}", month_name, calendar::fa_num(era as i64))
-    }));
+    win.set_month_title(SharedString::from(month_title));
 
     // ── the selected day's heading ──
     let sel_month = if en {
@@ -2487,6 +2608,7 @@ fn push_settings_to_ui(win: &PanganWindow, app: &AppState) {
     win.set_era(SharedString::from(s.era.clone()));
     win.set_era_label(SharedString::from(s.era_label()));
     win.set_era_blurb(SharedString::from(s.era_blurb()));
+    win.set_cal_mode(SharedString::from(s.cal_mode.clone()));
     win.set_theme_pref(SharedString::from(s.theme.clone()));
     win.set_theme_label(SharedString::from(s.theme_label()));
 
@@ -3747,10 +3869,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             return;
         }
         *pick_app.selected_day.lock().unwrap() = key.clone();
-        // Selecting a day also brings the grid to that day's month, so the
-        // selection is never off-screen after a jump.
-        if let Some((y, m, _)) = parse_day_key(&key) {
-            *pick_app.shown_month.lock().unwrap() = (y, m);
+        // Selecting a day also brings the grid to that day's month, in the
+        // active calendar's reckoning, so the selection is never off-screen.
+        if let Some((y, m, d)) = parse_day_key(&key) {
+            let jdn = calendar::jalali_to_jdn(y, m, d);
+            let cal = app_cal(&pick_app);
+            *pick_app.shown_month.lock().unwrap() = page_month_for(&cal, jdn);
         }
         if let Some(w) = pick_weak.upgrade() {
             refresh_day_view(&w, &pick_app);
@@ -3760,16 +3884,20 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let shift_app = Arc::clone(&app);
     let shift_weak = weak.clone();
     win.on_shift_month(move |delta| {
-        let (ty, tm, _) = calendar::today();
+        let (tjdn, _) = today_jdn();
+        let cal = app_cal(&shift_app);
         let (cy, cm) = {
             let shown = *shift_app.shown_month.lock().unwrap();
             if shown == (0, 0) {
-                (ty, tm)
+                page_month_for(&cal, tjdn)
             } else {
                 shown
             }
         };
-        let (ny, nm) = calendar::shift_month(cy, cm, delta);
+        let (ny, nm) = match cal.as_str() {
+            "gregorian" | "hijri" => crate::calendar::calendars::shift_month(cy, cm, delta),
+            _ => calendar::shift_month(cy, cm, delta),
+        };
         *shift_app.shown_month.lock().unwrap() = (ny, nm);
         if let Some(w) = shift_weak.upgrade() {
             refresh_day_view(&w, &shift_app);
@@ -3779,9 +3907,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let goto_app = Arc::clone(&app);
     let goto_weak = weak.clone();
     win.on_goto_today(move || {
-        let (ty, tm, td) = calendar::today();
+        let (tjdn, (ty, tm, td)) = today_jdn();
+        let cal = app_cal(&goto_app);
         *goto_app.selected_day.lock().unwrap() = format!("{ty:04}-{tm:02}-{td:02}");
-        *goto_app.shown_month.lock().unwrap() = (ty, tm);
+        *goto_app.shown_month.lock().unwrap() = page_month_for(&cal, tjdn);
         if let Some(w) = goto_weak.upgrade() {
             refresh_day_view(&w, &goto_app);
         }
@@ -3859,8 +3988,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(w) = mv_weak.upgrade() {
             if let Some(next) = landed {
                 *mv_app.selected_day.lock().unwrap() = next.clone();
-                if let Some((y, m, _)) = parse_day_key(&next) {
-                    *mv_app.shown_month.lock().unwrap() = (y, m);
+                if let Some((y, m, d)) = parse_day_key(&next) {
+                    let jdn = calendar::jalali_to_jdn(y, m, d);
+                    let cal = app_cal(&mv_app);
+                    *mv_app.shown_month.lock().unwrap() = page_month_for(&cal, jdn);
                 }
             }
             refresh_screens(&w, &mv_app);
@@ -3885,8 +4016,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             return;
         };
         *step_app.selected_day.lock().unwrap() = next.clone();
-        if let Some((y, m, _)) = parse_day_key(&next) {
-            *step_app.shown_month.lock().unwrap() = (y, m);
+        if let Some((y, m, d)) = parse_day_key(&next) {
+            let jdn = calendar::jalali_to_jdn(y, m, d);
+            let cal = app_cal(&step_app);
+            *step_app.shown_month.lock().unwrap() = page_month_for(&cal, jdn);
         }
         if let Some(w) = step_weak.upgrade() {
             refresh_day_view(&w, &step_app);
@@ -4025,6 +4158,32 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             *lang_app.calendar_day.lock().unwrap() = (0, 0, 0);
             refresh_calendar(&w, &lang_app, selected_day(&lang_app));
             refresh_screens(&w, &lang_app);
+        }
+    });
+
+    // Calendar reckoning switch: Jalali / Gregorian / Hijri. This only changes
+    // how dates are labelled and laid out — the underlying day, tasks, and
+    // journal stay anchored to the same real days.
+    let cal_app = Arc::clone(&app);
+    let cal_weak = weak.clone();
+    win.on_set_cal_mode(move |mode| {
+        let mode = mode.to_string();
+        let (tjdn, _) = today_jdn();
+        {
+            let mut s = cal_app.settings.lock().unwrap();
+            s.cal_mode = mode.clone();
+            s.sanitize_mut();
+            s.save();
+        }
+        cal_app.cloud.mark_dirty();
+        // Jump the displayed month to today in the new reckoning.
+        *cal_app.shown_month.lock().unwrap() = page_month_for(&mode, tjdn);
+        *cal_app.calendar_day.lock().unwrap() = (0, 0, 0);
+        if let Some(w) = cal_weak.upgrade() {
+            w.set_cal_mode(SharedString::from(mode));
+            refresh_day_view(&w, &cal_app);
+            refresh_calendar(&w, &cal_app, selected_day(&cal_app));
+            refresh_screens(&w, &cal_app);
         }
     });
 

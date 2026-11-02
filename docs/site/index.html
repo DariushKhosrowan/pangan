@@ -1,245 +1,161 @@
 <!DOCTYPE html>
-<html lang="en" data-lang="en">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Pangan — a focus timer with an Iranian soul</title>
-<meta name="description" content="Pangan is an open-source Pomodoro timer and productivity app built with Rust and Slint — Persian calendar, focus journal, and optional Google Drive sync for Linux, Windows, macOS, and mobile." />
-<meta property="og:title" content="Pangan — a focus timer with an Iranian soul" />
-<meta property="og:description" content="Open-source Pomodoro timer with a Persian calendar, focus journal, and cloud sync. Built with Rust + Slint." />
+<title>Pangan — Open-Source Pomodoro Focus Timer with a Persian Calendar</title>
+<meta name="description" content="Pangan is a free, open-source Pomodoro timer and productivity app built with Rust &amp; Slint. Persian Jalali calendar, Iranian historical themes, focus journal, statistics, and optional Google Drive sync for Linux, Windows, macOS, Android, and iOS." />
+<meta name="keywords" content="pomodoro timer, focus timer, pomodoro app, productivity app, persian calendar, jalali calendar, open source, rust, slint, focus journal, Iranian themes, time management, google drive sync, Linux, Windows, macOS, Android" />
+<meta name="author" content="Dariush Khosrowan" />
+<link rel="canonical" href="https://dariushkhosrowan.github.io/pangan/" />
+<meta name="robots" content="index, follow" />
 <meta property="og:type" content="website" />
-<style>
-  :root {
-    --bg: #1e1e2e;
-    --surface: #313244;
-    --surface2: #45475a;
-    --text: #cdd6f4;
-    --muted: #a6adc8;
-    --accent: #89b4fa;
-    --red: #e6453c;
-    --gold: #f5c97b;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    background: var(--bg); color: var(--text); line-height: 1.6;
-    display: flex; flex-direction: column; min-height: 100vh;
-  }
-  .container { width: min(940px, 92vw); margin: 0 auto; }
-  header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 18px 0; border-bottom: 1px solid #3a3a4c;
-  }
-  header .inner {
-    width: min(940px, 92vw); margin: 0 auto;
-    display: flex; align-items: center; justify-content: space-between;
-  }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.2rem; }
-  .dot { width: 18px; height: 18px; border-radius: 50%; background: var(--red); display: inline-block; }
-  .langs { display: flex; gap: 6px; }
-  .langs button {
-    background: transparent; color: var(--muted); border: 1px solid #3a3a4c;
-    padding: 4px 10px; border-radius: 999px; cursor: pointer; font-size: 0.85rem;
-  }
-  .langs button.active { background: var(--accent); color: #1e1e2e; border-color: var(--accent); }
-  .hero { text-align: center; padding: 60px 0 36px; }
-  .hero .water { font-size: 3rem; }
-  .hero h1 { font-size: 3rem; margin-bottom: 10px; }
-  .hero p.sub { color: var(--muted); max-width: 660px; margin: 0 auto 20px; font-size: 1.1rem; }
-  .badges { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 22px; }
-  .badge {
-    display: inline-block; background: var(--surface); border: 1px solid #3a3a4c;
-    padding: 6px 14px; border-radius: 999px; font-size: 0.85rem; color: var(--muted);
-  }
-  .cta { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-  .btn {
-    display: inline-block; background: var(--accent); color: #1e1e2e;
-    padding: 11px 24px; border-radius: 10px; text-decoration: none; font-weight: 600;
-  }
-  .btn.ghost { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
-  section { padding: 30px 0; }
-  section h2 { font-size: 1.5rem; margin-bottom: 18px; color: var(--accent); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
-  .card {
-    background: var(--surface); border: 1px solid #3a3a4c; border-radius: 12px;
-    padding: 20px; font-size: 0.95rem;
-  }
-  .card h3 { margin-bottom: 6px; color: var(--text); font-size: 1rem; }
-  .card p { color: var(--muted); }
-  .platforms { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
-  .platform {
-    background: var(--surface2); border-radius: 10px; padding: 8px 16px;
-    font-size: 0.9rem; color: var(--text); font-weight: 600;
-  }
-  code, pre {
-    font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
-    background: #181825; border-radius: 8px; color: var(--accent);
-  }
-  code { padding: 2px 6px; }
-  pre { padding: 16px; overflow-x: auto; margin: 12px 0; }
-  pre code { padding: 0; background: transparent; }
-  .note { color: var(--muted); font-size: 0.9rem; margin-top: 10px; }
-  footer {
-    margin-top: auto; padding: 28px 0; border-top: 1px solid #3a3a4c;
-    color: var(--muted); font-size: 0.85rem; text-align: center;
-  }
-  footer a { color: var(--accent); text-decoration: none; }
-</style>
+<meta property="og:site_name" content="Pangan" />
+<meta property="og:title" content="Pangan — Open-Source Pomodoro Focus Timer with a Persian Calendar" />
+<meta property="og:description" content="A free, open-source Pomodoro timer and productivity app built with Rust &amp; Slint. Persian Jalali calendar, Iranian historical themes, focus journal, and cloud sync. Linux, Windows, macOS, Android, iOS." />
+<meta property="og:url" content="https://dariushkhosrowan.github.io/pangan/" />
+<meta property="og:image" content="https://dariushkhosrowan.github.io/pangan/assets/og.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Pangan — Open-Source Pomodoro Focus Timer with a Persian Calendar" />
+<meta name="twitter:description" content="Rust + Slint focus timer with a Persian Jalali calendar, Iranian historical themes, focus journal, and cloud sync." />
+<meta name="twitter:image" content="https://dariushkhosrowan.github.io/pangan/assets/og.png" />
+<link rel="stylesheet" href="style.css" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Pangan",
+  "alternateName": "پنگان",
+  "applicationCategory": "ProductivityApplication",
+  "operatingSystem": "Linux, Windows, macOS, Android, iOS",
+  "url": "https://dariushkhosrowan.github.io/pangan/",
+  "sameAs": "https://github.com/DariushKhosrowan/pangan",
+  "description": "Free, open-source Pomodoro focus timer and productivity app built with Rust and Slint. Includes a Persian Jalali calendar, Iranian historical themes, a focus journal, statistics, and optional Google Drive sync.",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "license": "https://github.com/DariushKhosrowan/pangan/blob/main/LICENSE"
+}
+</script>
 </head>
 <body>
 
-<header>
-  <div class="inner">
-    <div class="brand"><span class="dot"></span> Pangan</div>
-    <div class="langs">
-      <button class="active" onclick="setLang('en')">EN</button>
-      <button onclick="setLang('fa')">FA</button>
-    </div>
+<header class="site-header">
+  <div class="container inner">
+    <a class="brand" href="index.html"><span class="dot"></span> Pangan <small>· پنگان</small></a>
+    <nav class="nav" aria-label="Primary">
+      <a href="features.html">Features</a>
+      <a href="themes.html">Themes</a>
+      <a href="calendar.html">Calendar</a>
+      <a href="download.html">Download</a>
+      <a class="gh" href="https://github.com/DariushKhosrowan/pangan">⭐ GitHub</a>
+    </nav>
   </div>
 </header>
 
 <main class="container">
+
   <div class="hero">
-    <div class="water" data-i18n="water">&#128336;</div>
-    <h1>Pangan</h1>
-    <p class="sub" data-i18n="tagline">A free, open-source focus timer with a Persian calendar and a focus journal — built with Rust &amp; Slint, available on desktop and mobile.</p>
+    <div class="water">⏱</div>
+    <h1>Focus deeply.<br />Plan meaningfully. <span class="farsi">Make time count.</span></h1>
+    <p class="sub">Pangan is a free, open-source <b>Pomodoro focus timer</b> and productivity app built with <b>Rust</b> and <b>Slint</b> — with a Persian calendar, daily planning, a focus journal, and an optional Google Drive sync. Native, lightweight, and beautiful on every platform.</p>
     <div class="badges">
-      <span class="badge" data-i18n="native">Native • Lightweight • Single binary</span>
-      <span class="badge" data-i18n="oss">Open source • MIT</span>
+      <span class="badge">Native · Lightweight · Single binary</span>
+      <span class="badge">Open source · MIT</span>
+      <span class="badge">Rust + Slint</span>
+      <span class="badge">No telemetry</span>
     </div>
     <div class="cta">
-      <a class="btn" href="https://github.com/DariushKhosrowan/pangan/releases/latest" data-i18n="cta2">Download</a>
-      <a class="btn ghost" href="https://github.com/DariushKhosrowan/pangan" data-i18n="cta">View on GitHub</a>
+      <a class="btn big" href="download.html">Download Pangan</a>
+      <a class="btn ghost big" href="https://github.com/DariushKhosrowan/pangan">View on GitHub</a>
     </div>
   </div>
 
   <section>
-    <h2 data-i18n="platform_title">Available on</h2>
     <div class="platforms">
-      <span class="platform" data-i18n="p1">Linux</span>
-      <span class="platform" data-i18n="p2">Windows</span>
-      <span class="platform" data-i18n="p3">macOS</span>
-      <span class="platform" data-i18n="p4">Android</span>
-      <span class="platform" data-i18n="p5">iOS (simulator)</span>
+      <span class="platform">Linux</span>
+      <span class="platform">Windows</span>
+      <span class="platform">macOS</span>
+      <span class="platform">Android (APK)</span>
+      <span class="platform">iOS (simulator)</span>
     </div>
   </section>
 
   <section>
-    <h2 data-i18n="feat_title">Features</h2>
+    <div class="eyebrow">What it does</div>
+    <h2 class="section-title">A focus timer that respects your culture and your time</h2>
+    <p class="section-sub">Pangan connects every work session to a real intention — not just a ticking clock. It turns time into focused work while keeping the rhythm of your day, your calendar, and your history in view.</p>
     <div class="grid">
-      <div class="card"><h3 data-i18n="f1">Focus timer</h3><p data-i18n="f1d">Customizable Pomodoro sessions with a calm, circular progress ring.</p></div>
-      <div class="card"><h3 data-i18n="f2">Persian calendar</h3><p data-i18n="f2d">Jalali dates, Iranian historical events, and Sasanian day names.</p></div>
-      <div class="card"><h3 data-i18n="f3">Daily tasks &amp; rota</h3><p data-i18n="f3d">Connect each focus session to real intentions and a daily plan.</p></div>
-      <div class="card"><h3 data-i18n="f4">Focus journal</h3><p data-i18n="f4d">Weekly digests that reflect on outcomes, not just minutes counted.</p></div>
-      <div class="card"><h3 data-i18n="f5">Statistics</h3><p data-i18n="f5d">Productivity trends across sessions, hours, and metrics.</p></div>
-      <div class="card"><h3 data-i18n="f6">Historical themes</h3><p data-i18n="f6d">Cyrus, Darius, Parthian, and Sasanian visual styles.</p></div>
-      <div class="card"><h3 data-i18n="f7">Cloud sync</h3><p data-i18n="f7d">Optional Google Drive synchronization and backup/restore.</p></div>
-      <div class="card"><h3 data-i18n="f8">Personalized</h3><p data-i18n="f8d">Light/dark appearance, English/Persian, and Iranian procedural sounds.</p></div>
+      <div class="card"><span class="ico">⏱</span><h3>Pomodoro timer</h3><p>Customizable work, short-break, and long-break sessions with a calm circular progress ring.</p></div>
+      <div class="card"><span class="ico">📅</span><h3>Persian calendar</h3><p>Jalali dates, Iranian historical events, and Sasanian day names — in its own dedicated view.</p></div>
+      <div class="card"><span class="ico">🎯</span><h3>Daily tasks &amp; rota</h3><p>Attach each focus session to real intentions, a daily plan, and a rotating schedule.</p></div>
+      <div class="card"><span class="ico">📓</span><h3>Focus journal</h3><p>Weekly digests that reflect on outcomes and quality — not just minutes counted.</p></div>
+      <div class="card"><span class="ico">📊</span><h3>Statistics</h3><p>Productivity trends across sessions, hours, breaks, and meaningful metrics.</p></div>
+      <div class="card"><span class="ico">🎨</span><h3>Historical themes</h3><p>Distinct visual identities inspired by Cyrus, Darius, the Parthians, and the Sasanians.</p></div>
+      <div class="card"><span class="ico">☁️</span><h3>Cloud sync</h3><p>Optional Google Drive synchronization across devices, plus backup and restore.</p></div>
+      <div class="card"><span class="ico">🔔</span><h3>Personalized</h3><p>Light/dark appearance, English/Persian, and procedural Iranian soundscapes.</p></div>
     </div>
   </section>
 
   <section>
-    <h2 data-i18n="install_title">Install</h2>
-    <p data-i18n="install_lead">Download the latest build for your platform from the <a href="https://github.com/DariushKhosrowan/pangan/releases/latest" style="color:var(--accent)" data-i18n="install_link">releases page</a>, or build from source:</p>
-    <pre><code>git clone https://github.com/DariushKhosrowan/pangan.git
-cd pangan
-cargo build --release
-./target/release/pangan</code></pre>
-    <p class="note" data-i18n="install_note">Checksums are provided for every release asset via SHA256SUMS.txt.</p>
+    <div class="eyebrow">Themes</div>
+    <h2 class="section-title">A distinctive visual identity</h2>
+    <p class="section-sub">Pangan ships with themed heritage eras — each with its own palette and authentic emblem, drawn from real Iranian artwork.</p>
+    <div class="swatches">
+      <div class="swatch"><div class="preview" style="background:#2a1f16;color:#e0b45c">🦅</div><div class="body"><h4>Cyrus</h4><div class="era">Achaemenid</div><p>Golden falcon standard on warm dusk.</p></div></div>
+      <div class="swatch"><div class="preview" style="background:#1d2436;color:#b7c9e8">🪽</div><div class="body"><h4>Darius</h4><div class="era">Persepolis</div><p>Faravahar, deep lapis and ivory.</p></div></div>
+      <div class="swatch"><div class="preview" style="background:#2a1b2e;color:#d8a7d6">🪶</div><div class="body"><h4>Parthian</h4><div class="era">Derafsh Kaviani</div><p>Imperial standard in royal purple.</p></div></div>
+      <div class="swatch"><div class="preview" style="background:#10281f;color:#9ed8b4">🐉</div><div class="body"><h4>Sasanid</h4><div class="era">Sasanian</div><p>Senmurv in a pearl roundel, deep green.</p></div></div>
+    </div>
+    <p style="margin-top:16px"><a href="themes.html">Explore all themes →</a></p>
   </section>
 
   <section>
-    <h2 data-i18n="why_title">Why Pangan?</h2>
-    <p data-i18n="why_body">Pangan (پنگان) is the Persian word for an ancient water clock used to divide time fairly among people. A fitting ancestor for a focus timer — small, precise, and fair to your attention.</p>
+    <div class="eyebrow">Calendar</div>
+    <h2 class="section-title">Time in cultural context</h2>
+    <p class="section-sub">Beyond the Gregorian view, Pangan brings the Persian Jalali calendar, Iranian historical dates, and Sasanian day names to your everyday planning.</p>
+    <div class="grid">
+      <div class="card"><span class="ico">📅</span><h3>Jalali (Persian) calendar</h3><p>The official Iranian civil calendar, with today's date, month, and year shown culturally.</p></div>
+      <div class="card"><span class="ico">🏛️</span><h3>Iranian events</h3><p>A chronicle of historical and cultural moments — the "on this day" table refreshed over time.</p></div>
+      <div class="card"><span class="ico">🗓️</span><h3>Sasanian day names</h3><p>Ancient Iranian day names woven into the week, a quiet nod to a deep heritage.</p></div>
+    </div>
+    <p style="margin-top:16px"><a href="calendar.html">See the calendar in action →</a></p>
   </section>
+
+  <div class="cta-band">
+    <h2>Try Pangan today</h2>
+    <p>Free, open source, and built to be a calm companion for focused work. Download for your platform in one click.</p>
+    <div class="cta">
+      <a class="btn big" href="download.html">Download the latest release</a>
+      <a class="btn ghost" href="https://github.com/DariushKhosrowan/pangan">⭐ Star on GitHub</a>
+    </div>
+  </div>
+
+  <section>
+    <div class="eyebrow">Why Pangan?</div>
+    <h2 class="section-title">Named after an ancient water clock</h2>
+    <div class="prose">
+      <p><b>Pangan</b> (پنگان) is the Persian word for an ancient water clock used to divide time fairly among people. A fitting ancestor for a focus timer — small, precise, and fair to your attention.</p>
+      <p><b>Why Rust?</b> Pangan is a native application, not a browser tab. It starts fast, stays quiet, and respects your system resources — with a single, portable binary on desktop.</p>
+      <p><b>Why open source?</b> Your focus data belongs to you. Pangan is MIT-licensed, runs fully offline, and is transparent about what it does.</p>
+    </div>
+  </section>
+
 </main>
 
-<footer>
-  <div class="container">
-    <p data-i18n="footer">MIT Licensed • Built with Rust &amp; Slint • <a href="https://github.com/DariushKhosrowan/pangan">GitHub</a></p>
+<footer class="site-footer">
+  <div class="container inner">
+    <div class="foot-brand"><span class="dot" style="width:12px;height:12px;border-radius:50%;background:var(--red);display:inline-block"></span> Pangan</div>
+    <div class="foot-links">
+      <a href="features.html">Features</a>
+      <a href="themes.html">Themes</a>
+      <a href="calendar.html">Calendar</a>
+      <a href="download.html">Download</a>
+      <a href="https://github.com/DariushKhosrowan/pangan">GitHub</a>
+      <a href="https://github.com/DariushKhosrowan/pangan/blob/main/LICENSE">MIT License</a>
+    </div>
+    <div>Built with Rust &amp; Slint · © <span id="yr"></span> Pangan</div>
   </div>
 </footer>
 
-<script>
-const I18N = {
-  en: {
-    water: "⏱",
-    tagline: "A free, open-source focus timer with a Persian calendar and a focus journal — built with Rust &amp; Slint, available on desktop and mobile.",
-    native: "Native • Lightweight • Single binary",
-    oss: "Open source • MIT",
-    cta: "View on GitHub",
-    cta2: "Download",
-    platform_title: "Available on",
-    p1: "Linux", p2: "Windows", p3: "macOS", p4: "Android", p5: "iOS (simulator)",
-    feat_title: "Features",
-    f1: "Focus timer", f1d: "Customizable Pomodoro sessions with a calm, circular progress ring.",
-    f2: "Persian calendar", f2d: "Jalali dates, Iranian historical events, and Sasanian day names.",
-    f3: "Daily tasks & rota", f3d: "Connect each focus session to real intentions and a daily plan.",
-    f4: "Focus journal", f4d: "Weekly digests that reflect on outcomes, not just minutes counted.",
-    f5: "Statistics", f5d: "Productivity trends across sessions, hours, and metrics.",
-    f6: "Historical themes", f6d: "Cyrus, Darius, Parthian, and Sasanian visual styles.",
-    f7: "Cloud sync", f7d: "Optional Google Drive synchronization and backup/restore.",
-    f8: "Personalized", f8d: "Light/dark appearance, English/Persian, and Iranian procedural sounds.",
-    install_title: "Install",
-    install_lead: "Download the latest build for your platform from the ",
-    install_link: "releases page",
-    install_note: "Checksums are provided for every release asset via SHA256SUMS.txt.",
-    why_title: "Why Pangan?",
-    why_body: "Pangan (پنگان) is the Persian word for an ancient water clock used to divide time fairly among people. A fitting ancestor for a focus timer — small, precise, and fair to your attention.",
-    footer: "MIT Licensed • Built with Rust &amp; Slint •",
-  },
-  fa: {
-    water: "⏱",
-    tagline: "یک تایمر تمرکز رایگان و متن‌باز با تقویم فارسی و ژورنال تمرکز — ساخته‌شده با راست و اسلینت، در دسترس روی دسکتاپ و موبایل.",
-    native: "بومی • سبک • تک‌باینری",
-    oss: "متن‌باز • MIT",
-    cta: "مشاهده در گیت‌هاب",
-    cta2: "دانلود",
-    platform_title: "در دسترس روی",
-    p1: "لینوکس", p2: "ویندوز", p3: "مک", p4: "اندروید", p5: "iOS (شبیه‌ساز)",
-    feat_title: "امکانات",
-    f1: "تایمر تمرکز", f1d: "جلسات پومودورو قابل تنظیم با حلقه پیشرفت دایره‌ای آرام.",
-    f2: "تقویم فارسی", f2d: "تاریخ جلالی، رویدادهای تاریخی ایران و نام روزهای ساسانی.",
-    f3: "وظایف روزانه و روتا", f3d: "اتصال هر جلسه تمرکز به نیت‌های واقعی و برنامه روزانه.",
-    f4: "ژورنال تمرکز", f4d: "خلاصه هفتگی که به نتیجه کار می‌اندیشد، نه فقط دقیقه‌های شمارش‌شده.",
-    f5: "آمار", f5d: "روند بهره‌وری در جلسات، ساعت‌ها و معیارها.",
-    f6: "تم‌های تاریخی", f6d: "سبک‌های بصری کوروش، داریوش، اشکانی و ساسانی.",
-    f7: "همگام‌سازی ابری", f7d: "همگام‌سازی اختیاری با گوگل‌درایو و پشتیبان‌گیری/بازیابی.",
-    f8: "شخصی‌سازی", f8d: "ظاهر روشن/تاریک، انگلیسی/فارسی و صداهای رویه‌ای ایرانی.",
-    install_title: "نصب",
-    install_lead: "آخرین نسخه را برای سیستم‌عامل خود از ",
-    install_link: "صفحه انتشارات",
-    install_note: "برای هر فایل انتشار، جمع کنترلی از طریق SHA256SUMS.txt ارائه می‌شود.",
-    why_title: "چرا پنگان؟",
-    why_body: "پنگان نام ساعت آبی باستانی ایرانیان است که برای تقسیم عادلانه زمان میان مردم استفاده می‌شد. نیای شایسته برای یک تایمر تمرکز — کوچک، دقیق، و منصف نسبت به توجه شما.",
-    footer: "تحت مجوز MIT • ساخته‌شده با راست و اسلینت •",
-  }
-};
-
-document.addEventListener("DOMContentLoaded", () => setLang("en"));
-
-function setLang(lang) {
-  document.documentElement.lang = lang;
-  document.documentElement.dataset.lang = lang;
-  const t = I18N[lang] || I18N.en;
-  document.querySelectorAll("[data-i18n]").forEach(el => {
-    const key = el.dataset.i18n;
-    if (!key) return;
-    const val = t[key] ?? key;
-    if (key === "install_cmd") el.textContent = val;
-    else el.innerHTML = val;
-  });
-  const lead = document.querySelector('[data-i18n="install_lead"]');
-  if (lead) {
-    lead.innerHTML = t.install_lead +
-      '<a href="https://github.com/DariushKhosrowan/pangan/releases/latest" style="color:var(--accent)">' +
-      t.install_link + '</a>' + (lang === 'fa' ? ' دانلود کنید.' : '.');
-  }
-  document.querySelectorAll(".langs button").forEach(b => {
-    b.classList.toggle("active", b.textContent === lang.toUpperCase());
-  });
-}
-</script>
-
+<script>document.getElementById("yr").textContent = new Date().getFullYear();</script>
 </body>
 </html>
