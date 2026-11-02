@@ -104,7 +104,14 @@ case "$distro" in
 esac
 
 # ----------------------------------------------------- acquire the app ------
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Determine where the script lives. When piped via `curl | bash` there is no
+# script file on disk ($0 == "bash"), so we fall back to the current dir;
+# the icon/desktop are then fetched from the repo (see below).
+case "$0" in
+  */*) HERE="$(cd "$(dirname "$0")" && pwd)" ;;
+  *)   HERE="$(pwd)" ;;
+esac
+RAW_BASE="https://raw.githubusercontent.com/${REPO}/main"
 
 # 1) If the user handed us an AppImage path, use it directly.
 if [ "$USE_APPIMAGE" -eq 1 ] && [ -z "$APPIMAGE" ] && [ -f "$HERE/"*.AppImage ]; then
@@ -210,7 +217,18 @@ for cand in "$HERE/pangan.png" "$HERE/pangan.svg" \
   [ -f "$cand" ] && ICON_SRC="$cand" && break
 done
 
-if [ -n "$ICON_SRC" ]; then
+# In bootstrap mode (downloaded binary), fetch the icon + desktop template
+# from the repo so the installed entry is complete even though nothing is on
+# disk next to the script.
+if [ -z "$ICON_SRC" ] && [ "$SOURCE" = download ]; then
+  need_curl
+  ASSET_DIR="${TMP:-$(mktemp -d)}"
+  [ "$DRY_RUN" -eq 0 ] && curl -fsSL "$RAW_BASE/ui/icons/pangan.svg" -o "$ASSET_DIR/pangan.svg" \
+    && ICON_SRC="$ASSET_DIR/pangan.svg" \
+    || warn "Could not fetch icon from repo — installing without a custom icon."
+fi
+
+if [ -n "$ICON_SRC" ] && [ -f "$ICON_SRC" ]; then
   case "$ICON_SRC" in
     *.svg)
       run install -m 0644 "$ICON_SRC" "$DATADIR/icons/hicolor/scalable/apps/pangan.svg"
@@ -224,7 +242,14 @@ if [ -n "$ICON_SRC" ]; then
 fi
 
 DESKTOP_SRC="$HERE/pangan.desktop"
-if [ ! -f "$DESKTOP_SRC" ]; then
+if [ ! -f "$DESKTOP_SRC" ] && [ "$SOURCE" = download ]; then
+  ASSET_DIR="${TMP:-$(mktemp -d)}"
+  if [ "$DRY_RUN" -eq 0 ]; then
+    curl -fsSL "$RAW_BASE/packaging/pangan.desktop" -o "$ASSET_DIR/pangan.desktop" \
+      && DESKTOP_SRC="$ASSET_DIR/pangan.desktop" || DESKTOP_SRC=""
+  fi
+fi
+if [ -z "$DESKTOP_SRC" ] || [ ! -f "$DESKTOP_SRC" ]; then
   DESKTOP_SRC="$(mktemp)"
   cat > "$DESKTOP_SRC" <<'EOF'
 [Desktop Entry]
