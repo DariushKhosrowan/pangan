@@ -370,6 +370,8 @@ jobs:
           head -30 release_body.md
           echo '--- SHA256SUMS.txt ---'
           cat SHA256SUMS.txt
+          echo '--- LATEST_VERSION ---'
+          cat LATEST_VERSION
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -378,3 +380,4 @@ jobs:
           files: |
             dist/**
             SHA256SUMS.txt
+            LATEST_VERSION

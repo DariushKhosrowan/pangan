@@ -205,6 +205,17 @@ def main():
 
     Path("release_body.md").write_text("\n".join(B))
     Path("SHA256SUMS.txt").write_text("\n".join(checksum_lines) + "\n")
+
+    # The machine-readable latest-version marker. The app's self-updater
+    # fetches this from https://github.com/<repo>/releases/latest/download/,
+    # which is served by the CDN and is NOT subject to the unauthenticated
+    # GitHub API rate limit — unlike the releases API.
+    if TAG:
+        Path("LATEST_VERSION").write_text(TAG + "\n")
+        print(f"Wrote LATEST_VERSION = {TAG}")
+    else:
+        Path("LATEST_VERSION").write_text("0.0.0\n")
+
     print("Wrote release_body.md and SHA256SUMS.txt with", len(rows), "assets.")
 
 

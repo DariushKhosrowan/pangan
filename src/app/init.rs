@@ -2665,6 +2665,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let shared = Arc::new(Shared::new(cfg));
     let app = Arc::new(AppState::load(Arc::clone(&shared)));
 
+    // Self-update check (desktop only): runs once per launch on a background
+    // thread. If a newer release exists and auto-update is enabled, the
+    // updater downloads, verifies, and swaps the binary, then relaunches.
+    {
+        let auto_update = settings.auto_update;
+        std::thread::spawn(move || crate::updater::run_auto_update(auto_update));
+    }
+
     // Write the current week's read-back once, if this week's file doesn't
     // exist yet (a scheduled hook — no UI). The review is a fixed document for
     // a fixed week; its absence is the only signal that it hasn't been written.

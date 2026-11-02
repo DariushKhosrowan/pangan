@@ -169,6 +169,12 @@ pub struct Settings {
     /// that a laptop left open all day is not hammering the API.
     #[serde(default = "default_sync_interval")]
     pub sync_interval_secs: u64,
+
+    // --- Self-update ---
+    /// Whether the app may quietly check GitHub Releases and update itself.
+    /// Only the desktop build performs the check; mobile builds ignore it.
+    #[serde(default = "default_true")]
+    pub auto_update: bool,
 }
 
 impl Default for Settings {
@@ -202,6 +208,7 @@ impl Default for Settings {
             shortcuts,
             sync_enabled: false,
             sync_interval_secs: default_sync_interval(),
+            auto_update: true,
         }
     }
 }

@@ -231,7 +231,21 @@ fi
 if [ -n "$ICON_SRC" ] && [ -f "$ICON_SRC" ]; then
   case "$ICON_SRC" in
     *.svg)
+      # Scalable icon for theme-aware desktops.
       run install -m 0644 "$ICON_SRC" "$DATADIR/icons/hicolor/scalable/apps/pangan.svg"
+      # PNG fallbacks at standard sizes: many app menus (GNOME, XFCE,
+      # Cinnamon, KDE) only render bitmap icons, so render them now.
+      if [ "$DRY_RUN" -eq 0 ] && have convert; then
+        for SIZE in 512 256 128 64 48; do
+          P="$DATADIR/icons/hicolor/${SIZE}x${SIZE}/apps"
+          run mkdir -p "$P"
+          convert -background none -density 256 -depth 8 \
+            -resize ${SIZE}x${SIZE} \
+            "$ICON_SRC" "$P/pangan.png" 2>/dev/null && ok "Rendered ${SIZE}x${SIZE} icon"
+        done
+      elif [ "$DRY_RUN" -eq 0 ]; then
+        warn "ImageMagick 'convert' not found — only SVG icon installed; some app menus may not show it."
+      fi
       run install -m 0644 "$ICON_SRC" "$DATADIR/pixmaps/pangan.svg"
       ;;
     *)
@@ -293,4 +307,7 @@ fi
 echo ""
 ok "Done. Pangan installed."
 echo "  Launch from your app menu, or from a terminal: $EXEC"
-[ "$SOURCE" = appimage ] && echo "  (AppImage launcher — runs the self-contained AppImage.)"
+if [ "$SOURCE" = appimage ]; then
+  echo "  (AppImage launcher — runs the self-contained AppImage.)"
+fi
+exit 0

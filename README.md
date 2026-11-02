@@ -100,6 +100,23 @@ Choose light or dark appearance, Persian or English language, focus-session beha
 
 Pangan stores productivity data locally and supports optional synchronization through your own Google Drive account, alongside backup and restore controls. Google Drive authorization may require configuration depending on the build.
 
+### Stay current, automatically
+
+The desktop build checks GitHub Releases on launch (once, in the background) and,
+when a newer version exists, downloads, verifies, and applies it itself — no
+manual upgrade step. A few notes:
+
+- The check is quiet and non-blocking; the app opens instantly and checks behind
+  the scenes.
+- Downloads are verified against the release's SHA-256 sidecar before being
+  swapped in, and the swap is atomic (the running app is never half-updated).
+- Enabled by default; turn it off by setting `auto_update = false` in
+  `~/.config/pangan/config.toml`.
+- Installs made via the one-command installer update the native binary in place.
+  AppImage-launcher installs report that a manual refresh is the right move
+  (`auto_update` is ignored for those).
+- It is a **desktop** feature — the Android/iOS builds do not self-update.
+
 ---
 
 ## Download

@@ -33,6 +33,7 @@ pub mod state;
 pub mod stats;
 pub mod sync;
 pub mod timer;
+pub mod updater;
 
 pub mod ui {
     slint::include_modules!();
