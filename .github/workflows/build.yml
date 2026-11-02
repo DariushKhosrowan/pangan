@@ -46,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-latest, macos-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-15, macos-13]
         include:
           - os: ubuntu-latest
             artifact: pangan-linux-x86_64
@@ -60,10 +60,10 @@ jobs:
           - os: windows-11-arm
             artifact: pangan-windows-aarch64
             target: aarch64-pc-windows-msvc
-          - os: macos-latest
+          - os: macos-15
             artifact: pangan-macos-arm64
             target: aarch64-apple-darwin
-          - os: macos-latest
+          - os: macos-15-intel
             artifact: pangan-macos-x86_64
             target: x86_64-apple-darwin
 
