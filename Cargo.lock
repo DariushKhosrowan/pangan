@@ -3801,7 +3801,7 @@ dependencies = [
 
 [[package]]
 name = "pangan"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -3826,7 +3826,7 @@ dependencies = [
 
 [[package]]
 name = "pangan-android"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "android-activity 0.6.1",
  "pangan",
@@ -3835,7 +3835,7 @@ dependencies = [
 
 [[package]]
 name = "pangan-ios"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "pangan",
  "slint",
