@@ -15,7 +15,7 @@ Built with **Rust** and **Slint**, with a Persian calendar, task planning, and a
 
 **[Download Pangan](https://github.com/DariushKhosrowan/pangan/releases/latest)** · **[Explore features](#what-you-can-do)** · **[Build from source](#build-from-source)** · **[Contribute](#contributing)**
 
-<sub>Desktop: Linux · Windows · macOS | Android and iOS are not yet publicly released.</sub>
+<sub>Desktop: Linux · Windows · macOS | Mobile: Android APKs + iOS simulator build</sub>
 
 </div>
 
@@ -95,15 +95,15 @@ Pangan stores productivity data locally and supports optional synchronization th
 
 ## Download
 
-Find the latest available desktop packages and checksums on the **[Releases page](https://github.com/DariushKhosrowan/pangan/releases/latest)**.
+Find the latest available desktop and mobile packages and checksums on the **[Releases page](https://github.com/DariushKhosrowan/pangan/releases/latest)**.
 
 | Platform | Status |
 | --- | --- |
 | Linux | Desktop builds available |
 | Windows | Desktop builds available |
 | macOS | Desktop builds available |
-| Android | In development; no public release yet |
-| iOS | In development; no public release yet |
+| Android | Release APKs available (arm64 + x86_64) |
+| iOS | Simulator build available |
 
 Choose a release asset for your operating system and CPU architecture. Actual availability is listed on the release page.
 

@@ -3,16 +3,21 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Pangan — a minimal Pomodoro timer</title>
-<meta name="description" content="Pangan is a minimal, efficient Pomodoro timer for Linux, Windows, and macOS, built with Rust and Slint." />
+<title>Pangan — a focus timer with an Iranian soul</title>
+<meta name="description" content="Pangan is an open-source Pomodoro timer and productivity app built with Rust and Slint — Persian calendar, focus journal, and optional Google Drive sync for Linux, Windows, macOS, and mobile." />
+<meta property="og:title" content="Pangan — a focus timer with an Iranian soul" />
+<meta property="og:description" content="Open-source Pomodoro timer with a Persian calendar, focus journal, and cloud sync. Built with Rust + Slint." />
+<meta property="og:type" content="website" />
 <style>
   :root {
     --bg: #1e1e2e;
     --surface: #313244;
+    --surface2: #45475a;
     --text: #cdd6f4;
     --muted: #a6adc8;
     --accent: #89b4fa;
     --red: #e6453c;
+    --gold: #f5c97b;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -20,10 +25,14 @@
     background: var(--bg); color: var(--text); line-height: 1.6;
     display: flex; flex-direction: column; min-height: 100vh;
   }
-  .container { width: min(900px, 92vw); margin: 0 auto; }
+  .container { width: min(940px, 92vw); margin: 0 auto; }
   header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 18px 0; border-bottom: 1px solid #3a3a4c;
+  }
+  header .inner {
+    width: min(940px, 92vw); margin: 0 auto;
+    display: flex; align-items: center; justify-content: space-between;
   }
   .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.2rem; }
   .dot { width: 18px; height: 18px; border-radius: 50%; background: var(--red); display: inline-block; }
@@ -33,15 +42,22 @@
     padding: 4px 10px; border-radius: 999px; cursor: pointer; font-size: 0.85rem;
   }
   .langs button.active { background: var(--accent); color: #1e1e2e; border-color: var(--accent); }
-  .hero { text-align: center; padding: 64px 0 40px; }
-  .hero h1 { font-size: 3rem; margin-bottom: 12px; }
-  .hero .water { font-size: 2rem; }
-  .hero p.sub { color: var(--muted); max-width: 640px; margin: 0 auto 20px; font-size: 1.1rem; }
+  .hero { text-align: center; padding: 60px 0 36px; }
+  .hero .water { font-size: 3rem; }
+  .hero h1 { font-size: 3rem; margin-bottom: 10px; }
+  .hero p.sub { color: var(--muted); max-width: 660px; margin: 0 auto 20px; font-size: 1.1rem; }
+  .badges { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 22px; }
   .badge {
     display: inline-block; background: var(--surface); border: 1px solid #3a3a4c;
     padding: 6px 14px; border-radius: 999px; font-size: 0.85rem; color: var(--muted);
   }
-  section { padding: 32px 0; }
+  .cta { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; background: var(--accent); color: #1e1e2e;
+    padding: 11px 24px; border-radius: 10px; text-decoration: none; font-weight: 600;
+  }
+  .btn.ghost { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+  section { padding: 30px 0; }
   section h2 { font-size: 1.5rem; margin-bottom: 18px; color: var(--accent); }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
   .card {
@@ -50,6 +66,11 @@
   }
   .card h3 { margin-bottom: 6px; color: var(--text); font-size: 1rem; }
   .card p { color: var(--muted); }
+  .platforms { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .platform {
+    background: var(--surface2); border-radius: 10px; padding: 8px 16px;
+    font-size: 0.9rem; color: var(--text); font-weight: 600;
+  }
   code, pre {
     font-family: ui-monospace, "Cascadia Code", Menlo, monospace;
     background: #181825; border-radius: 8px; color: var(--accent);
@@ -57,22 +78,18 @@
   code { padding: 2px 6px; }
   pre { padding: 16px; overflow-x: auto; margin: 12px 0; }
   pre code { padding: 0; background: transparent; }
-  .btn {
-    display: inline-block; background: var(--accent); color: #1e1e2e;
-    padding: 10px 22px; border-radius: 10px; text-decoration: none; font-weight: 600;
-    margin: 6px 6px 0 0;
-  }
-  .btn.ghost { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+  .note { color: var(--muted); font-size: 0.9rem; margin-top: 10px; }
   footer {
     margin-top: auto; padding: 28px 0; border-top: 1px solid #3a3a4c;
     color: var(--muted); font-size: 0.85rem; text-align: center;
   }
+  footer a { color: var(--accent); text-decoration: none; }
 </style>
 </head>
 <body>
 
 <header>
-  <div class="container" style="display:flex;align-items:center;justify-content:space-between;width:100%">
+  <div class="inner">
     <div class="brand"><span class="dot"></span> Pangan</div>
     <div class="langs">
       <button class="active" onclick="setLang('en')">EN</button>
@@ -85,30 +102,50 @@
   <div class="hero">
     <div class="water" data-i18n="water">&#128336;</div>
     <h1>Pangan</h1>
-    <p class="sub" data-i18n="tagline">A minimal, efficient Pomodoro timer for Linux, Windows &amp; macOS — Rust + Slint, ~4–8 MB idle RAM.</p>
-    <span class="badge" data-i18n="native">Native • Lightweight • Single binary</span><br />
-    <a class="btn" href="https://github.com/DariushKhosrowan/pangan" data-i18n="cta">View on GitHub</a>
-    <a class="btn ghost" href="https://github.com/DariushKhosrowan/pangan/releases" data-i18n="cta2">Download</a>
+    <p class="sub" data-i18n="tagline">A free, open-source focus timer with a Persian calendar and a focus journal — built with Rust &amp; Slint, available on desktop and mobile.</p>
+    <div class="badges">
+      <span class="badge" data-i18n="native">Native • Lightweight • Single binary</span>
+      <span class="badge" data-i18n="oss">Open source • MIT</span>
+    </div>
+    <div class="cta">
+      <a class="btn" href="https://github.com/DariushKhosrowan/pangan/releases/latest" data-i18n="cta2">Download</a>
+      <a class="btn ghost" href="https://github.com/DariushKhosrowan/pangan" data-i18n="cta">View on GitHub</a>
+    </div>
   </div>
+
+  <section>
+    <h2 data-i18n="platform_title">Available on</h2>
+    <div class="platforms">
+      <span class="platform" data-i18n="p1">Linux</span>
+      <span class="platform" data-i18n="p2">Windows</span>
+      <span class="platform" data-i18n="p3">macOS</span>
+      <span class="platform" data-i18n="p4">Android</span>
+      <span class="platform" data-i18n="p5">iOS (simulator)</span>
+    </div>
+  </section>
 
   <section>
     <h2 data-i18n="feat_title">Features</h2>
     <div class="grid">
-      <div class="card"><h3 data-i18n="f1">System tray</h3><p data-i18n="f1d">Live countdown with Start/Pause, Skip, Reset, Quit from the tray menu.</p></div>
-      <div class="card"><h3 data-i18n="f2">Notifications</h3><p data-i18n="f2d">Desktop notification when each focus/break session ends.</p></div>
-      <div class="card"><h3 data-i18n="f3">Global hotkey</h3><p data-i18n="f3d">Super+P to start/pause from anywhere.</p></div>
-      <div class="card"><h3 data-i18n="f4">Stay awake</h3><p data-i18n="f4d">Inhibits screen lock/suspend during focus sessions.</p></div>
-      <div class="card"><h3 data-i18n="f5">Autostart</h3><p data-i18n="f5d">Launches at login via a .desktop entry.</p></div>
-      <div class="card"><h3 data-i18n="f6">Configurable</h3><p data-i18n="f6d">Work/break lengths set in ~/.config/pangan/config.toml.</p></div>
+      <div class="card"><h3 data-i18n="f1">Focus timer</h3><p data-i18n="f1d">Customizable Pomodoro sessions with a calm, circular progress ring.</p></div>
+      <div class="card"><h3 data-i18n="f2">Persian calendar</h3><p data-i18n="f2d">Jalali dates, Iranian historical events, and Sasanian day names.</p></div>
+      <div class="card"><h3 data-i18n="f3">Daily tasks &amp; rota</h3><p data-i18n="f3d">Connect each focus session to real intentions and a daily plan.</p></div>
+      <div class="card"><h3 data-i18n="f4">Focus journal</h3><p data-i18n="f4d">Weekly digests that reflect on outcomes, not just minutes counted.</p></div>
+      <div class="card"><h3 data-i18n="f5">Statistics</h3><p data-i18n="f5d">Productivity trends across sessions, hours, and metrics.</p></div>
+      <div class="card"><h3 data-i18n="f6">Historical themes</h3><p data-i18n="f6d">Cyrus, Darius, Parthian, and Sasanian visual styles.</p></div>
+      <div class="card"><h3 data-i18n="f7">Cloud sync</h3><p data-i18n="f7d">Optional Google Drive synchronization and backup/restore.</p></div>
+      <div class="card"><h3 data-i18n="f8">Personalized</h3><p data-i18n="f8d">Light/dark appearance, English/Persian, and Iranian procedural sounds.</p></div>
     </div>
   </section>
 
   <section>
     <h2 data-i18n="install_title">Install</h2>
+    <p data-i18n="install_lead">Download the latest build for your platform from the <a href="https://github.com/DariushKhosrowan/pangan/releases/latest" style="color:var(--accent)" data-i18n="install_link">releases page</a>, or build from source:</p>
     <pre><code>git clone https://github.com/DariushKhosrowan/pangan.git
 cd pangan
 cargo build --release
-./target/release/pangan &   # autostarts on next login</code></pre>
+./target/release/pangan</code></pre>
+    <p class="note" data-i18n="install_note">Checksums are provided for every release asset via SHA256SUMS.txt.</p>
   </section>
 
   <section>
@@ -119,7 +156,7 @@ cargo build --release
 
 <footer>
   <div class="container">
-    <p data-i18n="footer">MIT Licensed • Built with Rust &amp; Slint • <a href="https://github.com/DariushKhosrowan/pangan" style="color:var(--accent)">GitHub</a></p>
+    <p data-i18n="footer">MIT Licensed • Built with Rust &amp; Slint • <a href="https://github.com/DariushKhosrowan/pangan">GitHub</a></p>
   </div>
 </footer>
 
@@ -127,36 +164,52 @@ cargo build --release
 const I18N = {
   en: {
     water: "⏱",
-    tagline: "A minimal, efficient Pomodoro timer for Linux — Rust + Slint, ~4–8 MB idle RAM.",
+    tagline: "A free, open-source focus timer with a Persian calendar and a focus journal — built with Rust &amp; Slint, available on desktop and mobile.",
     native: "Native • Lightweight • Single binary",
+    oss: "Open source • MIT",
     cta: "View on GitHub",
     cta2: "Download",
+    platform_title: "Available on",
+    p1: "Linux", p2: "Windows", p3: "macOS", p4: "Android", p5: "iOS (simulator)",
     feat_title: "Features",
-    f1: "System tray", f1d: "Live countdown with Start/Pause, Skip, Reset, Quit from the tray menu.",
-    f2: "Notifications", f2d: "Desktop notification when each focus/break session ends.",
-    f3: "Global hotkey", f3d: "Super+P to start/pause from anywhere.",
-    f4: "Stay awake", f4d: "Inhibits screen lock/suspend during focus sessions.",
-    f5: "Autostart", f5d: "Launches at login via a .desktop entry.",
-    f6: "Configurable", f6d: "Work/break lengths set in ~/.config/pangan/config.toml.",
-    install_title: "Install", install_cmd: "git clone https://github.com/DariushKhosrowan/pangan.git\ncd pangan\ncargo build --release\n./target/release/pangan &   # autostarts on next login",
+    f1: "Focus timer", f1d: "Customizable Pomodoro sessions with a calm, circular progress ring.",
+    f2: "Persian calendar", f2d: "Jalali dates, Iranian historical events, and Sasanian day names.",
+    f3: "Daily tasks & rota", f3d: "Connect each focus session to real intentions and a daily plan.",
+    f4: "Focus journal", f4d: "Weekly digests that reflect on outcomes, not just minutes counted.",
+    f5: "Statistics", f5d: "Productivity trends across sessions, hours, and metrics.",
+    f6: "Historical themes", f6d: "Cyrus, Darius, Parthian, and Sasanian visual styles.",
+    f7: "Cloud sync", f7d: "Optional Google Drive synchronization and backup/restore.",
+    f8: "Personalized", f8d: "Light/dark appearance, English/Persian, and Iranian procedural sounds.",
+    install_title: "Install",
+    install_lead: "Download the latest build for your platform from the ",
+    install_link: "releases page",
+    install_note: "Checksums are provided for every release asset via SHA256SUMS.txt.",
     why_title: "Why Pangan?",
     why_body: "Pangan (پنگان) is the Persian word for an ancient water clock used to divide time fairly among people. A fitting ancestor for a focus timer — small, precise, and fair to your attention.",
     footer: "MIT Licensed • Built with Rust &amp; Slint •",
   },
   fa: {
     water: "⏱",
-    tagline: "یک تایمر پومودورو سبک و کارآمد برای لینوکس — راست + اسلینت، حدود ۴ تا ۸ مگابایت.",
+    tagline: "یک تایمر تمرکز رایگان و متن‌باز با تقویم فارسی و ژورنال تمرکز — ساخته‌شده با راست و اسلینت، در دسترس روی دسکتاپ و موبایل.",
     native: "بومی • سبک • تک‌باینری",
+    oss: "متن‌باز • MIT",
     cta: "مشاهده در گیت‌هاب",
     cta2: "دانلود",
+    platform_title: "در دسترس روی",
+    p1: "لینوکس", p2: "ویندوز", p3: "مک", p4: "اندروید", p5: "iOS (شبیه‌ساز)",
     feat_title: "امکانات",
-    f1: "نوار سیستمی", f1d: "شمارش معکوس زنده به‌همراه شروع/مکث/رد/بازنشانی از منوی نوار.",
-    f2: "اعلان", f2d: "اعلان دسکتاپ هنگام پایان هر جلسه کار/استراحت.",
-    f3: "کلید میان‌بر سراسری", f3d: "Super+P برای شروع/مکث از هر جایی.",
-    f4: "بیدار ماندن", f4d: "جلوگیری از قفل/تعلیق صفحه هنگام جلسه تمرکز.",
-    f5: "اجرای خودکار", f5d: "اجرای خودکار هنگام ورود به سیستم با فایل .desktop.",
-    f6: "قابل تنظیم", f6d: "مدت کار/استراحت در ~/.config/pangan/config.toml.",
-    install_title: "نصب", install_cmd: "git clone https://github.com/DariushKhosrowan/pangan.git\ncd pangan\ncargo build --release\n./target/release/pangan &   # اجرای خودکار در ورود بعدی",
+    f1: "تایمر تمرکز", f1d: "جلسات پومودورو قابل تنظیم با حلقه پیشرفت دایره‌ای آرام.",
+    f2: "تقویم فارسی", f2d: "تاریخ جلالی، رویدادهای تاریخی ایران و نام روزهای ساسانی.",
+    f3: "وظایف روزانه و روتا", f3d: "اتصال هر جلسه تمرکز به نیت‌های واقعی و برنامه روزانه.",
+    f4: "ژورنال تمرکز", f4d: "خلاصه هفتگی که به نتیجه کار می‌اندیشد، نه فقط دقیقه‌های شمارش‌شده.",
+    f5: "آمار", f5d: "روند بهره‌وری در جلسات، ساعت‌ها و معیارها.",
+    f6: "تم‌های تاریخی", f6d: "سبک‌های بصری کوروش، داریوش، اشکانی و ساسانی.",
+    f7: "همگام‌سازی ابری", f7d: "همگام‌سازی اختیاری با گوگل‌درایو و پشتیبان‌گیری/بازیابی.",
+    f8: "شخصی‌سازی", f8d: "ظاهر روشن/تاریک، انگلیسی/فارسی و صداهای رویه‌ای ایرانی.",
+    install_title: "نصب",
+    install_lead: "آخرین نسخه را برای سیستم‌عامل خود از ",
+    install_link: "صفحه انتشارات",
+    install_note: "برای هر فایل انتشار، جمع کنترلی از طریق SHA256SUMS.txt ارائه می‌شود.",
     why_title: "چرا پنگان؟",
     why_body: "پنگان نام ساعت آبی باستانی ایرانیان است که برای تقسیم عادلانه زمان میان مردم استفاده می‌شد. نیای شایسته برای یک تایمر تمرکز — کوچک، دقیق، و منصف نسبت به توجه شما.",
     footer: "تحت مجوز MIT • ساخته‌شده با راست و اسلینت •",
@@ -171,16 +224,20 @@ function setLang(lang) {
   const t = I18N[lang] || I18N.en;
   document.querySelectorAll("[data-i18n]").forEach(el => {
     const key = el.dataset.i18n;
-    const val = key === "install_cmd" ? t.install_cmd : (t[key] ?? key);
+    if (!key) return;
+    const val = t[key] ?? key;
     if (key === "install_cmd") el.textContent = val;
     else el.innerHTML = val;
   });
+  const lead = document.querySelector('[data-i18n="install_lead"]');
+  if (lead) {
+    lead.innerHTML = t.install_lead +
+      '<a href="https://github.com/DariushKhosrowan/pangan/releases/latest" style="color:var(--accent)">' +
+      t.install_link + '</a>' + (lang === 'fa' ? ' دانلود کنید.' : '.');
+  }
   document.querySelectorAll(".langs button").forEach(b => {
     b.classList.toggle("active", b.textContent === lang.toUpperCase());
   });
-  // note: the install code block is rendered via its <pre><code> container.
-  const pre = document.querySelector("pre code");
-  if (pre) pre.textContent = t.install_cmd;
 }
 </script>
 
