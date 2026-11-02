@@ -13,9 +13,11 @@ Built with **Rust** and **Slint**, with a Persian calendar, task planning, and a
   <a href="LICENSE"><img src="https://img.shields.io/github/license/DariushKhosrowan/pangan?style=flat-square&color=656975" alt="License" /></a>
 </p>
 
-**[Download Pangan](https://github.com/DariushKhosrowan/pangan/releases/latest)** · **[Explore features](#what-you-can-do)** · **[Build from source](#build-from-source)** · **[Contribute](#contributing)**
+**[Download Pangan](https://github.com/DariushKhosrowan/pangan/releases/latest)** · **[Explore features](https://dariushkhosrowan.github.io/pangan/features.html)** · **[Themes](https://dariushkhosrowan.github.io/pangan/themes.html)** · **[Calendar](https://dariushkhosrowan.github.io/pangan/calendar.html)** · **[Build from source](#build-from-source)** · **[Contribute](#contributing)**
 
 <sub>Desktop: Linux · Windows · macOS | Mobile: Android APKs + iOS simulator build</sub>
+
+<sub>🏠 [Project website](https://dariushkhosrowan.github.io/pangan/) · ⭐ [Star on GitHub](https://github.com/DariushKhosrowan/pangan)</sub>
 
 </div>
 
@@ -25,7 +27,14 @@ Built with **Rust** and **Slint**, with a Persian calendar, task planning, and a
 
 *Pangan* (پنگان) is named after a traditional Persian water clock. Its purpose is simple: turn time into focused work—without losing sight of your intentions or the rhythm of your day.
 
-Pangan brings together a customizable **Pomodoro timer**, **daily tasks**, **Persian (Jalali) calendar**, historical Iranian day names and events, **focus statistics**, and an optional **Google Drive sync**. It is built as a native Rust application rather than a browser tab.
+Pangan brings together a customizable **Pomodoro timer**, **daily tasks**, three calendar reckonings (**Jalali, Gregorian, and Hijri**), historical Iranian day names and events, **focus statistics**, and an optional **Google Drive sync**. It is built as a native Rust application rather than a browser tab.
+
+### Highlights
+
+- **Three calendars** — switch between the Persian Jalali calendar, the Gregorian calendar, and the Hijri (Islamic) calendar. Tasks and journal stay anchored to the same real days no matter which reckoning you view.
+- **Eight themes** — four Iranian heritage eras (Cyrus, Darius, Parthian, Sasanid) plus Rose, Teal, Violet, and Olive, each in dark and light.
+- **Native & fast** — a single Rust binary that starts instantly and respects your resources.
+- **Private by default** — runs offline, data stored locally, optional Google Drive sync.
 
 ## A look inside
 
@@ -75,9 +84,9 @@ Set work, short-break, and long-break durations that fit your routine. Follow th
 
 Use tasks and a **daily rota** to connect focus sessions to specific work. Record your intentions before starting, then review what you actually completed.
 
-### Explore the Iranian calendar
+### Explore three calendars
 
-Navigate Persian calendar dates, historical events, and traditional **Sasanian day names**. Pangan also brings Iranian historical motifs into its appearance themes, including **Cyrus, Darius, Parthian, and Sasanian** styles.
+Navigate the **Persian Jalali calendar**, the **Gregorian calendar**, or the **Hijri (Islamic) calendar** — with Iranian historical events and traditional **Sasanian day names**. Pangan also brings Iranian historical motifs into its appearance themes, including **Cyrus, Darius, Parthian, and Sasanian** heritage styles plus **Rose, Teal, Violet, and Olive** modern palettes.
 
 ### Understand your progress
 
